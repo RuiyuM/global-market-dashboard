@@ -124,6 +124,15 @@ def main() -> int:
     ]:
         if marker not in html:
             errors.append(f"missing OHLC interaction marker: {marker}")
+    for marker in [
+        'class="country-toggle expanded"',
+        'class="country-toggle collapsed"',
+        'data-country="美国"',
+        'data-country="日本"',
+        "toggleCountryRows",
+    ]:
+        if marker not in html:
+            errors.append(f"missing second-order country accordion marker: {marker}")
 
     second_order = snapshot.get("second_order_monitor", [])
     if len(second_order) != SECOND_ORDER_ROWS:

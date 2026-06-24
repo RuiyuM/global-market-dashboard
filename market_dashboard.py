@@ -1206,17 +1206,38 @@ def render_html(snapshot: dict[str, Any]) -> str:
     html.append("D1 是窗口速度；D2 是速度变化率。债券曲线使用 10Y-2Y，便于观察长短端价差变化速度。")
     html.extend(['</div>', '<div class="table-wrap">', '<table class="derivative-table">'])
     html.append("<thead><tr><th>国家</th><th>类型</th><th>标的</th><th>1D</th><th>7D</th><th>30D</th></tr></thead><tbody>")
+    second_order_by_country: dict[str, list[dict[str, Any]]] = {}
     for row in second_order:
+        second_order_by_country.setdefault(row["country"], []).append(row)
+    for country in [item["name"] for item in COUNTRIES]:
+        country_rows = second_order_by_country.get(country, [])
+        if not country_rows:
+            continue
+        expanded = country == "美国"
+        toggle_class = "country-toggle expanded" if expanded else "country-toggle collapsed"
+        toggle_icon = "▾" if expanded else "▸"
         html.append(
-            f'<tr class="derivative-row" data-ohlc-key="{escape(row["key"])}" title="点击查看日线 OHLC">'
-            f'<th>{escape(row["country"])}</th>'
-            f'<td>{escape(row["group"])}</td>'
-            f'<td>{escape(row["label"])}</td>'
-            f'<td>{fmt_derivative(row["metrics"].get("1D"), row["unit"])}</td>'
-            f'<td>{fmt_derivative(row["metrics"].get("7D"), row["unit"])}</td>'
-            f'<td>{fmt_derivative(row["metrics"].get("30D"), row["unit"])}</td>'
-            "</tr>"
+            f'<tr class="country-group-row" data-country="{escape(country)}">'
+            '<th colspan="6">'
+            f'<button type="button" class="{toggle_class}" data-country="{escape(country)}" aria-expanded="{str(expanded).lower()}">'
+            f'<span class="toggle-icon">{toggle_icon}</span>'
+            f'<strong>{escape(country)}</strong>'
+            f'<span>{len(country_rows)} 项监控</span>'
+            "</button>"
+            "</th></tr>"
         )
+        hidden_attr = "" if expanded else " hidden"
+        for row in country_rows:
+            html.append(
+                f'<tr class="derivative-row" data-country="{escape(country)}" data-ohlc-key="{escape(row["key"])}" title="点击查看日线 OHLC"{hidden_attr}>'
+                f'<th>{escape(row["country"])}</th>'
+                f'<td>{escape(row["group"])}</td>'
+                f'<td>{escape(row["label"])}</td>'
+                f'<td>{fmt_derivative(row["metrics"].get("1D"), row["unit"])}</td>'
+                f'<td>{fmt_derivative(row["metrics"].get("7D"), row["unit"])}</td>'
+                f'<td>{fmt_derivative(row["metrics"].get("30D"), row["unit"])}</td>'
+                "</tr>"
+            )
     html.extend(["</tbody></table></div></section>"])
 
     html.extend(
@@ -1383,7 +1404,28 @@ th:first-child, td:first-child { text-align: left; }
 .math-note { color: var(--muted); font-size: 13px; margin: -4px 0 12px; }
 .derivative-table th, .derivative-table td { text-align: left; }
 .derivative-table td:nth-child(n+4), .derivative-table th:nth-child(n+4) { text-align: right; }
+.country-group-row th { background: #f9fafb; padding: 0; }
+.country-toggle {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: 20px minmax(80px, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 8px;
+  text-align: left;
+  font: inherit;
+}
+.country-toggle strong { font-size: 14px; }
+.country-toggle span:last-child { color: var(--muted); font-size: 12px; font-weight: 650; }
+.country-toggle.expanded { background: #edf4ff; color: var(--blue); }
+.country-toggle.collapsed:hover { background: #f3f6fa; }
+.toggle-icon { color: var(--blue); font-size: 13px; text-align: center; }
 .derivative-row { cursor: pointer; }
+.derivative-row[hidden] { display: none; }
 .derivative-row:hover { background: #f3f6fa; }
 .derivative-row.selected { background: #eaf2ff; }
 .deriv-cell { display: grid; gap: 2px; font-size: 12px; line-height: 1.35; min-width: 134px; }
@@ -1436,6 +1478,7 @@ JS = """
   const raw = document.getElementById("ohlc-data")?.textContent || "{}";
   const ohlcData = JSON.parse(raw);
   const rows = Array.from(document.querySelectorAll(".derivative-row"));
+  const countryToggles = Array.from(document.querySelectorAll(".country-toggle"));
   const defaultOhlcKey = "US_10Y";
   const head = document.getElementById("ohlc-head");
   const svg = document.getElementById("ohlc-chart");
@@ -1746,6 +1789,25 @@ JS = """
 
   rows.forEach((row) => {
     row.addEventListener("click", () => render(row.dataset.ohlcKey));
+  });
+
+  const toggleCountryRows = (button) => {
+    const country = button.dataset.country;
+    const nextExpanded = button.getAttribute("aria-expanded") !== "true";
+    button.setAttribute("aria-expanded", String(nextExpanded));
+    button.classList.toggle("expanded", nextExpanded);
+    button.classList.toggle("collapsed", !nextExpanded);
+    const icon = button.querySelector(".toggle-icon");
+    if (icon) icon.textContent = nextExpanded ? "▾" : "▸";
+    rows.forEach((row) => {
+      if (row.dataset.country === country) {
+        row.hidden = !nextExpanded;
+      }
+    });
+  };
+
+  countryToggles.forEach((button) => {
+    button.addEventListener("click", () => toggleCountryRows(button));
   });
 
   windowButtons.forEach((button) => {
