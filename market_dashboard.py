@@ -257,8 +257,7 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
         }
         try:
             rows = rows_from_investing_html(fetch_investing_html(investing_spec, start, end))
-            if rows:
-                write_ohlc(path, rows)
+            write_ohlc(path, rows)
             record.update({"status": "ok" if rows else "empty", "rows": str(len(rows)), "latest": rows[-1]["date"] if rows else ""})
         except Exception as exc:
             record.update({"status": "error", "error": str(exc)})
@@ -729,15 +728,44 @@ def analyze_fx_logic_with_user_code(changes: list[dict[str, Any]]) -> dict[str, 
     }
 
 
-def rate_pair_change(series: dict[str, list[dict[str, Any]]], key: str, pair: str, days: int | None) -> dict[str, Any] | None:
+def rate_pair_change(
+    series: dict[str, list[dict[str, Any]]],
+    key: str,
+    pair: str,
+    days: int | None,
+    *,
+    offset_days: int = 0,
+    offset_observations: int = 0,
+) -> dict[str, Any] | None:
     rows = series.get(key, [])
-    latest = latest_row(rows)
-    if not latest:
+    if days is None:
+        end_index = len(rows) - 1 - offset_observations
+        base_index = end_index - 1
+        if base_index < 0 or end_index >= len(rows):
+            return None
+        base = rows[base_index]
+        end = rows[end_index]
+    else:
+        latest = latest_row(rows)
+        if not latest:
+            return None
+        end_target = latest["date"] - timedelta(days=offset_days)
+        base_target = latest["date"] - timedelta(days=offset_days + days)
+        end = latest if offset_days == 0 else at_or_before(rows, end_target)
+        base = at_or_before(rows, base_target)
+        if not end or not base or base["date"] >= end["date"]:
+            return None
+
+    if base["close"] <= 0 or end["close"] <= 0:
         return None
-    base = rows[-2] if days is None and len(rows) >= 2 else at_or_before(rows, latest["date"] - timedelta(days=days or 0))
-    if not base:
-        return None
-    return {"pair": pair, "old": base["close"], "new": latest["close"], "base_date": base["date"].isoformat(), "latest_date": latest["date"].isoformat(), "source_key": key}
+    return {
+        "pair": pair,
+        "old": base["close"],
+        "new": end["close"],
+        "base_date": base["date"].isoformat(),
+        "latest_date": end["date"].isoformat(),
+        "source_key": key,
+    }
 
 
 def build_flow_sections(series: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
@@ -746,15 +774,29 @@ def build_flow_sections(series: dict[str, list[dict[str, Any]]]) -> list[dict[st
         {"name": "中德美", "pairs": [("USDCNY", "美中"), ("EURCNY", "德中"), ("EURUSD", "德美")]},
         {"name": "中俄美", "pairs": [("USDCNY", "美中"), ("RUBCNY", "俄中"), ("USDRUB", "美俄")]},
     ]
-    periods = [("当日", None), ("当周", 7), ("当月", 30)]
+    periods = [
+        {"label": "当日", "days": None, "offset_days": 0, "offset_observations": 0},
+        {"label": "上日", "days": None, "offset_days": 0, "offset_observations": 1},
+        {"label": "当周", "days": 7, "offset_days": 0, "offset_observations": 0},
+        {"label": "上周", "days": 7, "offset_days": 7, "offset_observations": 0},
+        {"label": "当月", "days": 30, "offset_days": 0, "offset_observations": 0},
+        {"label": "上月", "days": 30, "offset_days": 30, "offset_observations": 0},
+    ]
     sections = []
     for triad in triads:
         period_rows = []
-        for period_label, days in periods:
+        for period in periods:
             changes = []
             missing = []
             for key, pair in triad["pairs"]:
-                item = rate_pair_change(series, key, pair, days)
+                item = rate_pair_change(
+                    series,
+                    key,
+                    pair,
+                    period["days"],
+                    offset_days=period["offset_days"],
+                    offset_observations=period["offset_observations"],
+                )
                 if item:
                     changes.append(item)
                 else:
@@ -762,11 +804,11 @@ def build_flow_sections(series: dict[str, list[dict[str, Any]]]) -> list[dict[st
             if len(changes) == 3:
                 try:
                     result = analyze_fx_logic_with_user_code(changes)
-                    period_rows.append({"period": period_label, "changes": changes, "result": result, "missing": []})
+                    period_rows.append({"period": period["label"], "changes": changes, "result": result, "missing": []})
                 except Exception as exc:
-                    period_rows.append({"period": period_label, "changes": changes, "result": None, "missing": [str(exc)]})
+                    period_rows.append({"period": period["label"], "changes": changes, "result": None, "missing": [str(exc)]})
             else:
-                period_rows.append({"period": period_label, "changes": changes, "result": None, "missing": missing})
+                period_rows.append({"period": period["label"], "changes": changes, "result": None, "missing": missing})
         sections.append({"name": triad["name"], "periods": period_rows})
     return sections
 
