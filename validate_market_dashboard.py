@@ -25,6 +25,7 @@ INLINE_VOL_COUNT = len(COUNTRIES) * len(FIELDS)
 SECOND_ORDER_WINDOWS = {"1D", "7D", "30D"}
 SECOND_ORDER_ROWS = 30
 BOND_CURVE_ROWS = len(COUNTRIES)
+OHLC_MAX_WINDOW = 360
 
 
 def main() -> int:
@@ -109,6 +110,20 @@ def main() -> int:
     for marker in ["renderBondCurveChart", "curve-positive-band", "curve-negative-band"]:
         if marker not in html:
             errors.append(f"missing bond curve chart marker: {marker}")
+    for marker in ['const defaultOhlcKey = "US_10Y"', 'render(defaultOhlcKey, { scroll: false })']:
+        if marker not in html:
+            errors.append(f"missing default OHLC marker: {marker}")
+    for marker in [
+        'class="ohlc-toolbar"',
+        'data-window="90"',
+        'data-window="180"',
+        'data-window="360"',
+        "setVisibleWindow",
+        "zoomChart",
+        "dragStart",
+    ]:
+        if marker not in html:
+            errors.append(f"missing OHLC interaction marker: {marker}")
 
     second_order = snapshot.get("second_order_monitor", [])
     if len(second_order) != SECOND_ORDER_ROWS:
@@ -131,6 +146,8 @@ def main() -> int:
         ohlc = row.get("ohlc") or []
         if not ohlc:
             errors.append(f"{row.get('country')} {row.get('label')} missing OHLC rows")
+        if row.get("key") == "US_10Y" and len(ohlc) < OHLC_MAX_WINDOW:
+            errors.append(f"US_10Y default OHLC has fewer than {OHLC_MAX_WINDOW} rows: {len(ohlc)}")
         for bar in ohlc:
             for key in ["date", "open", "high", "low", "close"]:
                 if key not in bar:
@@ -143,6 +160,8 @@ def main() -> int:
             curve_data = curve.get("rows") or []
             if len(curve_data) < 30:
                 errors.append(f"{row.get('country')} bond curve has too few paired rows: {len(curve_data)}")
+            if row.get("key") == "US_10Y2Y" and len(curve_data) < OHLC_MAX_WINDOW:
+                errors.append(f"US_10Y2Y curve has fewer than {OHLC_MAX_WINDOW} rows: {len(curve_data)}")
             if not curve.get("bond_2y_label") or not curve.get("bond_10y_label"):
                 errors.append(f"{row.get('country')} bond curve missing component labels")
             for item in curve_data:
@@ -170,6 +189,35 @@ def main() -> int:
                 errors.append(f"{section['name']} {period['period']} missing best route: {period.get('missing')}")
             if result.get("source_code") != USER_FX_FLOW_CODE:
                 errors.append(f"{section['name']} {period['period']} not using user FX flow code")
+
+    notes = "\n".join(snapshot.get("notes", []))
+    if "derived = 本地公式" not in notes:
+        errors.append("missing derived source explanation note")
+    if "RUB 交叉汇率优先使用具备历史深度的 Yahoo 直接报价" not in notes:
+        errors.append("missing RUB direct source policy note")
+
+    status_by_key = {item.get("key"): item for item in snapshot.get("series_status", [])}
+    for key, direct_key in [("RUBCNY", "RUBCNY_YAHOO"), ("RUBJPY", "RUBJPY_YAHOO")]:
+        selected = status_by_key.get(key, {})
+        direct = status_by_key.get(direct_key, {})
+        if direct and not direct.get("stale") and direct.get("count", 0) >= 30 and selected.get("source") != "yahoo":
+            errors.append(f"{key} should prefer fresh direct Yahoo source, got {selected.get('source')}")
+
+    audit = {item.get("key"): item for item in snapshot.get("source_audit", [])}
+    for key in ["CNY_BASE", "CNYJPY", "US_10Y2Y", "CN_10Y2Y", "JP_10Y2Y", "DE_10Y2Y", "RU_10Y2Y", "KR_10Y2Y"]:
+        if key not in audit:
+            errors.append(f"missing source audit row: {key}")
+    for key in ["RUBCNY", "RUBJPY"]:
+        item = audit.get(key)
+        if not item:
+            errors.append(f"missing source audit row: {key}")
+            continue
+        if item.get("selected_source") == "yahoo":
+            comparison = item.get("comparison")
+            if not comparison:
+                errors.append(f"{key} missing direct/formula comparison")
+            elif abs(comparison.get("pct_diff", 100)) > 2:
+                errors.append(f"{key} direct/formula comparison diverges: {comparison.get('pct_diff')}")
 
     if errors:
         print("VALIDATION FAIL")

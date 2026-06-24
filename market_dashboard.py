@@ -134,8 +134,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fetch", dest="fetch", action="store_true", default=True, help="Fetch latest WSCN/Yahoo data before rendering.")
     parser.add_argument("--no-fetch", dest="fetch", action="store_false", help="Use cached/local CSV files only.")
-    parser.add_argument("--lookback-days", type=int, default=220, help="Yahoo fetch lookback window.")
-    parser.add_argument("--wscn-count", type=int, default=260, help="WSCN rows per series.")
+    parser.add_argument("--lookback-days", type=int, default=540, help="Yahoo fetch lookback window.")
+    parser.add_argument("--wscn-count", type=int, default=420, help="WSCN rows per series.")
     parser.add_argument("--sleep-sec", type=float, default=0.15)
     return parser.parse_args()
 
@@ -378,17 +378,23 @@ def load_all_series() -> tuple[dict[str, list[dict[str, Any]]], dict[str, Series
     usd_jpy = series.get("USDJPY", [])
     usdrub = series.get("USDRUB") or series.get("USDRUB_YAHOO", [])
 
-    rubcny = derived_ratio("RUBCNY", usdcny, usdrub, "USDCNY / USDRUB")
-    if not enough_recent_history(rubcny, 30):
-        rubcny = series.get("RUBCNY_YAHOO", [])
-    specs["RUBCNY"] = SeriesSpec("RUBCNY", "卢布/人民币", "fx", "derived", "USDCNY/USDRUB", "RUBCNY.csv")
-    series["RUBCNY"] = rubcny
+    rubcny_direct = series.get("RUBCNY_YAHOO", [])
+    rubcny_derived = derived_ratio("RUBCNY", usdcny, usdrub, "USDCNY / USDRUB")
+    if enough_recent_history(rubcny_direct, 30):
+        specs["RUBCNY"] = SeriesSpec("RUBCNY", "卢布/人民币", "fx", "yahoo", "RUBCNY=X", "RUBCNY.csv")
+        series["RUBCNY"] = rubcny_direct
+    else:
+        specs["RUBCNY"] = SeriesSpec("RUBCNY", "卢布/人民币", "fx", "derived", "USDCNY/USDRUB", "RUBCNY.csv")
+        series["RUBCNY"] = rubcny_derived
 
-    rubjpy = derived_ratio("RUBJPY", usd_jpy, usdrub, "USDJPY / USDRUB")
-    if not enough_recent_history(rubjpy, 30):
-        rubjpy = series.get("RUBJPY_YAHOO", [])
-    specs["RUBJPY"] = SeriesSpec("RUBJPY", "卢布/日元", "fx", "derived", "USDJPY/USDRUB", "RUBJPY.csv")
-    series["RUBJPY"] = rubjpy
+    rubjpy_direct = series.get("RUBJPY_YAHOO", [])
+    rubjpy_derived = derived_ratio("RUBJPY", usd_jpy, usdrub, "USDJPY / USDRUB")
+    if enough_recent_history(rubjpy_direct, 30):
+        specs["RUBJPY"] = SeriesSpec("RUBJPY", "卢布/日元", "fx", "yahoo", "RUBJPY=X", "RUBJPY.csv")
+        series["RUBJPY"] = rubjpy_direct
+    else:
+        specs["RUBJPY"] = SeriesSpec("RUBJPY", "卢布/日元", "fx", "derived", "USDJPY/USDRUB", "RUBJPY.csv")
+        series["RUBJPY"] = rubjpy_derived
 
     cnyjpy = derived_ratio("CNYJPY", series["CNY_BASE"], jpycny, "1 / JPYCNY")
     specs["CNYJPY"] = SeriesSpec("CNYJPY", "人民币/日元", "fx", "derived", "1/JPYCNY", "CNYJPY.csv")
@@ -416,6 +422,26 @@ def enough_recent_history(rows: list[dict[str, Any]], days: int) -> bool:
     if not latest:
         return False
     return at_or_before(rows, latest["date"] - timedelta(days=days)) is not None
+
+
+def compare_on_latest_common_date(left: list[dict[str, Any]], right: list[dict[str, Any]]) -> dict[str, Any] | None:
+    left_latest = latest_row(left)
+    right_latest = latest_row(right)
+    if not left_latest or not right_latest:
+        return None
+    target = min(left_latest["date"], right_latest["date"])
+    left_row = at_or_before(left, target)
+    right_row = at_or_before(right, target)
+    if not left_row or not right_row or right_row["close"] == 0:
+        return None
+    diff = left_row["close"] - right_row["close"]
+    return {
+        "date": target.isoformat(),
+        "left": left_row["close"],
+        "right": right_row["close"],
+        "abs_diff": diff,
+        "pct_diff": diff / right_row["close"] * 100,
+    }
 
 
 def at_or_before(rows: list[dict[str, Any]], target: date) -> dict[str, Any] | None:
@@ -569,7 +595,7 @@ def build_second_order_monitor(
                 "label": spec.label if spec else key,
                 "unit": unit,
                 "metrics": metrics,
-                "ohlc": recent_ohlc_rows(series.get(key, []), limit=90),
+                "ohlc": recent_ohlc_rows(series.get(key, []), limit=360),
                 "chart_type": "ohlc",
             }
             if group == "债券曲线":
@@ -582,7 +608,7 @@ def build_second_order_monitor(
                     "rows": recent_bond_curve_rows(
                         series.get(country["bond_2y"], []),
                         series.get(country["bond_10y"], []),
-                        limit=90,
+                        limit=360,
                     ),
                 }
             rows.append(item)
@@ -917,16 +943,69 @@ def build_snapshot(fetch_records: list[dict[str, str]]) -> dict[str, Any]:
         "second_order_monitor": build_second_order_monitor(series, specs),
         "fx_flows": build_flow_sections(series),
         "series_status": build_series_status(series, specs),
+        "source_audit": build_source_audit(series, specs),
         "fetch_records": fetch_records,
         "notes": [
             "债券变化单位为 bp；股指和汇率变化单位为对数百分比。",
             "一阶速度 = 当前窗口变化 / 实际间隔天数；二阶加速度 = 当前一阶速度相对上一段同长度窗口的速度变化 / 平均间隔天数。",
             "7D/30D 波动率 = 对应窗口相邻交易观测的平均绝对日变化；债券单位 bp/日，股指和汇率单位 %/日。",
             f"三币种资金流向直接调用用户提供代码：{USER_FX_FLOW_CODE}",
-            "WSCN 缺口优先用 Yahoo；俄/韩债券若无可靠日线会显示缺失。",
+            "derived = 本地公式而非外部供应商：CNY_BASE=1；债券曲线=10Y-2Y；CNYJPY=1/JPYCNY；RUB 交叉汇率优先使用具备历史深度的 Yahoo 直接报价，历史不足才用 USDCNY/USDRUB 或 USDJPY/USDRUB 派生并在 source_audit 里比对最新直接报价。",
+            "WSCN 缺口优先用 Yahoo；日本/德国/俄罗斯/韩国债券因 WSCN 对应符号缺失或陈旧，使用 Investing 历史日线。",
         ],
     }
     return snapshot
+
+
+def build_source_audit(series: dict[str, list[dict[str, Any]]], specs: dict[str, SeriesSpec]) -> list[dict[str, Any]]:
+    usdrub = series.get("USDRUB") or series.get("USDRUB_YAHOO", [])
+    rubcny_formula = derived_ratio("RUBCNY_AUDIT", series.get("USDCNY", []), usdrub, "USDCNY / USDRUB")
+    rubjpy_formula = derived_ratio("RUBJPY_AUDIT", series.get("USDJPY", []), usdrub, "USDJPY / USDRUB")
+    formula_checks = [
+        ("RUBCNY", "卢布/人民币", "USDCNY/USDRUB", rubcny_formula, series.get("RUBCNY_YAHOO", [])),
+        ("RUBJPY", "卢布/日元", "USDJPY/USDRUB", rubjpy_formula, series.get("RUBJPY_YAHOO", [])),
+    ]
+
+    rows: list[dict[str, Any]] = []
+    for key, label, formula, formula_rows, direct_rows in formula_checks:
+        comparison = compare_on_latest_common_date(formula_rows, direct_rows)
+        rows.append(
+            {
+                "key": key,
+                "label": label,
+                "selected_source": specs[key].source,
+                "selected_symbol": specs[key].symbol,
+                "formula": formula,
+                "direct_source": "yahoo",
+                "direct_symbol": f"{key}=X",
+                "comparison": comparison,
+            }
+        )
+
+    for key, formula in [
+        ("CNY_BASE", "1"),
+        ("CNYJPY", "1/JPYCNY"),
+        ("US_10Y2Y", "US_10Y-US_2Y"),
+        ("CN_10Y2Y", "CN_10Y-CN_2Y"),
+        ("JP_10Y2Y", "JP_10Y-JP_2Y"),
+        ("DE_10Y2Y", "DE_10Y-DE_2Y"),
+        ("RU_10Y2Y", "RU_10Y-RU_2Y"),
+        ("KR_10Y2Y", "KR_10Y-KR_2Y"),
+    ]:
+        spec = specs.get(key)
+        rows.append(
+            {
+                "key": key,
+                "label": spec.label if spec else key,
+                "selected_source": spec.source if spec else "derived",
+                "selected_symbol": spec.symbol if spec else formula,
+                "formula": formula,
+                "direct_source": "",
+                "direct_symbol": "",
+                "comparison": None,
+            }
+        )
+    return rows
 
 
 def build_series_status(series: dict[str, list[dict[str, Any]]], specs: dict[str, SeriesSpec]) -> list[dict[str, Any]]:
@@ -941,6 +1020,7 @@ def build_series_status(series: dict[str, list[dict[str, Any]]], specs: dict[str
                 "asset_class": spec.asset_class,
                 "source": spec.source,
                 "symbol": spec.symbol,
+                "count": len(series.get(key, [])),
                 "latest_date": latest["date"].isoformat() if latest else "",
                 "latest": latest["close"] if latest else None,
                 "stale": (today_utc() - latest["date"]).days > spec.stale_days if latest else True,
@@ -1088,6 +1168,19 @@ def render_html(snapshot: dict[str, Any]) -> str:
         [
             '<section class="panel ohlc-panel" id="ohlc-panel">',
             "<h2>日线 OHLC 可视化</h2>",
+            '<div class="ohlc-toolbar">',
+            '<div class="segmented" aria-label="OHLC 时间窗口">',
+            '<button type="button" class="ohlc-window active" data-window="90">90D</button>',
+            '<button type="button" class="ohlc-window" data-window="180">180D</button>',
+            '<button type="button" class="ohlc-window" data-window="360">360D</button>',
+            "</div>",
+            '<div class="chart-tools">',
+            '<button type="button" id="ohlc-zoom-in" title="放大">+</button>',
+            '<button type="button" id="ohlc-zoom-out" title="缩小">-</button>',
+            '<button type="button" id="ohlc-reset">Reset</button>',
+            '<span id="ohlc-range-label"></span>',
+            "</div>",
+            "</div>",
             '<div class="ohlc-head" id="ohlc-head">点击上方一阶/二阶监控中的任意一行查看日线图；鼠标放在单日上显示 OHLC。</div>',
             '<div class="chart-shell">',
             '<svg id="ohlc-chart" viewBox="0 0 980 360" role="img" aria-label="日线 OHLC 图"></svg>',
@@ -1241,9 +1334,15 @@ th:first-child, td:first-child { text-align: left; }
 .deriv-cell { display: grid; gap: 2px; font-size: 12px; line-height: 1.35; min-width: 134px; }
 .deriv-cell .tag { margin-top: 2px; }
 .ohlc-panel { scroll-margin-top: 18px; }
+.ohlc-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: -2px 0 12px; flex-wrap: wrap; }
+.segmented, .chart-tools { display: flex; align-items: center; gap: 6px; }
+.ohlc-toolbar button { border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); cursor: pointer; min-width: 34px; height: 30px; padding: 0 10px; font: inherit; font-size: 12px; font-weight: 650; }
+.ohlc-toolbar button.active { background: #eaf2ff; border-color: #aac5ee; color: var(--blue); }
+#ohlc-range-label { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .ohlc-head { color: var(--muted); margin: -4px 0 12px; font-size: 13px; }
 .chart-shell { position: relative; border: 1px solid var(--line); border-radius: 8px; background: #fff; overflow: hidden; }
-#ohlc-chart { display: block; width: 100%; height: min(52vw, 420px); min-height: 320px; }
+#ohlc-chart { display: block; width: 100%; height: min(52vw, 420px); min-height: 320px; cursor: grab; }
+#ohlc-chart.dragging { cursor: grabbing; }
 .chart-tooltip {
   position: absolute;
   display: none;
@@ -1282,10 +1381,21 @@ JS = """
   const raw = document.getElementById("ohlc-data")?.textContent || "{}";
   const ohlcData = JSON.parse(raw);
   const rows = Array.from(document.querySelectorAll(".derivative-row"));
+  const defaultOhlcKey = "US_10Y";
   const head = document.getElementById("ohlc-head");
   const svg = document.getElementById("ohlc-chart");
   const tooltip = document.getElementById("ohlc-tooltip");
   const panel = document.getElementById("ohlc-panel");
+  const rangeLabel = document.getElementById("ohlc-range-label");
+  const windowButtons = Array.from(document.querySelectorAll(".ohlc-window"));
+  const zoomInButton = document.getElementById("ohlc-zoom-in");
+  const zoomOutButton = document.getElementById("ohlc-zoom-out");
+  const resetButton = document.getElementById("ohlc-reset");
+  const windowSteps = [90, 180, 360];
+  let currentKey = null;
+  let visibleWindow = 90;
+  const viewEndByKey = {};
+  let dragStart = null;
 
   const fmt = (value) => {
     if (value === null || value === undefined || Number.isNaN(Number(value))) return "缺失";
@@ -1310,6 +1420,67 @@ JS = """
       ticks.push(min + (max - min) * i / (count - 1));
     }
     return ticks;
+  };
+
+  const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+
+  const sourceRows = (item) => item?.chartType === "bond_curve"
+    ? (item.curve?.rows || [])
+    : (item.ohlc || []);
+
+  const viewRange = (key, item) => {
+    const allRows = sourceRows(item);
+    const total = allRows.length;
+    if (!total) {
+      return { start: 0, end: 0, rows: [], total };
+    }
+    const size = Math.min(visibleWindow, total);
+    const end = clamp(viewEndByKey[key] || total, size, total);
+    const start = Math.max(0, end - size);
+    viewEndByKey[key] = end;
+    return { start, end, rows: allRows.slice(start, end), total };
+  };
+
+  const visibleItem = (key, item) => {
+    const range = viewRange(key, item);
+    if (item.chartType === "bond_curve") {
+      return {
+        ...item,
+        curve: { ...(item.curve || {}), rows: range.rows },
+        range
+      };
+    }
+    return { ...item, ohlc: range.rows, range };
+  };
+
+  const updateControls = (item) => {
+    windowButtons.forEach((button) => {
+      button.classList.toggle("active", Number(button.dataset.window) === visibleWindow);
+    });
+    const range = item?.range;
+    if (!rangeLabel || !range) return;
+    if (!range.total) {
+      rangeLabel.textContent = "无可用日线";
+      return;
+    }
+    const first = range.rows[0]?.date || "";
+    const last = range.rows[range.rows.length - 1]?.date || "";
+    rangeLabel.textContent = `${first} 到 ${last} · ${range.rows.length}/${range.total}`;
+  };
+
+  const rerenderCurrent = () => {
+    if (currentKey) render(currentKey, { scroll: false });
+  };
+
+  const setVisibleWindow = (nextWindow) => {
+    visibleWindow = clamp(Number(nextWindow), windowSteps[0], windowSteps[windowSteps.length - 1]);
+    rerenderCurrent();
+  };
+
+  const zoomChart = (direction) => {
+    const index = windowSteps.indexOf(visibleWindow);
+    const nextIndex = clamp(index + direction, 0, windowSteps.length - 1);
+    setVisibleWindow(windowSteps[nextIndex]);
   };
 
   const renderChart = (item) => {
@@ -1495,24 +1666,74 @@ JS = """
     });
   };
 
-  const render = (key) => {
-    const item = ohlcData[key];
-    if (!item) return;
+  const render = (key, options = {}) => {
+    const sourceItem = ohlcData[key];
+    if (!sourceItem) return;
+    const { scroll = true } = options;
+    currentKey = key;
+    const item = visibleItem(key, sourceItem);
     rows.forEach((row) => row.classList.toggle("selected", row.dataset.ohlcKey === key));
     if (item.chartType === "bond_curve") {
       const count = item.curve?.rows?.length || 0;
-      head.textContent = `${item.country} / 债券曲线：2Y 与 10Y 最近 ${count} 条日线 close；绿色为 10Y > 2Y，红色为 10Y < 2Y。`;
+      const total = item.range?.total || count;
+      head.textContent = `${item.country} / 债券曲线：2Y 与 10Y 显示 ${count}/${total} 条日线 close；绿色为 10Y > 2Y，红色为 10Y < 2Y。`;
       renderBondCurveChart(item);
     } else {
-      head.textContent = `${item.country} / ${item.group} / ${item.label}：最近 ${item.ohlc.length} 条日线，鼠标悬停显示 OHLC`;
+      const total = item.range?.total || item.ohlc.length;
+      head.textContent = `${item.country} / ${item.group} / ${item.label}：显示 ${item.ohlc.length}/${total} 条日线，鼠标悬停显示 OHLC；拖动图表可平移。`;
       renderChart(item);
     }
-    panel.scrollIntoView({ behavior: "smooth", block: "start" });
+    updateControls(item);
+    if (scroll) {
+      panel.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   };
 
   rows.forEach((row) => {
     row.addEventListener("click", () => render(row.dataset.ohlcKey));
   });
+
+  windowButtons.forEach((button) => {
+    button.addEventListener("click", () => setVisibleWindow(Number(button.dataset.window)));
+  });
+  zoomInButton?.addEventListener("click", () => zoomChart(-1));
+  zoomOutButton?.addEventListener("click", () => zoomChart(1));
+  resetButton?.addEventListener("click", () => {
+    if (!currentKey) return;
+    viewEndByKey[currentKey] = sourceRows(ohlcData[currentKey]).length;
+    visibleWindow = 90;
+    render(currentKey, { scroll: false });
+  });
+
+  svg.addEventListener("mousedown", (event) => {
+    if (!currentKey) return;
+    const source = sourceRows(ohlcData[currentKey]);
+    if (source.length <= visibleWindow) return;
+    dragStart = {
+      x: event.clientX,
+      end: viewEndByKey[currentKey] || source.length
+    };
+    svg.classList.add("dragging");
+    tooltip.style.display = "none";
+    event.preventDefault();
+  });
+
+  window.addEventListener("mousemove", (event) => {
+    if (!dragStart || !currentKey) return;
+    const source = sourceRows(ohlcData[currentKey]);
+    const size = Math.min(visibleWindow, source.length);
+    const bounds = svg.getBoundingClientRect();
+    const pixelsPerBar = bounds.width / Math.max(1, size);
+    const deltaBars = Math.round((dragStart.x - event.clientX) / pixelsPerBar);
+    viewEndByKey[currentKey] = clamp(dragStart.end + deltaBars, size, source.length);
+    render(currentKey, { scroll: false });
+  });
+
+  window.addEventListener("mouseup", () => {
+    dragStart = null;
+    svg.classList.remove("dragging");
+  });
+  render(defaultOhlcKey, { scroll: false });
 })();
 """
 
