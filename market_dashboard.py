@@ -561,18 +561,31 @@ def build_second_order_monitor(
         for group, key, unit in instruments:
             spec = specs.get(key)
             metrics = {f"{days}D": derivative_metrics(series.get(key, []), days, unit=unit) for days in windows}
-            rows.append(
-                {
-                    "country": country["name"],
-                    "code": country["code"],
-                    "group": group,
-                    "key": key,
-                    "label": spec.label if spec else key,
-                    "unit": unit,
-                    "metrics": metrics,
-                    "ohlc": recent_ohlc_rows(series.get(key, []), limit=90),
+            item = {
+                "country": country["name"],
+                "code": country["code"],
+                "group": group,
+                "key": key,
+                "label": spec.label if spec else key,
+                "unit": unit,
+                "metrics": metrics,
+                "ohlc": recent_ohlc_rows(series.get(key, []), limit=90),
+                "chart_type": "ohlc",
+            }
+            if group == "债券曲线":
+                bond_2y_spec = specs.get(country["bond_2y"])
+                bond_10y_spec = specs.get(country["bond_10y"])
+                item["chart_type"] = "bond_curve"
+                item["curve"] = {
+                    "bond_2y_label": bond_2y_spec.label if bond_2y_spec else country["bond_2y"],
+                    "bond_10y_label": bond_10y_spec.label if bond_10y_spec else country["bond_10y"],
+                    "rows": recent_bond_curve_rows(
+                        series.get(country["bond_2y"], []),
+                        series.get(country["bond_10y"], []),
+                        limit=90,
+                    ),
                 }
-            )
+            rows.append(item)
     return rows
 
 
@@ -589,6 +602,40 @@ def recent_ohlc_rows(rows: list[dict[str, Any]], limit: int = 90) -> list[dict[s
             }
         )
     return out
+
+
+def recent_bond_curve_rows(
+    bond_2y: list[dict[str, Any]],
+    bond_10y: list[dict[str, Any]],
+    limit: int = 90,
+) -> list[dict[str, Any]]:
+    if not bond_2y or not bond_10y:
+        return []
+
+    dates = sorted({row["date"] for row in bond_2y} | {row["date"] for row in bond_10y})
+    map_2y = forward_fill_map(bond_2y)
+    map_10y = forward_fill_map(bond_10y)
+    last_2y = None
+    last_10y = None
+    rows = []
+    for dt in dates:
+        if dt in map_2y:
+            last_2y = map_2y[dt]
+        if dt in map_10y:
+            last_10y = map_10y[dt]
+        if last_2y is None or last_10y is None:
+            continue
+        spread_bp = (last_10y - last_2y) * 100
+        rows.append(
+            {
+                "date": dt.isoformat(),
+                "bond_2y": last_2y,
+                "bond_10y": last_10y,
+                "spread_bp": spread_bp,
+                "positive": last_10y >= last_2y,
+            }
+        )
+    return rows[-limit:]
 
 
 def average_abs_vol(rows: list[dict[str, Any]], *, unit: str, periods: int) -> float | None:
@@ -969,7 +1016,9 @@ def render_html(snapshot: dict[str, Any]) -> str:
             "group": row["group"],
             "label": row["label"],
             "unit": row["unit"],
+            "chartType": row.get("chart_type", "ohlc"),
             "ohlc": row.get("ohlc", []),
+            "curve": row.get("curve"),
         }
         for row in second_order
     }
@@ -1349,12 +1398,115 @@ JS = """
     });
   };
 
+  const renderBondCurveChart = (item) => {
+    const curve = item.curve || {};
+    const bars = curve.rows || [];
+    const width = 980;
+    const height = 360;
+    const margin = { left: 64, right: 22, top: 34, bottom: 38 };
+    const innerW = width - margin.left - margin.right;
+    const innerH = height - margin.top - margin.bottom;
+    if (!bars.length) {
+      svg.innerHTML = `<text x="490" y="180" text-anchor="middle" fill="#66717d">没有 2Y/10Y 曲线数据</text>`;
+      return;
+    }
+
+    const values = bars.flatMap((bar) => [Number(bar.bond_2y), Number(bar.bond_10y)]);
+    let min = Math.min(...values);
+    let max = Math.max(...values);
+    if (min === max) {
+      min -= 1;
+      max += 1;
+    }
+    const pad = (max - min) * 0.10;
+    min -= pad;
+    max += pad;
+
+    const xStep = innerW / Math.max(1, bars.length - 1);
+    const y = (value) => margin.top + (max - Number(value)) / (max - min) * innerH;
+    const x = (index) => margin.left + index * xStep;
+    const linePath = (field) => bars.map((bar, index) => `${index === 0 ? "M" : "L"} ${x(index).toFixed(2)} ${y(bar[field]).toFixed(2)}`).join(" ");
+
+    const grid = yTicks(min, max).map((tick) => {
+      const yy = y(tick);
+      return `<line x1="${margin.left}" x2="${width - margin.right}" y1="${yy}" y2="${yy}" stroke="#e5e9ef" />`
+        + `<text x="${margin.left - 10}" y="${yy + 4}" text-anchor="end" fill="#66717d" font-size="11">${fmt(tick)}%</text>`;
+    }).join("");
+
+    const dateTicks = [];
+    const tickCount = Math.min(6, bars.length);
+    for (let i = 0; i < tickCount; i += 1) {
+      const index = Math.round(i * (bars.length - 1) / Math.max(1, tickCount - 1));
+      const xx = x(index);
+      dateTicks.push(`<text x="${xx}" y="${height - 13}" text-anchor="middle" fill="#66717d" font-size="11">${esc(bars[index].date.slice(5))}</text>`);
+    }
+
+    const bands = bars.slice(0, -1).map((bar, index) => {
+      const next = bars[index + 1];
+      const positive = (Number(bar.spread_bp) + Number(next.spread_bp)) / 2 >= 0;
+      const fill = positive ? "rgba(8, 116, 67, 0.16)" : "rgba(180, 35, 24, 0.16)";
+      const cls = positive ? "curve-positive-band" : "curve-negative-band";
+      const points = [
+        [x(index), y(bar.bond_10y)],
+        [x(index + 1), y(next.bond_10y)],
+        [x(index + 1), y(next.bond_2y)],
+        [x(index), y(bar.bond_2y)]
+      ].map(([px, py]) => `${px.toFixed(2)},${py.toFixed(2)}`).join(" ");
+      return `<polygon class="${cls}" points="${points}" fill="${fill}" />`;
+    }).join("");
+
+    const hitW = Math.max(8, xStep);
+    const hits = bars.map((bar, index) => (
+      `<rect class="curve-hit" data-index="${index}" x="${x(index) - hitW / 2}" y="${margin.top}" width="${hitW}" height="${innerH}" fill="transparent" />`
+    )).join("");
+
+    svg.innerHTML = `<rect width="${width}" height="${height}" fill="#fff" />`
+      + `<line x1="${margin.left}" x2="${margin.left}" y1="${margin.top}" y2="${height - margin.bottom}" stroke="#cbd3dd" />`
+      + `<line x1="${margin.left}" x2="${width - margin.right}" y1="${height - margin.bottom}" y2="${height - margin.bottom}" stroke="#cbd3dd" />`
+      + grid
+      + dateTicks.join("")
+      + bands
+      + `<path d="${linePath("bond_10y")}" fill="none" stroke="#2457a6" stroke-width="2.2" />`
+      + `<path d="${linePath("bond_2y")}" fill="none" stroke="#9a5b00" stroke-width="2.2" />`
+      + `<text x="${margin.left}" y="18" fill="#2457a6" font-size="12" font-weight="700">10Y</text>`
+      + `<text x="${margin.left + 42}" y="18" fill="#9a5b00" font-size="12" font-weight="700">2Y</text>`
+      + `<text x="${margin.left + 84}" y="18" fill="#087443" font-size="12">10Y > 2Y</text>`
+      + `<text x="${margin.left + 174}" y="18" fill="#b42318" font-size="12">10Y < 2Y</text>`
+      + hits;
+
+    Array.from(svg.querySelectorAll(".curve-hit")).forEach((node) => {
+      const bar = bars[Number(node.dataset.index)];
+      node.addEventListener("mousemove", (event) => {
+        const bounds = panel.getBoundingClientRect();
+        tooltip.style.display = "block";
+        tooltip.style.left = `${Math.min(bounds.width - 218, Math.max(8, event.clientX - bounds.left + 14))}px`;
+        tooltip.style.top = `${Math.max(8, event.clientY - bounds.top - 82)}px`;
+        const spread = Number(bar.spread_bp);
+        const spreadText = `${spread >= 0 ? "+" : ""}${fmt(spread)}bp`;
+        tooltip.innerHTML = `<strong>${esc(bar.date)}</strong>`
+          + `<div>${esc(curve.bond_10y_label || "10Y")}: ${fmt(bar.bond_10y)}%</div>`
+          + `<div>${esc(curve.bond_2y_label || "2Y")}: ${fmt(bar.bond_2y)}%</div>`
+          + `<div>Spread: ${spreadText}</div>`
+          + `<div>${bar.positive ? "10Y > 2Y，正斜率" : "10Y < 2Y，倒挂"}</div>`;
+      });
+      node.addEventListener("mouseleave", () => {
+        tooltip.style.display = "none";
+      });
+    });
+  };
+
   const render = (key) => {
     const item = ohlcData[key];
     if (!item) return;
     rows.forEach((row) => row.classList.toggle("selected", row.dataset.ohlcKey === key));
-    head.textContent = `${item.country} / ${item.group} / ${item.label}：最近 ${item.ohlc.length} 条日线，鼠标悬停显示 OHLC`;
-    renderChart(item);
+    if (item.chartType === "bond_curve") {
+      const count = item.curve?.rows?.length || 0;
+      head.textContent = `${item.country} / 债券曲线：2Y 与 10Y 最近 ${count} 条日线 close；绿色为 10Y > 2Y，红色为 10Y < 2Y。`;
+      renderBondCurveChart(item);
+    } else {
+      head.textContent = `${item.country} / ${item.group} / ${item.label}：最近 ${item.ohlc.length} 条日线，鼠标悬停显示 OHLC`;
+      renderChart(item);
+    }
     panel.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 

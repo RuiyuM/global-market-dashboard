@@ -24,6 +24,7 @@ VOL_RANKING_ROWS = 6
 INLINE_VOL_COUNT = len(COUNTRIES) * len(FIELDS)
 SECOND_ORDER_WINDOWS = {"1D", "7D", "30D"}
 SECOND_ORDER_ROWS = 30
+BOND_CURVE_ROWS = len(COUNTRIES)
 
 
 def main() -> int:
@@ -105,10 +106,16 @@ def main() -> int:
     inline_vol_count = html.count('class="asset-vol"')
     if inline_vol_count != INLINE_VOL_COUNT:
         errors.append(f"inline asset volatility count mismatch: {inline_vol_count}")
+    for marker in ["renderBondCurveChart", "curve-positive-band", "curve-negative-band"]:
+        if marker not in html:
+            errors.append(f"missing bond curve chart marker: {marker}")
 
     second_order = snapshot.get("second_order_monitor", [])
     if len(second_order) != SECOND_ORDER_ROWS:
         errors.append(f"second order row count mismatch: {len(second_order)}")
+    curve_rows = [row for row in second_order if row.get("group") == "债券曲线"]
+    if len(curve_rows) != BOND_CURVE_ROWS:
+        errors.append(f"bond curve row count mismatch: {len(curve_rows)}")
     for row in second_order:
         metrics = row.get("metrics", {})
         if set(metrics) != SECOND_ORDER_WINDOWS:
@@ -129,6 +136,26 @@ def main() -> int:
                 if key not in bar:
                     errors.append(f"{row.get('country')} {row.get('label')} OHLC missing {key}")
                     break
+        if row.get("group") == "债券曲线":
+            if row.get("chart_type") != "bond_curve":
+                errors.append(f"{row.get('country')} bond curve missing chart_type")
+            curve = row.get("curve") or {}
+            curve_data = curve.get("rows") or []
+            if len(curve_data) < 30:
+                errors.append(f"{row.get('country')} bond curve has too few paired rows: {len(curve_data)}")
+            if not curve.get("bond_2y_label") or not curve.get("bond_10y_label"):
+                errors.append(f"{row.get('country')} bond curve missing component labels")
+            for item in curve_data:
+                for key in ["date", "bond_2y", "bond_10y", "spread_bp", "positive"]:
+                    if key not in item:
+                        errors.append(f"{row.get('country')} bond curve paired row missing {key}")
+                        break
+                if {"bond_2y", "bond_10y", "spread_bp", "positive"} <= set(item):
+                    expected_spread = (item["bond_10y"] - item["bond_2y"]) * 100
+                    if abs(item["spread_bp"] - expected_spread) > 1e-7:
+                        errors.append(f"{row.get('country')} bond curve bad spread calculation")
+                    if item["positive"] != (item["bond_10y"] >= item["bond_2y"]):
+                        errors.append(f"{row.get('country')} bond curve bad positive flag")
 
     flow_names = {section["name"] for section in snapshot.get("fx_flows", [])}
     if flow_names != FLOWS:
