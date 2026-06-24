@@ -1158,6 +1158,11 @@ def render_html(snapshot: dict[str, Any]) -> str:
         for row in second_order
     }
     ohlc_json = json.dumps(ohlc_payload, ensure_ascii=False).replace("</", "<\\/")
+    volatility_by_key: dict[str, tuple[dict[str, Any], str]] = {}
+    for country in countries:
+        for field, unit in [("bond_2y", "bp"), ("bond_10y", "bp"), ("equity", "pct"), ("fx", "pct")]:
+            cell = country[field]
+            volatility_by_key[cell["key"]] = (cell["summary"], unit)
     generated = escape(snapshot["generated_at"])
     html = [
         "<!doctype html>",
@@ -1228,11 +1233,15 @@ def render_html(snapshot: dict[str, Any]) -> str:
         )
         hidden_attr = "" if expanded else " hidden"
         for row in country_rows:
+            volatility = ""
+            if row["key"] in volatility_by_key:
+                summary, volatility_unit = volatility_by_key[row["key"]]
+                volatility = fmt_asset_volatility(summary, volatility_unit)
             html.append(
                 f'<tr class="derivative-row" data-country="{escape(country)}" data-ohlc-key="{escape(row["key"])}" title="点击查看日线 OHLC"{hidden_attr}>'
                 f'<th>{escape(row["country"])}</th>'
                 f'<td>{escape(row["group"])}</td>'
-                f'<td>{escape(row["label"])}</td>'
+                f'<td><div>{escape(row["label"])}</div>{volatility}</td>'
                 f'<td>{fmt_derivative(row["metrics"].get("1D"), row["unit"])}</td>'
                 f'<td>{fmt_derivative(row["metrics"].get("7D"), row["unit"])}</td>'
                 f'<td>{fmt_derivative(row["metrics"].get("30D"), row["unit"])}</td>'
@@ -1282,8 +1291,7 @@ def render_html(snapshot: dict[str, Any]) -> str:
             html.append(
                 f'<td><div class="cell-label">{escape(cell["label"])}</div>'
                 f'<div>{escape(fmt_value(latest, digits))} {stale}</div>'
-                f'<div class="date">{escape(summary.get("date") or "")}</div>'
-                f'{fmt_asset_volatility(summary, unit)}</td>'
+                f'<div class="date">{escape(summary.get("date") or "")}</div></td>'
             )
             html.append(
                 "<td class=\"change-stack\">"

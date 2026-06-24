@@ -107,6 +107,14 @@ def main() -> int:
     inline_vol_count = html.count('class="asset-vol"')
     if inline_vol_count != INLINE_VOL_COUNT:
         errors.append(f"inline asset volatility count mismatch: {inline_vol_count}")
+    derivative_section = html.split('<table class="derivative-table">', 1)[-1].split("</table>", 1)[0]
+    market_section = html.split('<table class="market-table">', 1)[-1].split("</table>", 1)[0]
+    derivative_vol_count = derivative_section.count('class="asset-vol"')
+    market_vol_count = market_section.count('class="asset-vol"')
+    if derivative_vol_count != INLINE_VOL_COUNT:
+        errors.append(f"derivative table volatility count mismatch: {derivative_vol_count}")
+    if market_vol_count != 0:
+        errors.append(f"market panel should not render inline volatility: {market_vol_count}")
     for marker in ["renderBondCurveChart", "curve-positive-band", "curve-negative-band"]:
         if marker not in html:
             errors.append(f"missing bond curve chart marker: {marker}")
