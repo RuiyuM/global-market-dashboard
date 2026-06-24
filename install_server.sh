@@ -11,17 +11,32 @@ if [[ "${EUID}" -ne 0 ]]; then
   exit 1
 fi
 
+NGINX_SITE_TARGET=""
+
 if command -v apt-get >/dev/null 2>&1; then
   apt-get update
   DEBIAN_FRONTEND=noninteractive apt-get install -y git python3 curl nginx ca-certificates
+  NGINX_SITE_TARGET="/etc/nginx/sites-available/global-market-dashboard"
+elif command -v dnf >/dev/null 2>&1; then
+  dnf install -y git python3 curl nginx ca-certificates
+  NGINX_SITE_TARGET="/etc/nginx/conf.d/global-market-dashboard.conf"
+elif command -v yum >/dev/null 2>&1; then
+  yum install -y git python3 curl nginx ca-certificates
+  NGINX_SITE_TARGET="/etc/nginx/conf.d/global-market-dashboard.conf"
 else
-  echo "This installer currently supports Debian/Ubuntu systems with apt-get." >&2
+  echo "This installer supports Debian/Ubuntu apt, OpenCloudOS/CentOS/RHEL dnf, or yum systems." >&2
   exit 1
 fi
 
 if ! id "${SERVICE_USER}" >/dev/null 2>&1; then
-  useradd --system --home "${APP_DIR}" --shell /usr/sbin/nologin "${SERVICE_USER}"
+  NOLOGIN_SHELL="$(command -v nologin || true)"
+  if [[ -z "${NOLOGIN_SHELL}" ]]; then
+    NOLOGIN_SHELL="/sbin/nologin"
+  fi
+  useradd --system --home "${APP_DIR}" --shell "${NOLOGIN_SHELL}" "${SERVICE_USER}"
 fi
+
+PYTHON_BIN="$(command -v python3)"
 
 if [[ -d "${APP_DIR}/.git" ]]; then
   git -C "${APP_DIR}" pull --ff-only
@@ -45,7 +60,7 @@ User=${SERVICE_USER}
 Group=${SERVICE_USER}
 WorkingDirectory=${APP_DIR}
 ExecStart=${APP_DIR}/update_market_dashboard.sh
-ExecStartPost=/usr/bin/python3 ${APP_DIR}/validate_market_dashboard.py
+ExecStartPost=${PYTHON_BIN} ${APP_DIR}/validate_market_dashboard.py
 EOF
 
 cat >/etc/systemd/system/global-market-dashboard-update.timer <<EOF
@@ -61,7 +76,7 @@ Unit=global-market-dashboard-update.service
 WantedBy=timers.target
 EOF
 
-cat >/etc/nginx/sites-available/global-market-dashboard <<EOF
+cat >"${NGINX_SITE_TARGET}" <<EOF
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
@@ -76,10 +91,13 @@ server {
 }
 EOF
 
-rm -f /etc/nginx/sites-enabled/default
-ln -sf /etc/nginx/sites-available/global-market-dashboard /etc/nginx/sites-enabled/global-market-dashboard
+if [[ -d /etc/nginx/sites-enabled ]]; then
+  rm -f /etc/nginx/sites-enabled/default
+  ln -sf "${NGINX_SITE_TARGET}" /etc/nginx/sites-enabled/global-market-dashboard
+fi
 
 systemctl daemon-reload
+systemctl enable --now nginx
 systemctl enable --now global-market-dashboard-update.timer
 systemctl start global-market-dashboard-update.service
 nginx -t
@@ -89,10 +107,14 @@ if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
   ufw allow 80/tcp || true
 fi
 
+if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
+  firewall-cmd --permanent --add-service=http || true
+  firewall-cmd --reload || true
+fi
+
 PUBLIC_IP="$(curl -fsS --max-time 5 https://api.ipify.org || hostname -I | awk '{print $1}')"
 echo
 echo "Global Market Dashboard installed."
 echo "Open: http://${PUBLIC_IP}/"
 echo "App dir: ${APP_DIR}"
 echo "Timer: systemctl list-timers global-market-dashboard-update.timer"
-

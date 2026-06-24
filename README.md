@@ -22,7 +22,7 @@ open dashboard/index.html
 
 ## One-Command Server Deploy
 
-On a fresh Ubuntu/Debian server:
+On a fresh Ubuntu/Debian/OpenCloudOS/CentOS/RHEL server:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/RuiyuM/global-market-dashboard/main/install_server.sh | sudo bash
@@ -33,6 +33,8 @@ After installation, open:
 ```text
 http://YOUR_SERVER_IP/
 ```
+
+Use your real public IP in a browser address bar. Do not run `http://...` as a shell command.
 
 No domain is required.
 
@@ -64,4 +66,3 @@ View logs:
 ```bash
 journalctl -u global-market-dashboard-update.service -n 200 --no-pager
 ```
-
