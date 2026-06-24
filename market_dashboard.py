@@ -257,7 +257,8 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
         }
         try:
             rows = rows_from_investing_html(fetch_investing_html(investing_spec, start, end))
-            write_ohlc(path, rows)
+            if rows:
+                write_ohlc(path, rows)
             record.update({"status": "ok" if rows else "empty", "rows": str(len(rows)), "latest": rows[-1]["date"] if rows else ""})
         except Exception as exc:
             record.update({"status": "error", "error": str(exc)})

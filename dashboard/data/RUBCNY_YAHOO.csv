@@ -1,0 +1,2 @@
+date,timestamp,open,high,low,close,volume,source_symbol,source
+2026-06-24,1782270988,0.09053999930620193,0.09064999967813492,0.08529999852180481,0.08540000021457672,0,RUBCNY=X,Yahoo Finance chart API
