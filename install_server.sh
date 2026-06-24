@@ -63,7 +63,7 @@ User=${SERVICE_USER}
 Group=${SERVICE_USER}
 WorkingDirectory=${APP_DIR}
 ExecStart=${APP_DIR}/update_market_dashboard.sh
-ExecStartPost=${PYTHON_BIN} ${APP_DIR}/validate_market_dashboard.py
+ExecStartPost=-${PYTHON_BIN} ${APP_DIR}/validate_market_dashboard.py
 EOF
 
 cat >/etc/systemd/system/global-market-dashboard-update.timer <<EOF
