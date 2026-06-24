@@ -679,6 +679,52 @@ def asset_class_vol(country_rows: list[dict[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def summary_volatility(summary: dict[str, Any], period: str) -> float | None:
+    return (summary.get("avg_abs_vol") or {}).get(period)
+
+
+def volatility_rankings(country_rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    groups = {
+        "bond": {"label": "债市", "unit": "bp", "fields": ("bond_2y", "bond_10y")},
+        "equity": {"label": "股指", "unit": "pct", "fields": ("equity",)},
+        "fx": {"label": "汇率", "unit": "pct", "fields": ("fx",)},
+    }
+    rankings: dict[str, list[dict[str, Any]]] = {}
+    for key, spec in groups.items():
+        rows = []
+        for country in country_rows:
+            windows = {}
+            sample_counts = {}
+            for period in ["7D", "30D"]:
+                values = []
+                for field in spec["fields"]:
+                    summary = country[field]["summary"]
+                    value = summary_volatility(summary, period)
+                    if value is not None and not summary.get("stale"):
+                        values.append(value)
+                windows[period] = statistics.mean(values) if values else None
+                sample_counts[period] = len(values)
+
+            if windows["7D"] is None:
+                continue
+            rows.append(
+                {
+                    "country": country["country"],
+                    "ccy": country["ccy"],
+                    "label": spec["label"],
+                    "unit": spec["unit"],
+                    "windows": windows,
+                    "sample_counts": sample_counts,
+                }
+            )
+
+        rows.sort(key=lambda item: item["windows"]["7D"], reverse=True)
+        for rank, row in enumerate(rows, start=1):
+            row["rank"] = rank
+        rankings[key] = rows
+    return rankings
+
+
 def load_user_fx_flow_logic() -> Any:
     if not USER_FX_FLOW_CODE.exists():
         raise FileNotFoundError(f"missing user FX flow code: {USER_FX_FLOW_CODE}")
@@ -820,6 +866,7 @@ def build_snapshot(fetch_records: list[dict[str, str]]) -> dict[str, Any]:
         "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "countries": countries,
         "asset_class_vol": asset_class_vol(countries),
+        "volatility_rankings": volatility_rankings(countries),
         "second_order_monitor": build_second_order_monitor(series, specs),
         "fx_flows": build_flow_sections(series),
         "series_status": build_series_status(series, specs),
@@ -827,7 +874,7 @@ def build_snapshot(fetch_records: list[dict[str, str]]) -> dict[str, Any]:
         "notes": [
             "债券变化单位为 bp；股指和汇率变化单位为对数百分比。",
             "一阶速度 = 当前窗口变化 / 实际间隔天数；二阶加速度 = 当前一阶速度相对上一段同长度窗口的速度变化 / 平均间隔天数。",
-            "最近一周平均波动率 = 最近7个相邻交易观测的平均绝对日变化。",
+            "7D/30D 波动率 = 对应窗口相邻交易观测的平均绝对日变化；债券单位 bp/日，股指和汇率单位 %/日。",
             f"三币种资金流向直接调用用户提供代码：{USER_FX_FLOW_CODE}",
             "WSCN 缺口优先用 Yahoo；俄/韩债券若无可靠日线会显示缺失。",
         ],
@@ -875,6 +922,23 @@ def fmt_change(summary: dict[str, Any], key: str, unit: str) -> str:
     return f'<span class="{cls}">{value:+.2f}{suffix}</span>'
 
 
+def fmt_volatility_value(value: float | None, unit: str) -> str:
+    if value is None:
+        return "缺失"
+    suffix = "bp/日" if unit == "bp" else "%/日"
+    return f"{value:.2f}{suffix}"
+
+
+def fmt_asset_volatility(summary: dict[str, Any], unit: str) -> str:
+    windows = summary.get("avg_abs_vol") or {}
+    return (
+        '<div class="asset-vol">'
+        f'<span>7D 波动 {escape(fmt_volatility_value(windows.get("7D"), unit))}</span>'
+        f'<span>30D 波动 {escape(fmt_volatility_value(windows.get("30D"), unit))}</span>'
+        "</div>"
+    )
+
+
 def fmt_derivative(metric: dict[str, Any] | None, unit: str) -> str:
     if not metric:
         return '<span class="muted">缺失</span>'
@@ -897,7 +961,7 @@ def fmt_derivative(metric: dict[str, Any] | None, unit: str) -> str:
 
 def render_html(snapshot: dict[str, Any]) -> str:
     countries = snapshot["countries"]
-    vol = snapshot["asset_class_vol"]
+    rankings = snapshot["volatility_rankings"]
     second_order = snapshot["second_order_monitor"]
     ohlc_payload = {
         row["key"]: {
@@ -931,25 +995,28 @@ def render_html(snapshot: dict[str, Any]) -> str:
         "</div>",
         '<a class="button" href="latest_market_snapshot.json">JSON</a>',
         "</section>",
-        '<section class="vol-grid">',
     ]
-    for key in ["equity", "bond", "fx"]:
-        item = vol[key]
-        unit_label = "bp/日" if item["unit"] == "bp" else "%/日"
-        windows = item.get("windows", {})
-        period_rows = []
-        for period in ["7D", "30D"]:
-            window = windows.get(period, {})
-            value = "缺失" if window.get("value") is None else f'{window["value"]:.2f}{unit_label}'
-            period_rows.append(
-                f'<div class="vol-window"><span>{escape(period)}</span>'
-                f'<strong>{escape(value)}</strong><em>样本 {window.get("count", 0)}</em></div>'
+
+    html.extend(['<section class="panel volatility-panel">', "<h2>波动率排名</h2>", '<div class="ranking-grid">'])
+    ranking_titles = {"bond": "债市波动率排名", "equity": "股指波动率排名", "fx": "汇率波动率排名"}
+    for key in ["bond", "equity", "fx"]:
+        rows = rankings.get(key, [])
+        html.append('<div class="ranking-block">')
+        html.append(f'<h3>{escape(ranking_titles[key])}</h3>')
+        html.append('<div class="rank-row rank-head"><span>#</span><span>国家</span><span>7D</span><span>30D</span></div>')
+        for row in rows:
+            unit = row["unit"]
+            windows = row["windows"]
+            html.append(
+                '<div class="rank-row">'
+                f'<span>{row["rank"]}</span>'
+                f'<strong>{escape(row["country"])}</strong>'
+                f'<span>{escape(fmt_volatility_value(windows.get("7D"), unit))}</span>'
+                f'<span>{escape(fmt_volatility_value(windows.get("30D"), unit))}</span>'
+                "</div>"
             )
-        html.append(
-            f'<div class="metric"><div class="metric-label">{escape(item["label"])}平均日波动率</div>'
-            f'<div class="metric-windows">{"".join(period_rows)}</div></div>'
-        )
-    html.extend(["</section>"])
+        html.append("</div>")
+    html.extend(["</div></section>"])
 
     html.extend(['<section class="panel">', "<h2>一阶/二阶监控</h2>", '<div class="math-note">'])
     html.append("D1 是窗口速度；D2 是速度变化率。债券曲线使用 10Y-2Y，便于观察长短端价差变化速度。")
@@ -997,7 +1064,8 @@ def render_html(snapshot: dict[str, Any]) -> str:
             html.append(
                 f'<td><div class="cell-label">{escape(cell["label"])}</div>'
                 f'<div>{escape(fmt_value(latest, digits))} {stale}</div>'
-                f'<div class="date">{escape(summary.get("date") or "")}</div></td>'
+                f'<div class="date">{escape(summary.get("date") or "")}</div>'
+                f'{fmt_asset_volatility(summary, unit)}</td>'
             )
             html.append(
                 "<td class=\"change-stack\">"
@@ -1090,18 +1158,13 @@ h3 { margin: 0 0 10px; font-size: 15px; letter-spacing: 0; }
 .muted, .date { color: var(--muted); }
 .date { font-size: 12px; margin-top: 2px; }
 .button { border: 1px solid var(--line); color: var(--ink); text-decoration: none; padding: 8px 12px; border-radius: 6px; background: #fff; }
-.vol-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
-.metric, .panel, .flow-block { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
-.metric { padding: 14px 16px; }
-.metric-label { color: var(--muted); font-size: 13px; }
-.metric-value { font-size: 26px; font-weight: 750; margin-top: 4px; }
-.metric-foot { color: var(--muted); font-size: 12px; margin-top: 2px; }
-.metric-windows { display: grid; gap: 8px; margin-top: 10px; }
-.vol-window { display: grid; grid-template-columns: 42px minmax(0, 1fr) 72px; align-items: baseline; gap: 10px; }
-.vol-window span { color: var(--muted); font-size: 12px; font-weight: 700; }
-.vol-window strong { font-size: 23px; line-height: 1.05; }
-.vol-window em { color: var(--muted); font-size: 11px; font-style: normal; text-align: right; }
+.panel, .flow-block { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
 .panel { padding: 16px; margin-top: 14px; }
+.ranking-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+.ranking-block + .ranking-block { border-left: 1px solid var(--line); padding-left: 18px; }
+.rank-row { display: grid; grid-template-columns: 28px minmax(58px, 1fr) minmax(76px, auto) minmax(76px, auto); gap: 8px; align-items: baseline; padding: 5px 0; font-variant-numeric: tabular-nums; }
+.rank-row span:nth-child(n+3) { text-align: right; }
+.rank-head { color: var(--muted); font-size: 12px; font-weight: 650; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; }
 th, td { border-bottom: 1px solid var(--line); padding: 9px 8px; text-align: right; vertical-align: top; white-space: nowrap; }
@@ -1109,6 +1172,7 @@ thead th { color: var(--muted); font-size: 12px; font-weight: 650; background: #
 th:first-child, td:first-child { text-align: left; }
 .country span { display: block; color: var(--muted); font-weight: 500; font-size: 12px; }
 .cell-label { color: var(--muted); font-size: 12px; }
+.asset-vol { display: grid; gap: 1px; margin-top: 6px; color: var(--muted); font-size: 11px; line-height: 1.35; font-variant-numeric: tabular-nums; }
 .change-stack { display: grid; grid-template-columns: repeat(4, minmax(58px, 1fr)); gap: 6px; align-items: start; }
 .pos { color: var(--pos); font-variant-numeric: tabular-nums; }
 .neg { color: var(--neg); font-variant-numeric: tabular-nums; }
@@ -1158,7 +1222,8 @@ th:first-child, td:first-child { text-align: left; }
 @media (max-width: 900px) {
   main { padding: 14px; }
   .topbar { align-items: flex-start; flex-direction: column; }
-  .vol-grid, .flow-grid { grid-template-columns: 1fr; }
+  .ranking-grid, .flow-grid { grid-template-columns: 1fr; }
+  .ranking-block + .ranking-block { border-left: 0; border-top: 1px solid var(--line); padding-left: 0; padding-top: 12px; }
 }
 """
 
