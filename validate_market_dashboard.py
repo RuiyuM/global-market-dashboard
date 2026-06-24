@@ -197,6 +197,8 @@ def main() -> int:
         errors.append("missing RUB direct source policy note")
 
     status_by_key = {item.get("key"): item for item in snapshot.get("series_status", [])}
+    if status_by_key.get("JP_EQUITY", {}).get("source") != "nikkei":
+        errors.append(f"JP_EQUITY should use official Nikkei source, got {status_by_key.get('JP_EQUITY', {}).get('source')}")
     for key, direct_key in [("RUBCNY", "RUBCNY_YAHOO"), ("RUBJPY", "RUBJPY_YAHOO")]:
         selected = status_by_key.get(key, {})
         direct = status_by_key.get(direct_key, {})

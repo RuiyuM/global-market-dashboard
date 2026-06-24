@@ -109,7 +109,7 @@ INVESTING_SPECS: list[tuple[SeriesSpec, InvestingSpec]] = [
 
 YAHOO_SPECS = [
     SeriesSpec("US_EQUITY", "标普500", "equity", "yahoo", "^GSPC", "US_EQUITY.csv", "SP500_YAHOO_1D_ohlc.csv"),
-    SeriesSpec("JP_EQUITY", "日经225", "equity", "yahoo", "^N225", "JP_EQUITY.csv", "NIKKEI225_YAHOO_1D_ohlc.csv"),
+    SeriesSpec("JP_EQUITY_YAHOO", "日经225", "equity", "yahoo", "^N225", "JP_EQUITY_YAHOO.csv", "NIKKEI225_YAHOO_1D_ohlc.csv"),
     SeriesSpec("DE_EQUITY", "德国DAX", "equity", "yahoo", "^GDAXI", "DE_EQUITY.csv", None),
     SeriesSpec("KR_EQUITY", "韩国KOSPI", "equity", "yahoo", "^KS11", "KR_EQUITY.csv", None),
     SeriesSpec("KRWCNY", "韩元/人民币", "fx", "yahoo", "KRWCNY=X", "KRWCNY.csv", None),
@@ -119,6 +119,9 @@ YAHOO_SPECS = [
     SeriesSpec("USDRUB_YAHOO", "美元/卢布", "fx", "yahoo", "USDRUB=X", "USDRUB_YAHOO.csv", None),
 ]
 
+NIKKEI_SPECS = [
+    SeriesSpec("JP_EQUITY", "日经225", "equity", "nikkei", "nikkei_stock_average_daily_en.csv", "JP_EQUITY.csv", None),
+]
 
 COUNTRIES = [
     {"code": "US", "name": "美国", "ccy": "USD", "bond_2y": "US_2Y", "bond_10y": "US_10Y", "equity": "US_EQUITY", "fx": "USDCNY"},
@@ -170,6 +173,7 @@ def fetch_yahoo_ohlc(symbol: str, start: date, end: date) -> list[dict[str, Any]
     if not result:
         return []
 
+    meta = result.get("meta") or {}
     timestamps = result.get("timestamp") or []
     quote_data = ((result.get("indicators") or {}).get("quote") or [{}])[0]
     rows: list[dict[str, Any]] = []
@@ -179,6 +183,11 @@ def fetch_yahoo_ohlc(symbol: str, start: date, end: date) -> list[dict[str, Any]
         low_px = value_at(quote_data.get("low"), index)
         close_px = value_at(quote_data.get("close"), index)
         volume = value_at(quote_data.get("volume"), index)
+        if close_px is None and index == len(timestamps) - 1:
+            close_px = meta.get("regularMarketPrice")
+            open_px = open_px if open_px is not None else close_px
+            high_px = high_px if high_px is not None else close_px
+            low_px = low_px if low_px is not None else close_px
         if None in {open_px, high_px, low_px, close_px}:
             continue
         rows.append(
@@ -192,6 +201,39 @@ def fetch_yahoo_ohlc(symbol: str, start: date, end: date) -> list[dict[str, Any]
                 "volume": int(volume) if volume is not None else "",
                 "source_symbol": symbol,
                 "source": "Yahoo Finance chart API",
+            }
+        )
+    return rows
+
+
+def fetch_nikkei_ohlc(symbol: str) -> list[dict[str, Any]]:
+    url = f"https://indexes.nikkei.co.jp/nkave/historical/{quote(symbol, safe='')}"
+    request = Request(url, headers={"User-Agent": "Mozilla/5.0", "Accept": "text/csv,*/*"})
+    with urlopen(request, timeout=30) as response:
+        text = response.read().decode("cp932")
+
+    rows: list[dict[str, Any]] = []
+    for row in csv.DictReader(text.splitlines()):
+        try:
+            parsed_date = datetime.strptime(row["Date of Data"], "%Y/%m/%d").date()
+            close = float(row["Close"].replace(",", ""))
+            open_px = float(row["Open"].replace(",", ""))
+            high = float(row["High"].replace(",", ""))
+            low = float(row["Low"].replace(",", ""))
+        except (KeyError, TypeError, ValueError, AttributeError):
+            continue
+        timestamp = int(datetime(parsed_date.year, parsed_date.month, parsed_date.day, tzinfo=timezone.utc).timestamp())
+        rows.append(
+            {
+                "date": parsed_date.isoformat(),
+                "timestamp": timestamp,
+                "open": open_px,
+                "high": high,
+                "low": low,
+                "close": close,
+                "volume": "",
+                "source_symbol": symbol,
+                "source": "Nikkei Indexes official daily CSV",
             }
         )
     return rows
@@ -238,6 +280,19 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
             rows = fetch_yahoo_ohlc(spec.symbol, start, end)
             if rows:
                 write_ohlc(path, rows)
+            record.update({"status": "ok" if rows else "empty", "rows": str(len(rows)), "latest": rows[-1]["date"] if rows else ""})
+        except Exception as exc:
+            record.update({"status": "error", "error": str(exc)})
+        records.append(record)
+        if args.sleep_sec:
+            time.sleep(args.sleep_sec)
+
+    for spec in NIKKEI_SPECS:
+        path = DASHBOARD_DATA / spec.cache_file
+        record = {"key": spec.key, "source": spec.source, "symbol": spec.symbol, "status": "pending", "file": str(path), "error": ""}
+        try:
+            rows = fetch_nikkei_ohlc(spec.symbol)
+            write_ohlc(path, rows)
             record.update({"status": "ok" if rows else "empty", "rows": str(len(rows)), "latest": rows[-1]["date"] if rows else ""})
         except Exception as exc:
             record.update({"status": "error", "error": str(exc)})
@@ -362,7 +417,7 @@ def derived_difference(key: str, left: list[dict[str, Any]], right: list[dict[st
 
 def load_all_series() -> tuple[dict[str, list[dict[str, Any]]], dict[str, SeriesSpec]]:
     investing_series_specs = [series_spec for series_spec, _ in INVESTING_SPECS]
-    specs = {spec.key: spec for spec in [*WSCN_SPECS, *YAHOO_SPECS, *investing_series_specs]}
+    specs = {spec.key: spec for spec in [*WSCN_SPECS, *YAHOO_SPECS, *NIKKEI_SPECS, *investing_series_specs]}
     series = {key: read_series(spec) for key, spec in specs.items()}
 
     # Base currency and derived crosses.
