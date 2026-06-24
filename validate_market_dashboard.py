@@ -18,6 +18,7 @@ CHANGES = ["chg_1d", "chg_7d", "chg_14d", "chg_30d"]
 FLOWS = {"中日美", "中德美", "中俄美"}
 PERIODS = {"当日", "当周", "当月"}
 VOLS = {"equity", "bond", "fx"}
+VOL_WINDOWS = {"7D", "30D"}
 SECOND_ORDER_WINDOWS = {"1D", "7D", "30D"}
 SECOND_ORDER_ROWS = 30
 
@@ -58,6 +59,15 @@ def main() -> int:
             errors.append(f"{key} volatility is null")
         if item.get("count", 0) <= 0:
             errors.append(f"{key} volatility has no samples")
+        windows = item.get("windows", {})
+        if set(windows) != VOL_WINDOWS:
+            errors.append(f"{key} volatility windows mismatch: {sorted(windows)}")
+        for window in VOL_WINDOWS:
+            window_item = windows.get(window, {})
+            if window_item.get("value") is None:
+                errors.append(f"{key} {window} volatility is null")
+            if window_item.get("count", 0) <= 0:
+                errors.append(f"{key} {window} volatility has no samples")
 
     second_order = snapshot.get("second_order_monitor", [])
     if len(second_order) != SECOND_ORDER_ROWS:

@@ -592,7 +592,7 @@ def recent_ohlc_rows(rows: list[dict[str, Any]], limit: int = 90) -> list[dict[s
     return out
 
 
-def week_average_abs_vol(rows: list[dict[str, Any]], *, unit: str, periods: int = 7) -> float | None:
+def average_abs_vol(rows: list[dict[str, Any]], *, unit: str, periods: int) -> float | None:
     if len(rows) < 2:
         return None
     latest = rows[-(periods + 1) :]
@@ -605,6 +605,13 @@ def week_average_abs_vol(rows: list[dict[str, Any]], *, unit: str, periods: int 
         else:
             values.append(abs(math.log(current["close"] / previous["close"])) * 100)
     return statistics.mean(values) if values else None
+
+
+def volatility_windows(rows: list[dict[str, Any]], *, unit: str) -> dict[str, float | None]:
+    return {
+        "7D": average_abs_vol(rows, unit=unit, periods=7),
+        "30D": average_abs_vol(rows, unit=unit, periods=30),
+    }
 
 
 def series_summary(key: str, rows: list[dict[str, Any]], unit: str, stale_days: int = 7) -> dict[str, Any]:
@@ -623,7 +630,8 @@ def series_summary(key: str, rows: list[dict[str, Any]], unit: str, stale_days: 
         "chg_7d": change(rows, 7, unit=unit),
         "chg_14d": change(rows, 14, unit=unit),
         "chg_30d": change(rows, 30, unit=unit),
-        "week_avg_abs_vol": week_average_abs_vol(rows, unit=unit),
+        "week_avg_abs_vol": average_abs_vol(rows, unit=unit, periods=7),
+        "avg_abs_vol": volatility_windows(rows, unit=unit),
     }
 
 
@@ -651,15 +659,24 @@ def asset_class_vol(country_rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
     result = {}
     for key, (label, fields, unit) in groups.items():
-        values = []
         fields_tuple = fields if isinstance(fields, tuple) else (fields,)
-        for row in country_rows:
-            for field in fields_tuple:
-                summary = row[field]["summary"]
-                value = summary.get("week_avg_abs_vol")
-                if value is not None and not summary.get("stale"):
-                    values.append(value)
-        result[key] = {"label": label, "unit": unit, "value": statistics.mean(values) if values else None, "count": len(values)}
+        windows = {}
+        for period in ["7D", "30D"]:
+            values = []
+            for row in country_rows:
+                for field in fields_tuple:
+                    summary = row[field]["summary"]
+                    value = (summary.get("avg_abs_vol") or {}).get(period)
+                    if value is not None and not summary.get("stale"):
+                        values.append(value)
+            windows[period] = {"value": statistics.mean(values) if values else None, "count": len(values)}
+        result[key] = {
+            "label": label,
+            "unit": unit,
+            "value": windows["7D"]["value"],
+            "count": windows["7D"]["count"],
+            "windows": windows,
+        }
     return result
 
 
@@ -877,10 +894,18 @@ def render_html(snapshot: dict[str, Any]) -> str:
     for key in ["equity", "bond", "fx"]:
         item = vol[key]
         unit_label = "bp/日" if item["unit"] == "bp" else "%/日"
-        value = "缺失" if item["value"] is None else f'{item["value"]:.2f}{unit_label}'
+        windows = item.get("windows", {})
+        period_rows = []
+        for period in ["7D", "30D"]:
+            window = windows.get(period, {})
+            value = "缺失" if window.get("value") is None else f'{window["value"]:.2f}{unit_label}'
+            period_rows.append(
+                f'<div class="vol-window"><span>{escape(period)}</span>'
+                f'<strong>{escape(value)}</strong><em>样本 {window.get("count", 0)}</em></div>'
+            )
         html.append(
-            f'<div class="metric"><div class="metric-label">{escape(item["label"])}近一周平均波动率</div>'
-            f'<div class="metric-value">{escape(value)}</div><div class="metric-foot">样本数 {item["count"]}</div></div>'
+            f'<div class="metric"><div class="metric-label">{escape(item["label"])}平均日波动率</div>'
+            f'<div class="metric-windows">{"".join(period_rows)}</div></div>'
         )
     html.extend(["</section>"])
 
@@ -1029,6 +1054,11 @@ h3 { margin: 0 0 10px; font-size: 15px; letter-spacing: 0; }
 .metric-label { color: var(--muted); font-size: 13px; }
 .metric-value { font-size: 26px; font-weight: 750; margin-top: 4px; }
 .metric-foot { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.metric-windows { display: grid; gap: 8px; margin-top: 10px; }
+.vol-window { display: grid; grid-template-columns: 42px minmax(0, 1fr) 72px; align-items: baseline; gap: 10px; }
+.vol-window span { color: var(--muted); font-size: 12px; font-weight: 700; }
+.vol-window strong { font-size: 23px; line-height: 1.05; }
+.vol-window em { color: var(--muted); font-size: 11px; font-style: normal; text-align: right; }
 .panel { padding: 16px; margin-top: 14px; }
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; }
