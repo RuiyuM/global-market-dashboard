@@ -18,10 +18,12 @@ if command -v apt-get >/dev/null 2>&1; then
   DEBIAN_FRONTEND=noninteractive apt-get install -y git python3 curl nginx ca-certificates
   NGINX_SITE_TARGET="/etc/nginx/sites-available/global-market-dashboard"
 elif command -v dnf >/dev/null 2>&1; then
-  dnf install -y git python3 curl nginx ca-certificates
+  dnf install -y git python3 curl ca-certificates
+  dnf install -y nginx || dnf install -y --disableexcludes=all nginx
   NGINX_SITE_TARGET="/etc/nginx/conf.d/global-market-dashboard.conf"
 elif command -v yum >/dev/null 2>&1; then
-  yum install -y git python3 curl nginx ca-certificates
+  yum install -y git python3 curl ca-certificates
+  yum install -y nginx || yum install -y --disableexcludes=all nginx
   NGINX_SITE_TARGET="/etc/nginx/conf.d/global-market-dashboard.conf"
 else
   echo "This installer supports Debian/Ubuntu apt, OpenCloudOS/CentOS/RHEL dnf, or yum systems." >&2
@@ -56,6 +58,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+TimeoutStartSec=600
 User=${SERVICE_USER}
 Group=${SERVICE_USER}
 WorkingDirectory=${APP_DIR}
@@ -95,11 +98,15 @@ if [[ -d /etc/nginx/sites-enabled ]]; then
   rm -f /etc/nginx/sites-enabled/default
   ln -sf "${NGINX_SITE_TARGET}" /etc/nginx/sites-enabled/global-market-dashboard
 fi
+rm -f /etc/nginx/conf.d/default.conf
 
 systemctl daemon-reload
 systemctl enable --now nginx
 systemctl enable --now global-market-dashboard-update.timer
 systemctl start global-market-dashboard-update.service
+if command -v chcon >/dev/null 2>&1; then
+  chcon -R -t httpd_sys_content_t "${APP_DIR}/dashboard" || true
+fi
 nginx -t
 systemctl reload nginx
 
