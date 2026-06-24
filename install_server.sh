@@ -4,7 +4,16 @@ set -euo pipefail
 REPO_URL="${REPO_URL:-https://github.com/RuiyuM/global-market-dashboard.git}"
 APP_DIR="${APP_DIR:-/opt/global-market-dashboard}"
 SERVICE_USER="${SERVICE_USER:-globaldash}"
-UPDATE_TIME="${UPDATE_TIME:-07:30:00}"
+UPDATE_TIME="${UPDATE_TIME:-}"
+UPDATE_CALENDAR="${UPDATE_CALENDAR:-}"
+
+if [[ -z "${UPDATE_CALENDAR}" ]]; then
+  if [[ -n "${UPDATE_TIME}" ]]; then
+    UPDATE_CALENDAR="*-*-* ${UPDATE_TIME}"
+  else
+    UPDATE_CALENDAR="Mon..Fri *-*-* 17:30:00 America/New_York"
+  fi
+fi
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "Run as root: curl -fsSL ... | sudo bash" >&2
@@ -71,7 +80,7 @@ cat >/etc/systemd/system/global-market-dashboard-update.timer <<EOF
 Description=Daily Global Market Dashboard update
 
 [Timer]
-OnCalendar=*-*-* ${UPDATE_TIME}
+OnCalendar=${UPDATE_CALENDAR}
 Persistent=true
 Unit=global-market-dashboard-update.service
 
