@@ -1162,6 +1162,24 @@ def build_hike_cycle_example(series: dict[str, list[dict[str, Any]]]) -> dict[st
             "chart_start": "2020-07-01",
             "chart_end": "2021-03-31",
             "chart_points": paired_yield_points(us2, us10, date(2020, 7, 1), date(2021, 3, 31)),
+            "focus_charts": [
+                {
+                    "label": "10Y：2020-07 到 2021-03",
+                    "line": "10Y",
+                    "asset": "us10y",
+                    "start": "2020-07-01",
+                    "end": "2021-03-31",
+                    "points": single_yield_points(us10, date(2020, 7, 1), date(2021, 3, 31)),
+                },
+                {
+                    "label": "2Y：2020-07 到 2021-03",
+                    "line": "2Y",
+                    "asset": "us2y",
+                    "start": "2020-07-01",
+                    "end": "2021-03-31",
+                    "points": single_yield_points(us2, date(2020, 7, 1), date(2021, 3, 31)),
+                },
+            ],
         },
         {
             "title": "2. 长短端共同回落",
@@ -1202,15 +1220,21 @@ def build_hike_cycle_example(series: dict[str, list[dict[str, Any]]]) -> dict[st
             "chart_start": "2021-08-01",
             "chart_end": "2022-02-28",
             "chart_points": paired_yield_points(us2, us10, date(2021, 8, 1), date(2022, 2, 28)),
-            "include_default_chart": True,
             "focus_charts": [
                 {
-                    "label": "2Y：2021-08 到 2022-02（2021-08=100）",
+                    "label": "10Y：2021-08 到 2022-02",
+                    "line": "10Y",
+                    "asset": "us10y",
+                    "start": "2021-08-02",
+                    "end": "2022-02-28",
+                    "points": single_yield_points(us10, date(2021, 8, 2), date(2022, 2, 28)),
+                },
+                {
+                    "label": "2Y：2021-08 到 2022-02",
                     "line": "2Y",
                     "asset": "us2y",
                     "start": "2021-08-02",
                     "end": "2022-02-28",
-                    "mode": "index",
                     "points": single_yield_points(us2, date(2021, 8, 2), date(2022, 2, 28)),
                 },
             ],
@@ -1225,6 +1249,24 @@ def build_hike_cycle_example(series: dict[str, list[dict[str, Any]]]) -> dict[st
             "chart_start": "2022-02-28",
             "chart_end": "2022-06-14",
             "chart_points": paired_yield_points(us2, us10, date(2022, 2, 28), date(2022, 6, 14)),
+            "focus_charts": [
+                {
+                    "label": "10Y：2022-02 到 2022-06",
+                    "line": "10Y",
+                    "asset": "us10y",
+                    "start": "2022-02-28",
+                    "end": "2022-06-14",
+                    "points": single_yield_points(us10, date(2022, 2, 28), date(2022, 6, 14)),
+                },
+                {
+                    "label": "2Y：2022-02 到 2022-06",
+                    "line": "2Y",
+                    "asset": "us2y",
+                    "start": "2022-02-28",
+                    "end": "2022-06-14",
+                    "points": single_yield_points(us2, date(2022, 2, 28), date(2022, 6, 14)),
+                },
+            ],
         },
     ]
 

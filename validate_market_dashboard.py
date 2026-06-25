@@ -293,15 +293,24 @@ def main() -> int:
     if hike_phase_count != 4:
         errors.append(f"hike phase count mismatch: {hike_phase_count}")
     hike_phase_chart_count = html.count('class="hike-phase-chart"')
-    if hike_phase_chart_count != 6:
+    if hike_phase_chart_count != 8:
         errors.append(f"hike phase chart count mismatch: {hike_phase_chart_count}")
-    if "阶段收益率走势" not in html:
-        errors.append("missing hike phase yield chart label")
-    for marker in ["10Y：2021-01 到 2021-07", "2Y：2021-06 到 2021-08", "2Y：2021-08 到 2022-02（2021-08=100）"]:
+    for marker in [
+        "10Y：2020-07 到 2021-03",
+        "2Y：2020-07 到 2021-03",
+        "10Y：2021-01 到 2021-07",
+        "2Y：2021-06 到 2021-08",
+        "10Y：2021-08 到 2022-02",
+        "2Y：2021-08 到 2022-02",
+        "10Y：2022-02 到 2022-06",
+        "2Y：2022-02 到 2022-06",
+    ]:
         if marker not in html:
-            errors.append(f"missing second phase focused chart marker: {marker}")
+            errors.append(f"missing hike focused chart marker: {marker}")
+    if "2021-08=100" in html:
+        errors.append("hike phase charts should not render indexed changes")
     hike_chart_label_count = html.count('class="hike-chart-label"')
-    if hike_chart_label_count < 6:
+    if hike_chart_label_count < 8:
         errors.append(f"hike chart label count mismatch: {hike_chart_label_count}")
     if 'class="hike-overview-legend"' not in html:
         errors.append("missing external hike overview legend")
