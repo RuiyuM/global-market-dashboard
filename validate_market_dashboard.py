@@ -234,13 +234,15 @@ def main() -> int:
         errors.append(f"flow route expand button count mismatch: {flow_expand_count}")
     for marker in [
         'id="fx-flow-data"',
-        'id="flow-detail" class="flow-detail" hidden',
-        'id="flow-detail-body"',
         ".flow-routes[hidden]",
+        ".flow-route-detail",
+        ".flow-route-detail[hidden]",
         ".flow-calc-more[hidden]",
         "toggleFlowRoutes",
         "toggleFlowCalculation",
         "renderFlowDetail",
+        "createFlowDetail",
+        'insertAdjacentElement("afterend", flowDetail)',
         "directTerm",
         "new / old",
         "ln(new / old)",
@@ -252,6 +254,8 @@ def main() -> int:
             errors.append(f"missing FX flow detail marker: {marker}")
     if "flowDetail?.scrollIntoView" in html:
         errors.append("FX flow detail should expand in place without auto scrolling")
+    if 'id="flow-detail"' in html or 'id="flow-detail-body"' in html:
+        errors.append("FX flow detail should be inserted under the clicked route, not rendered as a global panel")
 
     notes = "\n".join(snapshot.get("notes", []))
     if "derived = 本地公式" not in notes:

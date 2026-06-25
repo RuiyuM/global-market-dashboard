@@ -1350,10 +1350,6 @@ def render_html(snapshot: dict[str, Any]) -> str:
     html.extend(
         [
             "</div>",
-            '<div id="flow-detail" class="flow-detail" hidden>',
-            "<h3>资金流向推导详情</h3>",
-            '<div id="flow-detail-body" class="muted">点击任意资金兑换路线，查看 Q 值、反向规则和 score = Q(XY) + Q(YZ) 的逐步拆解。</div>',
-            "</div>",
             "</section>",
         ]
     )
@@ -1541,12 +1537,16 @@ th:first-child, td:first-child { text-align: left; }
 .flow-route.selected { border-color: var(--blue); background: #eaf2ff; }
 .flow-route span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .route-status { color: var(--muted); font-size: 11px; }
-.flow-detail {
-  margin-top: 14px;
-  border-top: 1px solid var(--line);
-  padding-top: 14px;
+.flow-route-detail {
+  margin: 2px 0 8px;
+  border: 1px solid #c8d4e2;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 10px;
 }
+.flow-route-detail[hidden] { display: none; }
 .flow-detail-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 12px; }
+.flow-route-detail .flow-detail-grid { grid-template-columns: 1fr; }
 .flow-detail-card { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 12px; }
 .flow-detail-card h4 { margin: 0 0 8px; font-size: 13px; letter-spacing: 0; }
 .flow-detail-card p { margin: 5px 0; }
@@ -1592,8 +1592,7 @@ JS = """
   const countryToggles = Array.from(document.querySelectorAll(".country-toggle"));
   const flowExpandButtons = Array.from(document.querySelectorAll(".flow-expand"));
   const flowRoutes = Array.from(document.querySelectorAll(".flow-route"));
-  const flowDetail = document.getElementById("flow-detail");
-  const flowDetailBody = document.getElementById("flow-detail-body");
+  let activeFlowDetail = null;
   const defaultOhlcKey = "US_10Y";
   const head = document.getElementById("ohlc-head");
   const svg = document.getElementById("ohlc-chart");
@@ -1716,6 +1715,16 @@ JS = """
       + `</div>`;
   };
 
+  const createFlowDetail = () => {
+    const detail = document.createElement("div");
+    detail.className = "flow-route-detail";
+    detail.hidden = true;
+    const body = document.createElement("div");
+    body.className = "flow-detail-body";
+    detail.appendChild(body);
+    return detail;
+  };
+
   const toggleFlowCalculation = (button) => {
     const target = button.nextElementSibling;
     if (!target || !target.classList.contains("flow-calc-more")) return;
@@ -1725,11 +1734,18 @@ JS = """
     button.textContent = nextExpanded ? "收起数字计算" : "展开数字计算";
   };
 
-  const renderFlowDetail = (sectionIndex, periodIndex, routeIndex) => {
+  const renderFlowDetail = (sectionIndex, periodIndex, routeIndex, routeButton) => {
     const section = flowData[Number(sectionIndex)];
     const period = section?.periods?.[Number(periodIndex)];
     const route = period?.result?.routes?.[Number(routeIndex)];
-    if (!section || !period || !route || !flowDetailBody) return;
+    const selectedButton = routeButton || document.querySelector(
+      `.flow-route[data-flow-section="${sectionIndex}"][data-flow-period="${periodIndex}"][data-flow-route="${routeIndex}"]`
+    );
+    if (!section || !period || !route || !selectedButton) return;
+    const flowDetail = activeFlowDetail || createFlowDetail();
+    activeFlowDetail = flowDetail;
+    const flowDetailBody = flowDetail.querySelector(".flow-detail-body");
+    if (!flowDetailBody) return;
     const first = directTerm(period, route.x, route.y);
     const second = directTerm(period, route.y, route.z);
     const computed = (first?.value || 0) + (second?.value || 0);
@@ -1751,7 +1767,8 @@ JS = """
     });
 
     flowDetailBody.classList.remove("muted");
-    if (flowDetail) flowDetail.hidden = false;
+    selectedButton.insertAdjacentElement("afterend", flowDetail);
+    flowDetail.hidden = false;
     flowDetailBody.innerHTML = `<div class="flow-detail-grid">`
       + `<div class="flow-detail-card">`
       + `<h4>${esc(section.name)}｜${esc(period.period)}｜${esc(route.label)}</h4>`
@@ -2078,7 +2095,7 @@ JS = """
 
   flowRoutes.forEach((button) => {
     button.addEventListener("click", () => {
-      renderFlowDetail(button.dataset.flowSection, button.dataset.flowPeriod, button.dataset.flowRoute);
+      renderFlowDetail(button.dataset.flowSection, button.dataset.flowPeriod, button.dataset.flowRoute, button);
     });
   });
 
