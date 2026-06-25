@@ -218,6 +218,24 @@ def main() -> int:
                 errors.append(f"{section['name']} {period['period']} missing best route: {period.get('missing')}")
             if result.get("source_code") != USER_FX_FLOW_CODE:
                 errors.append(f"{section['name']} {period['period']} not using user FX flow code")
+            routes = result.get("routes", [])
+            if routes and len(routes) != 6:
+                errors.append(f"{section['name']} {period['period']} route count mismatch: {len(routes)}")
+    expected_flow_routes = len(FLOWS) * len(PERIODS) * 6
+    flow_route_count = html.count('class="flow-route"')
+    if flow_route_count != expected_flow_routes:
+        errors.append(f"flow route button count mismatch: {flow_route_count}")
+    for marker in [
+        'id="fx-flow-data"',
+        'id="flow-detail"',
+        'id="flow-detail-body"',
+        "renderFlowDetail",
+        "directTerm",
+        "Q(",
+        "score =",
+    ]:
+        if marker not in html:
+            errors.append(f"missing FX flow detail marker: {marker}")
 
     notes = "\n".join(snapshot.get("notes", []))
     if "derived = 本地公式" not in notes:

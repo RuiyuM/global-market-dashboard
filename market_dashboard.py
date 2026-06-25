@@ -1155,6 +1155,7 @@ def render_html(snapshot: dict[str, Any]) -> str:
     countries = snapshot["countries"]
     rankings = snapshot["volatility_rankings"]
     second_order = snapshot["second_order_monitor"]
+    flow_json = json.dumps(snapshot["fx_flows"], ensure_ascii=False).replace("</", "<\\/")
     ohlc_payload = {
         row["key"]: {
             "country": row["country"],
@@ -1309,10 +1310,10 @@ def render_html(snapshot: dict[str, Any]) -> str:
     html.extend(["</tbody></table></div></section>"])
 
     html.extend(['<section class="panel">', "<h2>三币种资金流向</h2>", '<div class="flow-grid">'])
-    for section in snapshot["fx_flows"]:
+    for section_index, section in enumerate(snapshot["fx_flows"]):
         html.append('<div class="flow-block">')
         html.append(f'<h3>{escape(section["name"])}</h3>')
-        for period in section["periods"]:
+        for period_index, period in enumerate(section["periods"]):
             html.append('<div class="flow-row">')
             html.append(f'<div class="period">{escape(period["period"])}</div>')
             result = period["result"]
@@ -1320,15 +1321,38 @@ def render_html(snapshot: dict[str, Any]) -> str:
                 best = result["best_route"]
                 ranking = " > ".join(result["ranking"])
                 html.append(
+                    '<div class="flow-cell">'
                     f'<div><strong>{escape(best["label"])}</strong> '
-                    f'<span class="pos">{best["score"]:+.4f}</span>'
-                    f'<div class="muted">强弱：{escape(ranking)}</div></div>'
+                    f'<span class="pos">{best["score"]:+.4f}</span></div>'
+                    f'<div class="muted">强弱：{escape(ranking)}</div>'
+                    '<div class="flow-routes">'
                 )
+                for route_index, route in enumerate(result["routes"]):
+                    score_cls = "pos" if route["score"] >= 0 else "neg"
+                    status = "成立" if route["score"] > 0 else "不成立" if route["score"] < 0 else "临界"
+                    html.append(
+                        f'<button type="button" class="flow-route" data-flow-section="{section_index}" '
+                        f'data-flow-period="{period_index}" data-flow-route="{route_index}">'
+                        f'<span>{escape(route["label"])}</span>'
+                        f'<span class="{score_cls}">{route["score"]:+.4f}</span>'
+                        f'<span class="route-status">{escape(status)}</span>'
+                        "</button>"
+                    )
+                html.append("</div></div>")
             else:
                 html.append(f'<div class="muted">缺少：{escape(", ".join(period["missing"]))}</div>')
             html.append("</div>")
         html.append("</div>")
-    html.extend(["</div></section>"])
+    html.extend(
+        [
+            "</div>",
+            '<div id="flow-detail" class="flow-detail">',
+            "<h3>资金流向推导详情</h3>",
+            '<div id="flow-detail-body" class="muted">点击任意资金兑换路线，查看 Q 值、反向规则和 score = Q(XY) + Q(YZ) 的逐步拆解。</div>',
+            "</div>",
+            "</section>",
+        ]
+    )
 
     html.extend(['<section class="panel">', "<h2>数据状态</h2>", '<div class="table-wrap">', '<table class="status-table">'])
     html.append("<thead><tr><th>Key</th><th>名称</th><th>来源</th><th>符号</th><th>最新日期</th><th>最新值</th><th>状态</th></tr></thead><tbody>")
@@ -1349,6 +1373,7 @@ def render_html(snapshot: dict[str, Any]) -> str:
         [
             "</section>",
             f'<script id="ohlc-data" type="application/json">{ohlc_json}</script>',
+            f'<script id="fx-flow-data" type="application/json">{flow_json}</script>',
             "<script>",
             JS,
             "</script>",
@@ -1473,6 +1498,41 @@ th:first-child, td:first-child { text-align: left; }
 .flow-block { padding: 12px; }
 .flow-row { display: grid; grid-template-columns: 52px 1fr; gap: 10px; border-top: 1px solid var(--line); padding: 10px 0 0; margin-top: 10px; }
 .period { color: var(--blue); font-weight: 700; }
+.flow-cell { min-width: 0; }
+.flow-routes { display: grid; gap: 5px; margin-top: 8px; }
+.flow-route {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  padding: 6px 8px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.flow-route:hover { border-color: #b7c2cf; background: #f8fafc; }
+.flow-route.selected { border-color: var(--blue); background: #eaf2ff; }
+.flow-route span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.route-status { color: var(--muted); font-size: 11px; }
+.flow-detail {
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+.flow-detail-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 12px; }
+.flow-detail-card { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 12px; }
+.flow-detail-card h4 { margin: 0 0 8px; font-size: 13px; letter-spacing: 0; }
+.flow-detail-card p { margin: 5px 0; }
+.flow-detail-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.flow-detail-table th, .flow-detail-table td { border-bottom: 1px solid var(--line); padding: 6px 4px; text-align: left; }
+.flow-detail-table th:last-child, .flow-detail-table td:last-child { text-align: right; }
+.formula-line { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
 .status-table th, .status-table td { text-align: left; }
 .notes { color: var(--muted); font-size: 13px; margin: 14px 0 0; }
 .notes p { margin: 4px 0; }
@@ -1480,6 +1540,7 @@ th:first-child, td:first-child { text-align: left; }
   main { padding: 14px; }
   .topbar { align-items: flex-start; flex-direction: column; }
   .ranking-grid, .flow-grid { grid-template-columns: 1fr; }
+  .flow-detail-grid { grid-template-columns: 1fr; }
   .ranking-block + .ranking-block { border-left: 0; border-top: 1px solid var(--line); padding-left: 0; padding-top: 12px; }
 }
 """
@@ -1489,8 +1550,13 @@ JS = """
 (() => {
   const raw = document.getElementById("ohlc-data")?.textContent || "{}";
   const ohlcData = JSON.parse(raw);
+  const flowRaw = document.getElementById("fx-flow-data")?.textContent || "[]";
+  const flowData = JSON.parse(flowRaw);
   const rows = Array.from(document.querySelectorAll(".derivative-row"));
   const countryToggles = Array.from(document.querySelectorAll(".country-toggle"));
+  const flowRoutes = Array.from(document.querySelectorAll(".flow-route"));
+  const flowDetail = document.getElementById("flow-detail");
+  const flowDetailBody = document.getElementById("flow-detail-body");
   const defaultOhlcKey = "US_10Y";
   const head = document.getElementById("ohlc-head");
   const svg = document.getElementById("ohlc-chart");
@@ -1522,6 +1588,111 @@ JS = """
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+
+  const signed = (value, digits = 4) => {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return "缺失";
+    return `${number >= 0 ? "+" : ""}${number.toFixed(digits)}`;
+  };
+
+  const qName = (base, quote) => `Q(${base}${quote})`;
+
+  const flowDirectRows = (period) => {
+    const result = period?.result || {};
+    return (result.direct_rows || []).map((row, index) => ({
+      ...row,
+      sourceKey: period.changes?.[index]?.source_key || "",
+      baseDate: period.changes?.[index]?.base_date || "",
+      latestDate: period.changes?.[index]?.latest_date || ""
+    }));
+  };
+
+  const directTerm = (period, base, quote) => {
+    const rows = flowDirectRows(period);
+    const direct = rows.find((row) => row.base === base && row.quote === quote);
+    if (direct) {
+      return {
+        base,
+        quote,
+        value: Number(direct.q),
+        direct,
+        reversed: false,
+        expression: qName(base, quote)
+      };
+    }
+    const reverse = rows.find((row) => row.base === quote && row.quote === base);
+    if (reverse) {
+      return {
+        base,
+        quote,
+        value: -Number(reverse.q),
+        direct: reverse,
+        reversed: true,
+        expression: `-${qName(reverse.base, reverse.quote)}`
+      };
+    }
+    return null;
+  };
+
+  const renderTerm = (term) => {
+    if (!term) return '<p class="muted">缺少这一段直接或反向报价。</p>';
+    const row = term.direct;
+    const rule = term.reversed
+      ? `${qName(term.base, term.quote)} = -${qName(row.base, row.quote)} = ${signed(term.value)}`
+      : `${qName(term.base, term.quote)} = 100 * ln(${fmt(row.new)} / ${fmt(row.old)}) = ${signed(term.value)}`;
+    return `<p class="formula-line">${esc(rule)}</p>`
+      + `<p class="muted">${esc(row.sourceKey)}：${esc(row.baseDate)} ${fmt(row.old)} -> ${esc(row.latestDate)} ${fmt(row.new)}</p>`;
+  };
+
+  const renderFlowDetail = (sectionIndex, periodIndex, routeIndex) => {
+    const section = flowData[Number(sectionIndex)];
+    const period = section?.periods?.[Number(periodIndex)];
+    const route = period?.result?.routes?.[Number(routeIndex)];
+    if (!section || !period || !route || !flowDetailBody) return;
+    const first = directTerm(period, route.x, route.y);
+    const second = directTerm(period, route.y, route.z);
+    const computed = (first?.value || 0) + (second?.value || 0);
+    const ranking = (period.result?.routes || [])
+      .map((item) => `<tr><td>${esc(item.label)}</td><td class="${item.score >= 0 ? "pos" : "neg"}">${signed(item.score)}</td><td>${esc(item.status)}</td></tr>`)
+      .join("");
+    const directRows = flowDirectRows(period)
+      .map((row) => `<tr><td>${esc(row.base)}兑${esc(row.quote)}</td><td>${fmt(row.old)}</td><td>${fmt(row.new)}</td><td class="${row.q >= 0 ? "pos" : "neg"}">${signed(row.q)}</td></tr>`)
+      .join("");
+    const residuals = (period.result?.triangle_residuals || [])
+      .map((item) => `<p class="formula-line">${esc(item.formula)} = ${signed(item.residual)} · ${esc(item.status)}</p>`)
+      .join("") || '<p class="muted">无闭环残差。</p>';
+
+    flowRoutes.forEach((button) => {
+      const selected = button.dataset.flowSection === String(sectionIndex)
+        && button.dataset.flowPeriod === String(periodIndex)
+        && button.dataset.flowRoute === String(routeIndex);
+      button.classList.toggle("selected", selected);
+    });
+
+    flowDetailBody.classList.remove("muted");
+    flowDetailBody.innerHTML = `<div class="flow-detail-grid">`
+      + `<div class="flow-detail-card">`
+      + `<h4>${esc(section.name)}｜${esc(period.period)}｜${esc(route.label)}</h4>`
+      + `<p class="formula-line">score = ${qName(route.x, route.y)} + ${qName(route.y, route.z)}</p>`
+      + renderTerm(first)
+      + renderTerm(second)
+      + `<p class="formula-line">score = ${signed(first?.value || 0)} + ${signed(second?.value || 0)} = <strong class="${computed >= 0 ? "pos" : "neg"}">${signed(computed)}</strong></p>`
+      + `<p>判定：<strong>${esc(route.status)}</strong>。score &gt; 0 为成立，score &lt; 0 为不成立。</p>`
+      + `</div>`
+      + `<div class="flow-detail-card">`
+      + `<h4>原始 Q 值</h4>`
+      + `<table class="flow-detail-table"><thead><tr><th>货币对</th><th>old</th><th>new</th><th>Q</th></tr></thead><tbody>${directRows}</tbody></table>`
+      + `</div>`
+      + `<div class="flow-detail-card">`
+      + `<h4>同组路线排序</h4>`
+      + `<table class="flow-detail-table"><thead><tr><th>路线</th><th>score</th><th>状态</th></tr></thead><tbody>${ranking}</tbody></table>`
+      + `</div>`
+      + `<div class="flow-detail-card">`
+      + `<h4>三角闭环检查</h4>${residuals}`
+      + `</div>`
+      + `</div>`;
+    flowDetail?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   const yTicks = (min, max, count = 5) => {
     if (min === max) return [min];
@@ -1801,6 +1972,12 @@ JS = """
 
   rows.forEach((row) => {
     row.addEventListener("click", () => render(row.dataset.ohlcKey));
+  });
+
+  flowRoutes.forEach((button) => {
+    button.addEventListener("click", () => {
+      renderFlowDetail(button.dataset.flowSection, button.dataset.flowPeriod, button.dataset.flowRoute);
+    });
   });
 
   const toggleCountryRows = (button) => {
