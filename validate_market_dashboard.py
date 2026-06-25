@@ -272,6 +272,10 @@ def main() -> int:
     hedge_case_count = html.count('class="hedge-case"')
     if hedge_case_count != 8:
         errors.append(f"hedge case count mismatch: {hedge_case_count}")
+    hedge_index = html.find('class="panel hedge-cycle-panel"')
+    status_index = html.find("<h2>数据状态</h2>")
+    if hedge_index < 0 or status_index < 0 or hedge_index > status_index:
+        errors.append("hedge cycle panel should render before data status")
 
     notes = "\n".join(snapshot.get("notes", []))
     if "derived = 本地公式" not in notes:

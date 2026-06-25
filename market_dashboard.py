@@ -1354,23 +1354,6 @@ def render_html(snapshot: dict[str, Any]) -> str:
         ]
     )
 
-    html.extend(['<section class="panel">', "<h2>数据状态</h2>", '<div class="table-wrap">', '<table class="status-table">'])
-    html.append("<thead><tr><th>Key</th><th>名称</th><th>来源</th><th>符号</th><th>最新日期</th><th>最新值</th><th>状态</th></tr></thead><tbody>")
-    for item in snapshot["series_status"]:
-        status = '<span class="tag warn">旧/缺</span>' if item["stale"] else '<span class="tag ok">OK</span>'
-        html.append(
-            "<tr>"
-            f'<td>{escape(item["key"])}</td><td>{escape(item["label"])}</td><td>{escape(item["source"])}</td>'
-            f'<td>{escape(item["symbol"])}</td><td>{escape(item["latest_date"])}</td>'
-            f'<td>{escape(fmt_value(item["latest"], 5))}</td><td>{status}</td></tr>'
-        )
-    html.extend(["</tbody></table></div></section>"])
-
-    html.extend(['<section class="notes">'])
-    for note in snapshot["notes"]:
-        html.append(f"<p>{escape(note)}</p>")
-    html.append("</section>")
-
     hedge_cycles = [
         (
             "降息周期",
@@ -1406,6 +1389,23 @@ def render_html(snapshot: dict[str, Any]) -> str:
             )
         html.append("</div></div>")
     html.append('<p class="hedge-footnote">前两种偏缩，后两种偏扩；第一次加息常见长短债交叉。</p>')
+    html.append("</section>")
+
+    html.extend(['<section class="panel">', "<h2>数据状态</h2>", '<div class="table-wrap">', '<table class="status-table">'])
+    html.append("<thead><tr><th>Key</th><th>名称</th><th>来源</th><th>符号</th><th>最新日期</th><th>最新值</th><th>状态</th></tr></thead><tbody>")
+    for item in snapshot["series_status"]:
+        status = '<span class="tag warn">旧/缺</span>' if item["stale"] else '<span class="tag ok">OK</span>'
+        html.append(
+            "<tr>"
+            f'<td>{escape(item["key"])}</td><td>{escape(item["label"])}</td><td>{escape(item["source"])}</td>'
+            f'<td>{escape(item["symbol"])}</td><td>{escape(item["latest_date"])}</td>'
+            f'<td>{escape(fmt_value(item["latest"], 5))}</td><td>{status}</td></tr>'
+        )
+    html.extend(["</tbody></table></div></section>"])
+
+    html.extend(['<section class="notes">'])
+    for note in snapshot["notes"]:
+        html.append(f"<p>{escape(note)}</p>")
     html.append("</section>")
 
     html.extend(
