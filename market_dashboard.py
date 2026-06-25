@@ -1369,9 +1369,47 @@ def render_html(snapshot: dict[str, Any]) -> str:
     html.extend(['<section class="notes">'])
     for note in snapshot["notes"]:
         html.append(f"<p>{escape(note)}</p>")
+    html.append("</section>")
+
+    hedge_cycles = [
+        (
+            "降息周期",
+            [
+                ("第一种", "降息卖短买长", "短债收益率走高，长债收益率走低，交易降息预期。", "短高长低"),
+                ("第二种", "扩表卖长债", "长债收益率走高，长短债收益率都走高。", "短高长高"),
+                ("第三种", "继续扩表卖长债", "当长短债同幅高位，市场会优先买较高收益率短债。", "短低长高"),
+                ("第四种", "停止卖出", "降息中不降息，自然压低债券收益率，阶段性扩表完成。", "短低长低"),
+            ],
+        ),
+        (
+            "加息周期",
+            [
+                ("第一种", "短端低，长端高", "长端仍反映期限溢价或供给压力，曲线偏陡。", "短低长高"),
+                ("第二种", "短端低，长端低", "长短端同步低位，政策和增长预期都偏弱。", "短低长低"),
+                ("第三种", "短端高，长端低", "第一次加息常见长短债交叉，短端更快交易政策利率。", "短高长低"),
+                ("第四种", "短端高，长端高", "长短端同步高位，市场同时定价加息和期限压力。", "短高长高"),
+            ],
+        ),
+    ]
+    html.extend(['<section class="panel hedge-cycle-panel">', "<h2>长短债 8 种对冲</h2>"])
+    for cycle_title, cases in hedge_cycles:
+        html.append('<div class="hedge-cycle-block">')
+        html.append(f"<h3>{escape(cycle_title)}</h3>")
+        html.append('<div class="hedge-case-grid">')
+        for index, action, detail, state in cases:
+            html.append(
+                '<div class="hedge-case">'
+                f'<div><strong>{escape(index)}</strong><span>{escape(action)}</span></div>'
+                f'<p>{escape(detail)}</p>'
+                f'<b>{escape(state)}</b>'
+                "</div>"
+            )
+        html.append("</div></div>")
+    html.append('<p class="hedge-footnote">前两种偏缩，后两种偏扩；第一次加息常见长短债交叉。</p>')
+    html.append("</section>")
+
     html.extend(
         [
-            "</section>",
             f'<script id="ohlc-data" type="application/json">{ohlc_json}</script>',
             f'<script id="fx-flow-data" type="application/json">{flow_json}</script>',
             "<script>",
@@ -1572,11 +1610,30 @@ th:first-child, td:first-child { text-align: left; }
 .status-table th, .status-table td { text-align: left; }
 .notes { color: var(--muted); font-size: 13px; margin: 14px 0 0; }
 .notes p { margin: 4px 0; }
+.hedge-cycle-panel h2 { margin-bottom: 12px; }
+.hedge-cycle-block + .hedge-cycle-block { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.hedge-cycle-block h3 { margin: 0 0 10px; font-size: 15px; letter-spacing: 0; }
+.hedge-case-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.hedge-case {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px;
+  display: grid;
+  gap: 6px;
+}
+.hedge-case div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.hedge-case strong { color: var(--blue); white-space: nowrap; }
+.hedge-case span { font-weight: 700; text-align: right; }
+.hedge-case p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.hedge-case b { justify-self: start; color: var(--ink); background: #eef2f7; border-radius: 6px; padding: 3px 7px; font-size: 12px; }
+.hedge-footnote { margin: 12px 0 0; color: var(--muted); font-size: 12px; }
 @media (max-width: 900px) {
   main { padding: 14px; }
   .topbar { align-items: flex-start; flex-direction: column; }
   .ranking-grid, .flow-grid { grid-template-columns: 1fr; }
   .flow-detail-grid { grid-template-columns: 1fr; }
+  .hedge-case-grid { grid-template-columns: 1fr; }
   .ranking-block + .ranking-block { border-left: 0; border-top: 1px solid var(--line); padding-left: 0; padding-top: 12px; }
 }
 """

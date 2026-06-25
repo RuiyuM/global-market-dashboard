@@ -258,6 +258,20 @@ def main() -> int:
         errors.append("FX flow detail should expand in place without auto scrolling")
     if 'id="flow-detail"' in html or 'id="flow-detail-body"' in html:
         errors.append("FX flow detail should be inserted under the clicked route, not rendered as a global panel")
+    hedge_markers = [
+        'class="panel hedge-cycle-panel"',
+        "长短债 8 种对冲",
+        "降息周期",
+        "加息周期",
+        "前两种偏缩，后两种偏扩",
+        "第一次加息常见长短债交叉",
+    ]
+    for marker in hedge_markers:
+        if marker not in html:
+            errors.append(f"missing hedge cycle marker: {marker}")
+    hedge_case_count = html.count('class="hedge-case"')
+    if hedge_case_count != 8:
+        errors.append(f"hedge case count mismatch: {hedge_case_count}")
 
     notes = "\n".join(snapshot.get("notes", []))
     if "derived = 本地公式" not in notes:
