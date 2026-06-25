@@ -1520,6 +1520,7 @@ th:first-child, td:first-child { text-align: left; }
 }
 .flow-expand:hover { background: #f8fafc; border-color: #b7c2cf; }
 .flow-routes { display: grid; gap: 5px; margin-top: 8px; }
+.flow-routes[hidden] { display: none; }
 .flow-route {
   width: 100%;
   display: grid;

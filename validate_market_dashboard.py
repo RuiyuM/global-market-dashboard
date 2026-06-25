@@ -236,6 +236,7 @@ def main() -> int:
         'id="fx-flow-data"',
         'id="flow-detail" class="flow-detail" hidden',
         'id="flow-detail-body"',
+        ".flow-routes[hidden]",
         "toggleFlowRoutes",
         "renderFlowDetail",
         "directTerm",
