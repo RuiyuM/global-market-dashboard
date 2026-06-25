@@ -52,8 +52,10 @@ class SeriesSpec:
 
 
 WSCN_SPECS = [
+    SeriesSpec("US_1Y", "美国1年国债", "bond", "wscn", "US1YR.OTC", "US_1Y.csv", "US1YR_OTC_1D_ohlc.csv"),
     SeriesSpec("US_2Y", "美国2年国债", "bond", "wscn", "US2YR.OTC", "US_2Y.csv", "US2YR_OTC_1D_ohlc.csv"),
     SeriesSpec("US_10Y", "美国10年国债", "bond", "wscn", "US10YR.OTC", "US_10Y.csv", "US10YR_OTC_1D_ohlc.csv"),
+    SeriesSpec("CN_1Y", "中国1年国债", "bond", "wscn", "CN1YR.OTC", "CN_1Y.csv", "CN1YR_OTC_1D_ohlc.csv"),
     SeriesSpec("CN_2Y", "中国2年国债", "bond", "wscn", "CN2YR.OTC", "CN_2Y.csv", "CN2YR_OTC_1D_ohlc.csv"),
     SeriesSpec("CN_10Y", "中国10年国债", "bond", "wscn", "CN10YR.OTC", "CN_10Y.csv", "CN10YR_OTC_1D_ohlc.csv"),
     SeriesSpec("USDCNY", "美元/人民币", "fx", "wscn", "USDCNY.OTC", "USDCNY.csv", "USDCNY_OTC_1D_ohlc.csv"),
@@ -68,6 +70,10 @@ WSCN_SPECS = [
 
 
 INVESTING_SPECS: list[tuple[SeriesSpec, InvestingSpec]] = [
+    (
+        SeriesSpec("JP_1Y", "日本1年国债", "bond", "investing", "JP1YT=XX", "JP_1Y.csv", "JP1YR_INVESTING_1D_ohlc.csv"),
+        InvestingSpec("JP1Y", "23892", "JP1YT=XX", "japan-1-year-bond-yield-historical-data", "Japan 1-Year Bond Yield Historical Data", "JP1YR_INVESTING_1D_ohlc.csv"),
+    ),
     (
         SeriesSpec("JP_2Y", "日本2年国债", "bond", "investing", "JP2YT=XX", "JP_2Y.csv", "JP2YR_INVESTING_1D_ohlc.csv"),
         InvestingSpec("JP2Y", "23893", "JP2YT=XX", "japan-2-year-bond-yield-historical-data", "Japan 2-Year Bond Yield Historical Data", "JP2YR_INVESTING_1D_ohlc.csv"),
@@ -124,9 +130,9 @@ NIKKEI_SPECS = [
 ]
 
 COUNTRIES = [
-    {"code": "US", "name": "美国", "ccy": "USD", "bond_2y": "US_2Y", "bond_10y": "US_10Y", "equity": "US_EQUITY", "fx": "USDCNY"},
-    {"code": "CN", "name": "中国", "ccy": "CNY", "bond_2y": "CN_2Y", "bond_10y": "CN_10Y", "equity": "CN_EQUITY", "fx": "CNY_BASE"},
-    {"code": "JP", "name": "日本", "ccy": "JPY", "bond_2y": "JP_2Y", "bond_10y": "JP_10Y", "equity": "JP_EQUITY", "fx": "JPYCNY"},
+    {"code": "US", "name": "美国", "ccy": "USD", "bond_1y": "US_1Y", "bond_2y": "US_2Y", "bond_10y": "US_10Y", "equity": "US_EQUITY", "fx": "USDCNY"},
+    {"code": "CN", "name": "中国", "ccy": "CNY", "bond_1y": "CN_1Y", "bond_2y": "CN_2Y", "bond_10y": "CN_10Y", "equity": "CN_EQUITY", "fx": "CNY_BASE"},
+    {"code": "JP", "name": "日本", "ccy": "JPY", "bond_1y": "JP_1Y", "bond_2y": "JP_2Y", "bond_10y": "JP_10Y", "equity": "JP_EQUITY", "fx": "JPYCNY"},
     {"code": "DE", "name": "德国", "ccy": "EUR", "bond_2y": "DE_2Y", "bond_10y": "DE_10Y", "equity": "DE_EQUITY", "fx": "EURCNY"},
     {"code": "RU", "name": "俄罗斯", "ccy": "RUB", "bond_2y": "RU_2Y", "bond_10y": "RU_10Y", "equity": "RU_EQUITY", "fx": "RUBCNY"},
     {"code": "KR", "name": "韩国", "ccy": "KRW", "bond_2y": "KR_2Y", "bond_10y": "KR_10Y", "equity": "KR_EQUITY", "fx": "KRWCNY"},
@@ -635,13 +641,15 @@ def build_second_order_monitor(
         instruments = [
             ("股指", country["equity"], "pct"),
             ("外汇", country["fx"], "pct"),
+            *([("债券", country["bond_1y"], "bp")] if country.get("bond_1y") else []),
             ("债券", country["bond_2y"], "bp"),
             ("债券", country["bond_10y"], "bp"),
             ("债券曲线", f"{country['code']}_10Y2Y", "bp"),
         ]
         for group, key, unit in instruments:
             spec = specs.get(key)
-            metrics = {f"{days}D": derivative_metrics(series.get(key, []), days, unit=unit) for days in windows}
+            data_rows = series.get(key, [])
+            metrics = {f"{days}D": derivative_metrics(data_rows, days, unit=unit) for days in windows}
             item = {
                 "country": country["name"],
                 "code": country["code"],
@@ -650,9 +658,11 @@ def build_second_order_monitor(
                 "label": spec.label if spec else key,
                 "unit": unit,
                 "metrics": metrics,
-                "ohlc": recent_ohlc_rows(series.get(key, []), limit=360),
+                "ohlc": recent_ohlc_rows(data_rows, limit=360),
                 "chart_type": "ohlc",
             }
+            if group != "债券曲线":
+                item["summary"] = series_summary(key, data_rows, unit, stale_days=spec.stale_days if spec else 7)
             if group == "债券曲线":
                 bond_2y_spec = specs.get(country["bond_2y"])
                 bond_10y_spec = specs.get(country["bond_10y"])
@@ -1158,11 +1168,6 @@ def render_html(snapshot: dict[str, Any]) -> str:
         for row in second_order
     }
     ohlc_json = json.dumps(ohlc_payload, ensure_ascii=False).replace("</", "<\\/")
-    volatility_by_key: dict[str, tuple[dict[str, Any], str]] = {}
-    for country in countries:
-        for field, unit in [("bond_2y", "bp"), ("bond_10y", "bp"), ("equity", "pct"), ("fx", "pct")]:
-            cell = country[field]
-            volatility_by_key[cell["key"]] = (cell["summary"], unit)
     generated = escape(snapshot["generated_at"])
     html = [
         "<!doctype html>",
@@ -1234,9 +1239,8 @@ def render_html(snapshot: dict[str, Any]) -> str:
         hidden_attr = "" if expanded else " hidden"
         for row in country_rows:
             volatility = ""
-            if row["key"] in volatility_by_key:
-                summary, volatility_unit = volatility_by_key[row["key"]]
-                volatility = fmt_asset_volatility(summary, volatility_unit)
+            if row.get("summary"):
+                volatility = fmt_asset_volatility(row["summary"], row["unit"])
             html.append(
                 f'<tr class="derivative-row" data-country="{escape(country)}" data-ohlc-key="{escape(row["key"])}" title="点击查看日线 OHLC"{hidden_attr}>'
                 f'<th>{escape(row["country"])}</th>'

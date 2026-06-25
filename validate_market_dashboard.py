@@ -22,8 +22,10 @@ VOLS = {"equity", "bond", "fx"}
 VOL_WINDOWS = {"7D", "30D"}
 VOL_RANKING_ROWS = 6
 INLINE_VOL_COUNT = len(COUNTRIES) * len(FIELDS)
+ONE_YEAR_BOND_KEYS = {"US_1Y": "美国", "CN_1Y": "中国", "JP_1Y": "日本"}
+DERIVATIVE_VOL_COUNT = INLINE_VOL_COUNT + len(ONE_YEAR_BOND_KEYS)
 SECOND_ORDER_WINDOWS = {"1D", "7D", "30D"}
-SECOND_ORDER_ROWS = 30
+SECOND_ORDER_ROWS = len(COUNTRIES) * 5 + len(ONE_YEAR_BOND_KEYS)
 BOND_CURVE_ROWS = len(COUNTRIES)
 OHLC_MAX_WINDOW = 360
 
@@ -105,13 +107,13 @@ def main() -> int:
     if "波动率排名" not in html:
         errors.append("missing volatility ranking panel")
     inline_vol_count = html.count('class="asset-vol"')
-    if inline_vol_count != INLINE_VOL_COUNT:
+    if inline_vol_count != DERIVATIVE_VOL_COUNT:
         errors.append(f"inline asset volatility count mismatch: {inline_vol_count}")
     derivative_section = html.split('<table class="derivative-table">', 1)[-1].split("</table>", 1)[0]
     market_section = html.split('<table class="market-table">', 1)[-1].split("</table>", 1)[0]
     derivative_vol_count = derivative_section.count('class="asset-vol"')
     market_vol_count = market_section.count('class="asset-vol"')
-    if derivative_vol_count != INLINE_VOL_COUNT:
+    if derivative_vol_count != DERIVATIVE_VOL_COUNT:
         errors.append(f"derivative table volatility count mismatch: {derivative_vol_count}")
     if market_vol_count != 0:
         errors.append(f"market panel should not render inline volatility: {market_vol_count}")
@@ -145,6 +147,16 @@ def main() -> int:
     second_order = snapshot.get("second_order_monitor", [])
     if len(second_order) != SECOND_ORDER_ROWS:
         errors.append(f"second order row count mismatch: {len(second_order)}")
+    row_by_key = {row.get("key"): row for row in second_order}
+    for key, country in ONE_YEAR_BOND_KEYS.items():
+        row = row_by_key.get(key)
+        if not row:
+            errors.append(f"missing 1Y bond second-order row: {key}")
+            continue
+        if row.get("country") != country or row.get("group") != "债券":
+            errors.append(f"bad 1Y bond row placement: {key} {row.get('country')} {row.get('group')}")
+        if f'data-ohlc-key="{key}"' not in html:
+            errors.append(f"missing 1Y bond OHLC row marker: {key}")
     curve_rows = [row for row in second_order if row.get("group") == "债券曲线"]
     if len(curve_rows) != BOND_CURVE_ROWS:
         errors.append(f"bond curve row count mismatch: {len(curve_rows)}")
