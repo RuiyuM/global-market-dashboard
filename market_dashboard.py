@@ -1554,6 +1554,21 @@ th:first-child, td:first-child { text-align: left; }
 .flow-detail-table th, .flow-detail-table td { border-bottom: 1px solid var(--line); padding: 6px 4px; text-align: left; }
 .flow-detail-table th:last-child, .flow-detail-table td:last-child { text-align: right; }
 .formula-line { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+.flow-calc-toggle {
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--blue);
+  padding: 6px 9px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.flow-calc-toggle:hover { background: #f8fafc; border-color: #b7c2cf; }
+.flow-calc-more { margin-top: 10px; }
+.flow-calc-more[hidden] { display: none; }
 .status-table th, .status-table td { text-align: left; }
 .notes { color: var(--muted); font-size: 13px; margin: 14px 0 0; }
 .notes p { margin: 4px 0; }
@@ -1617,6 +1632,12 @@ JS = """
     return `${number >= 0 ? "+" : ""}${number.toFixed(digits)}`;
   };
 
+  const precise = (value, digits = 8) => {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return "缺失";
+    return number.toFixed(digits);
+  };
+
   const qName = (base, quote) => `Q(${base}${quote})`;
 
   const flowDirectRows = (period) => {
@@ -1666,6 +1687,44 @@ JS = """
       + `<p class="muted">${esc(row.sourceKey)}：${esc(row.baseDate)} ${fmt(row.old)} -> ${esc(row.latestDate)} ${fmt(row.new)}</p>`;
   };
 
+  const renderCalculationRows = (term, label) => {
+    if (!term) return "";
+    const row = term.direct;
+    const oldValue = Number(row.old);
+    const newValue = Number(row.new);
+    const ratio = newValue / oldValue;
+    const logValue = Math.log(ratio);
+    const directQ = 100 * logValue;
+    const targetQ = term.reversed ? -directQ : directQ;
+    const reverseRule = term.reversed ? `${qName(term.base, term.quote)} = -${qName(row.base, row.quote)}` : qName(term.base, term.quote);
+    return `<tr><td rowspan="5">${esc(label)}<br><span class="muted">${esc(reverseRule)}</span></td><td>old</td><td>${fmt(oldValue)}</td></tr>`
+      + `<tr><td>new</td><td>${fmt(newValue)}</td></tr>`
+      + `<tr><td>new / old</td><td>${fmt(newValue)} / ${fmt(oldValue)} = ${precise(ratio)}</td></tr>`
+      + `<tr><td>ln(new / old)</td><td>ln(${precise(ratio)}) = ${precise(logValue)}</td></tr>`
+      + `<tr><td>100 * ln(new / old)</td><td>${signed(directQ)}${term.reversed ? `；反向后 ${signed(targetQ)}` : ""}</td></tr>`;
+  };
+
+  const renderCalculationDetails = (first, second, computed) => {
+    const firstValue = first?.value || 0;
+    const secondValue = second?.value || 0;
+    return `<div class="flow-calc-more" hidden>`
+      + `<table class="flow-detail-table"><thead><tr><th>段</th><th>步骤</th><th>数字计算</th></tr></thead><tbody>`
+      + renderCalculationRows(first, "第一段")
+      + renderCalculationRows(second, "第二段")
+      + `<tr><td>合成</td><td>score</td><td>${signed(firstValue)} + ${signed(secondValue)} = ${signed(computed)}</td></tr>`
+      + `</tbody></table>`
+      + `</div>`;
+  };
+
+  const toggleFlowCalculation = (button) => {
+    const target = button.nextElementSibling;
+    if (!target || !target.classList.contains("flow-calc-more")) return;
+    const nextExpanded = button.getAttribute("aria-expanded") !== "true";
+    button.setAttribute("aria-expanded", String(nextExpanded));
+    target.hidden = !nextExpanded;
+    button.textContent = nextExpanded ? "收起数字计算" : "展开数字计算";
+  };
+
   const renderFlowDetail = (sectionIndex, periodIndex, routeIndex) => {
     const section = flowData[Number(sectionIndex)];
     const period = section?.periods?.[Number(periodIndex)];
@@ -1701,6 +1760,8 @@ JS = """
       + renderTerm(second)
       + `<p class="formula-line">score = ${signed(first?.value || 0)} + ${signed(second?.value || 0)} = <strong class="${computed >= 0 ? "pos" : "neg"}">${signed(computed)}</strong></p>`
       + `<p>判定：<strong>${esc(route.status)}</strong>。score &gt; 0 为成立，score &lt; 0 为不成立。</p>`
+      + `<button type="button" class="flow-calc-toggle" aria-expanded="false">展开数字计算</button>`
+      + renderCalculationDetails(first, second, computed)
       + `</div>`
       + `<div class="flow-detail-card">`
       + `<h4>原始 Q 值</h4>`
@@ -1714,6 +1775,8 @@ JS = """
       + `<h4>三角闭环检查</h4>${residuals}`
       + `</div>`
       + `</div>`;
+    const calculationToggle = flowDetailBody.querySelector(".flow-calc-toggle");
+    calculationToggle?.addEventListener("click", () => toggleFlowCalculation(calculationToggle));
   };
 
   const toggleFlowRoutes = (button) => {
