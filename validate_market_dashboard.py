@@ -241,6 +241,8 @@ def main() -> int:
         "toggleFlowRoutes",
         "toggleFlowCalculation",
         "renderFlowDetail",
+        "collapseFlowDetail",
+        "activeFlowRouteKey",
         "createFlowDetail",
         'insertAdjacentElement("afterend", flowDetail)',
         "directTerm",

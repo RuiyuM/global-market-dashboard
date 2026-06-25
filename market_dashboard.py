@@ -1593,6 +1593,7 @@ JS = """
   const flowExpandButtons = Array.from(document.querySelectorAll(".flow-expand"));
   const flowRoutes = Array.from(document.querySelectorAll(".flow-route"));
   let activeFlowDetail = null;
+  let activeFlowRouteKey = null;
   const defaultOhlcKey = "US_10Y";
   const head = document.getElementById("ohlc-head");
   const svg = document.getElementById("ohlc-chart");
@@ -1725,6 +1726,12 @@ JS = """
     return detail;
   };
 
+  const collapseFlowDetail = () => {
+    if (activeFlowDetail) activeFlowDetail.hidden = true;
+    activeFlowRouteKey = null;
+    flowRoutes.forEach((button) => button.classList.remove("selected"));
+  };
+
   const toggleFlowCalculation = (button) => {
     const target = button.nextElementSibling;
     if (!target || !target.classList.contains("flow-calc-more")) return;
@@ -1743,6 +1750,12 @@ JS = """
     );
     if (!section || !period || !route || !selectedButton) return;
     const flowDetail = activeFlowDetail || createFlowDetail();
+    const routeKey = `${sectionIndex}-${periodIndex}-${routeIndex}`;
+    if (activeFlowRouteKey === routeKey && selectedButton.nextElementSibling === flowDetail && !flowDetail.hidden) {
+      collapseFlowDetail();
+      return;
+    }
+    activeFlowRouteKey = routeKey;
     activeFlowDetail = flowDetail;
     const flowDetailBody = flowDetail.querySelector(".flow-detail-body");
     if (!flowDetailBody) return;
