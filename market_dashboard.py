@@ -1325,7 +1325,11 @@ def render_html(snapshot: dict[str, Any]) -> str:
                     f'<div><strong>{escape(best["label"])}</strong> '
                     f'<span class="pos">{best["score"]:+.4f}</span></div>'
                     f'<div class="muted">强弱：{escape(ranking)}</div>'
-                    '<div class="flow-routes">'
+                    f'<button type="button" class="flow-expand" data-flow-section="{section_index}" '
+                    f'data-flow-period="{period_index}" aria-expanded="false">'
+                    '<span class="toggle-icon">▸</span><span>查看6条路线</span>'
+                    "</button>"
+                    f'<div class="flow-routes" hidden data-flow-routes="{section_index}-{period_index}">'
                 )
                 for route_index, route in enumerate(result["routes"]):
                     score_cls = "pos" if route["score"] >= 0 else "neg"
@@ -1499,6 +1503,22 @@ th:first-child, td:first-child { text-align: left; }
 .flow-row { display: grid; grid-template-columns: 52px 1fr; gap: 10px; border-top: 1px solid var(--line); padding: 10px 0 0; margin-top: 10px; }
 .period { color: var(--blue); font-weight: 700; }
 .flow-cell { min-width: 0; }
+.flow-expand {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--blue);
+  padding: 5px 8px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.flow-expand:hover { background: #f8fafc; border-color: #b7c2cf; }
 .flow-routes { display: grid; gap: 5px; margin-top: 8px; }
 .flow-route {
   width: 100%;
@@ -1554,6 +1574,7 @@ JS = """
   const flowData = JSON.parse(flowRaw);
   const rows = Array.from(document.querySelectorAll(".derivative-row"));
   const countryToggles = Array.from(document.querySelectorAll(".country-toggle"));
+  const flowExpandButtons = Array.from(document.querySelectorAll(".flow-expand"));
   const flowRoutes = Array.from(document.querySelectorAll(".flow-route"));
   const flowDetail = document.getElementById("flow-detail");
   const flowDetailBody = document.getElementById("flow-detail-body");
@@ -1692,6 +1713,19 @@ JS = """
       + `<h4>三角闭环检查</h4>${residuals}`
       + `</div>`
       + `</div>`;
+  };
+
+  const toggleFlowRoutes = (button) => {
+    const key = `${button.dataset.flowSection}-${button.dataset.flowPeriod}`;
+    const routes = document.querySelector(`[data-flow-routes="${key}"]`);
+    if (!routes) return;
+    const nextExpanded = button.getAttribute("aria-expanded") !== "true";
+    button.setAttribute("aria-expanded", String(nextExpanded));
+    routes.hidden = !nextExpanded;
+    const icon = button.querySelector(".toggle-icon");
+    if (icon) icon.textContent = nextExpanded ? "▾" : "▸";
+    const label = button.querySelector("span:last-child");
+    if (label) label.textContent = nextExpanded ? "收起6条路线" : "查看6条路线";
   };
 
   const yTicks = (min, max, count = 5) => {
@@ -1972,6 +2006,10 @@ JS = """
 
   rows.forEach((row) => {
     row.addEventListener("click", () => render(row.dataset.ohlcKey));
+  });
+
+  flowExpandButtons.forEach((button) => {
+    button.addEventListener("click", () => toggleFlowRoutes(button));
   });
 
   flowRoutes.forEach((button) => {

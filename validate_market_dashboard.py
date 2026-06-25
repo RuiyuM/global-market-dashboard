@@ -18,6 +18,7 @@ FIELDS = ["bond_2y", "bond_10y", "equity", "fx"]
 CHANGES = ["chg_1d", "chg_7d", "chg_14d", "chg_30d"]
 FLOWS = {"中日美", "中德美", "中俄美"}
 PERIODS = {"当日", "上日", "当周", "上周", "当月", "上月"}
+FLOW_PERIOD_COUNT = len(FLOWS) * len(PERIODS)
 VOLS = {"equity", "bond", "fx"}
 VOL_WINDOWS = {"7D", "30D"}
 VOL_RANKING_ROWS = 6
@@ -225,10 +226,17 @@ def main() -> int:
     flow_route_count = html.count('class="flow-route"')
     if flow_route_count != expected_flow_routes:
         errors.append(f"flow route button count mismatch: {flow_route_count}")
+    collapsed_route_groups = html.count('class="flow-routes" hidden')
+    if collapsed_route_groups != FLOW_PERIOD_COUNT:
+        errors.append(f"collapsed flow route group count mismatch: {collapsed_route_groups}")
+    flow_expand_count = html.count('class="flow-expand"')
+    if flow_expand_count != FLOW_PERIOD_COUNT:
+        errors.append(f"flow route expand button count mismatch: {flow_expand_count}")
     for marker in [
         'id="fx-flow-data"',
         'id="flow-detail" class="flow-detail" hidden',
         'id="flow-detail-body"',
+        "toggleFlowRoutes",
         "renderFlowDetail",
         "directTerm",
         "Q(",
