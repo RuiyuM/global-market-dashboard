@@ -1346,7 +1346,7 @@ def render_html(snapshot: dict[str, Any]) -> str:
     html.extend(
         [
             "</div>",
-            '<div id="flow-detail" class="flow-detail">',
+            '<div id="flow-detail" class="flow-detail" hidden>',
             "<h3>资金流向推导详情</h3>",
             '<div id="flow-detail-body" class="muted">点击任意资金兑换路线，查看 Q 值、反向规则和 score = Q(XY) + Q(YZ) 的逐步拆解。</div>',
             "</div>",
@@ -1670,6 +1670,7 @@ JS = """
     });
 
     flowDetailBody.classList.remove("muted");
+    if (flowDetail) flowDetail.hidden = false;
     flowDetailBody.innerHTML = `<div class="flow-detail-grid">`
       + `<div class="flow-detail-card">`
       + `<h4>${esc(section.name)}｜${esc(period.period)}｜${esc(route.label)}</h4>`
@@ -1691,7 +1692,6 @@ JS = """
       + `<h4>三角闭环检查</h4>${residuals}`
       + `</div>`
       + `</div>`;
-    flowDetail?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   const yTicks = (min, max, count = 5) => {

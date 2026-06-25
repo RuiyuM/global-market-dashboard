@@ -227,7 +227,7 @@ def main() -> int:
         errors.append(f"flow route button count mismatch: {flow_route_count}")
     for marker in [
         'id="fx-flow-data"',
-        'id="flow-detail"',
+        'id="flow-detail" class="flow-detail" hidden',
         'id="flow-detail-body"',
         "renderFlowDetail",
         "directTerm",
@@ -236,6 +236,8 @@ def main() -> int:
     ]:
         if marker not in html:
             errors.append(f"missing FX flow detail marker: {marker}")
+    if "flowDetail?.scrollIntoView" in html:
+        errors.append("FX flow detail should expand in place without auto scrolling")
 
     notes = "\n".join(snapshot.get("notes", []))
     if "derived = 本地公式" not in notes:
