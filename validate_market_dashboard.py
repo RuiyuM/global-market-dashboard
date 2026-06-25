@@ -276,6 +276,41 @@ def main() -> int:
     status_index = html.find("<h2>数据状态</h2>")
     if hedge_index < 0 or status_index < 0 or hedge_index > status_index:
         errors.append("hedge cycle panel should render before data status")
+    hike_example_markers = [
+        'class="hike-example"',
+        "2022 加息周期长短债例子",
+        "US2YR.OTC / US10YR.OTC 本地日线",
+        "短低长高",
+        "短低长低",
+        "短高长低",
+        "短高长高",
+        "2022-03-16 首次加息",
+    ]
+    for marker in hike_example_markers:
+        if marker not in html:
+            errors.append(f"missing hike cycle example marker: {marker}")
+    hike_phase_count = html.count('class="hike-phase"')
+    if hike_phase_count != 4:
+        errors.append(f"hike phase count mismatch: {hike_phase_count}")
+    hike_phase_chart_count = html.count('class="hike-phase-chart"')
+    if hike_phase_chart_count != 6:
+        errors.append(f"hike phase chart count mismatch: {hike_phase_chart_count}")
+    if "阶段收益率走势" not in html:
+        errors.append("missing hike phase yield chart label")
+    for marker in ["10Y：2021-01 到 2021-07", "2Y：2021-06 到 2021-08", "2Y：2021-08 到 2022-02（2021-08=100）"]:
+        if marker not in html:
+            errors.append(f"missing second phase focused chart marker: {marker}")
+    hike_chart_label_count = html.count('class="hike-chart-label"')
+    if hike_chart_label_count < 6:
+        errors.append(f"hike chart label count mismatch: {hike_chart_label_count}")
+    if 'class="hike-overview-legend"' not in html:
+        errors.append("missing external hike overview legend")
+    if 'class="hike-event-note"' not in html:
+        errors.append("missing external hike event note")
+    if 'class="hike-legend"' in html:
+        errors.append("hike overview legend should not be rendered inside the SVG")
+    if 'class="hike-event-label"' in html:
+        errors.append("hike first-hike label should not be rendered inside the SVG")
 
     notes = "\n".join(snapshot.get("notes", []))
     if "derived = 本地公式" not in notes:

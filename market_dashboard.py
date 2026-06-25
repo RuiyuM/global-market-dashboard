@@ -144,7 +144,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--fetch", dest="fetch", action="store_true", default=True, help="Fetch latest WSCN/Yahoo data before rendering.")
     parser.add_argument("--no-fetch", dest="fetch", action="store_false", help="Use cached/local CSV files only.")
     parser.add_argument("--lookback-days", type=int, default=540, help="Yahoo fetch lookback window.")
-    parser.add_argument("--wscn-count", type=int, default=420, help="WSCN rows per series.")
+    parser.add_argument("--wscn-count", type=int, default=1800, help="WSCN rows per series.")
     parser.add_argument("--sleep-sec", type=float, default=0.15)
     return parser.parse_args()
 
@@ -1007,6 +1007,7 @@ def build_snapshot(fetch_records: list[dict[str, str]]) -> dict[str, Any]:
         "volatility_rankings": volatility_rankings(countries),
         "second_order_monitor": build_second_order_monitor(series, specs),
         "fx_flows": build_flow_sections(series),
+        "hike_cycle_example": build_hike_cycle_example(series),
         "series_status": build_series_status(series, specs),
         "source_audit": build_source_audit(series, specs),
         "fetch_records": fetch_records,
@@ -1020,6 +1021,233 @@ def build_snapshot(fetch_records: list[dict[str, str]]) -> dict[str, Any]:
         ],
     }
     return snapshot
+
+
+def row_on_or_after(rows: list[dict[str, Any]], target: date) -> dict[str, Any] | None:
+    for row in rows:
+        if row["date"] >= target:
+            return row
+    return None
+
+
+def date_range_rows(rows: list[dict[str, Any]], start: date, end: date) -> list[dict[str, Any]]:
+    return [row for row in rows if start <= row["date"] <= end]
+
+
+def extreme_row(rows: list[dict[str, Any]], start: date, end: date, field: str, mode: str) -> dict[str, Any] | None:
+    window = date_range_rows(rows, start, end)
+    if not window:
+        return None
+    if mode == "max":
+        return max(window, key=lambda row: row[field])
+    return min(window, key=lambda row: row[field])
+
+
+def yield_leg(
+    rows: list[dict[str, Any]],
+    start: date,
+    end: date,
+    *,
+    mode: str,
+) -> dict[str, Any] | None:
+    if mode == "low_high":
+        start_row = extreme_row(rows, start, end, "low", "min")
+        candidates = [row for row in date_range_rows(rows, start, end) if start_row and row["date"] >= start_row["date"]]
+        end_row = max(candidates, key=lambda row: row["high"]) if candidates else None
+        start_field = "low"
+        end_field = "high"
+    elif mode == "high_low":
+        start_row = extreme_row(rows, start, end, "high", "max")
+        candidates = [row for row in date_range_rows(rows, start, end) if start_row and row["date"] >= start_row["date"]]
+        end_row = min(candidates, key=lambda row: row["low"]) if candidates else None
+        start_field = "high"
+        end_field = "low"
+    else:
+        start_row = row_on_or_after(rows, start)
+        end_row = at_or_before(rows, end)
+        start_field = "close"
+        end_field = "close"
+    if not start_row or not end_row:
+        return None
+
+    start_value = start_row[start_field]
+    end_value = end_row[end_field]
+    return {
+        "start_date": start_row["date"].isoformat(),
+        "end_date": end_row["date"].isoformat(),
+        "start": start_value,
+        "end": end_value,
+        "pct": (end_value / start_value - 1) * 100 if start_value else None,
+        "bp": (end_value - start_value) * 100,
+    }
+
+
+def covers_period(rows: list[dict[str, Any]], start: date, end: date) -> bool:
+    return bool(rows and rows[0]["date"] <= start and rows[-1]["date"] >= end)
+
+
+def long_history_rows(current_rows: list[dict[str, Any]], local_file: str, start: date, end: date) -> list[dict[str, Any]]:
+    if covers_period(current_rows, start, end):
+        return current_rows
+    local_path = LOCAL_DATA / local_file
+    if local_path.exists():
+        local_rows = read_ohlc(local_path)
+        if covers_period(local_rows, start, end):
+            return local_rows
+    return current_rows
+
+
+def paired_yield_points(
+    us2: list[dict[str, Any]],
+    us10: list[dict[str, Any]],
+    start: date,
+    end: date,
+) -> list[dict[str, Any]]:
+    points: list[dict[str, Any]] = []
+    for row_10y in date_range_rows(us10, start, end):
+        row_2y = at_or_before(us2, row_10y["date"])
+        if not row_2y:
+            continue
+        points.append(
+            {
+                "date": row_10y["date"].isoformat(),
+                "us2y": row_2y["close"],
+                "us10y": row_10y["close"],
+            }
+        )
+    return points
+
+
+def single_yield_points(rows: list[dict[str, Any]], start: date, end: date) -> list[dict[str, Any]]:
+    return [
+        {
+            "date": row["date"].isoformat(),
+            "value": row["close"],
+        }
+        for row in date_range_rows(rows, start, end)
+    ]
+
+
+def build_hike_cycle_example(series: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+    start = date(2020, 7, 1)
+    end = date(2022, 6, 14)
+    us2 = long_history_rows(series.get("US_2Y", []), "US2YR_OTC_1D_ohlc.csv", start, end)
+    us10 = long_history_rows(series.get("US_10Y", []), "US10YR_OTC_1D_ohlc.csv", start, end)
+    base_2y = row_on_or_after(us2, start)
+    base_10y = row_on_or_after(us10, start)
+    points: list[dict[str, Any]] = []
+    if base_2y and base_10y:
+        for row_10y in date_range_rows(us10, start, end):
+            row_2y = at_or_before(us2, row_10y["date"])
+            if not row_2y:
+                continue
+            points.append(
+                {
+                    "date": row_10y["date"].isoformat(),
+                    "us2y": row_2y["close"],
+                    "us10y": row_10y["close"],
+                    "us2y_index": row_2y["close"] / base_2y["close"] * 100,
+                    "us10y_index": row_10y["close"] / base_10y["close"] * 100,
+                }
+            )
+
+    phase_specs = [
+        {
+            "title": "1. 长端先起飞",
+            "state": "短低长高",
+            "period": "2020-07 到 2021-03",
+            "note": "10Y 从疫情后低位先向上交易再通胀和复苏，2Y 仍贴近零利率。",
+            "us10": yield_leg(us10, date(2020, 7, 1), date(2021, 3, 31), mode="low_high"),
+            "us2": yield_leg(us2, date(2020, 7, 1), date(2021, 3, 31), mode="low_high"),
+            "chart_start": "2020-07-01",
+            "chart_end": "2021-03-31",
+            "chart_points": paired_yield_points(us2, us10, date(2020, 7, 1), date(2021, 3, 31)),
+        },
+        {
+            "title": "2. 长短端共同回落",
+            "state": "短低长低",
+            "period": "2021-03 到 2021-07",
+            "note": "长端从 3 月高点回落；短端在 6 月冲高后也回落。",
+            "us10": yield_leg(us10, date(2021, 3, 30), date(2021, 7, 31), mode="high_low"),
+            "us2": yield_leg(us2, date(2021, 6, 21), date(2021, 7, 31), mode="high_low"),
+            "chart_start": "2021-03-30",
+            "chart_end": "2021-07-30",
+            "chart_points": paired_yield_points(us2, us10, date(2021, 3, 30), date(2021, 7, 30)),
+            "focus_charts": [
+                {
+                    "label": "10Y：2021-01 到 2021-07",
+                    "line": "10Y",
+                    "asset": "us10y",
+                    "start": "2021-01-04",
+                    "end": "2021-07-30",
+                    "points": single_yield_points(us10, date(2021, 1, 4), date(2021, 7, 30)),
+                },
+                {
+                    "label": "2Y：2021-06 到 2021-08",
+                    "line": "2Y",
+                    "asset": "us2y",
+                    "start": "2021-06-01",
+                    "end": "2021-08-31",
+                    "points": single_yield_points(us2, date(2021, 6, 1), date(2021, 8, 31)),
+                },
+            ],
+        },
+        {
+            "title": "3. 短端暴涨追赶",
+            "state": "短高长低",
+            "period": "2021-08 到 2022-02",
+            "note": "市场开始集中交易加息路径，2Y 对政策利率更敏感。",
+            "us10": yield_leg(us10, date(2021, 8, 1), date(2022, 2, 28), mode="low_high"),
+            "us2": yield_leg(us2, date(2021, 8, 1), date(2022, 2, 28), mode="low_high"),
+            "chart_start": "2021-08-01",
+            "chart_end": "2022-02-28",
+            "chart_points": paired_yield_points(us2, us10, date(2021, 8, 1), date(2022, 2, 28)),
+            "include_default_chart": True,
+            "focus_charts": [
+                {
+                    "label": "2Y：2021-08 到 2022-02（2021-08=100）",
+                    "line": "2Y",
+                    "asset": "us2y",
+                    "start": "2021-08-02",
+                    "end": "2022-02-28",
+                    "mode": "index",
+                    "points": single_yield_points(us2, date(2021, 8, 2), date(2022, 2, 28)),
+                },
+            ],
+        },
+        {
+            "title": "4. 长端补涨，价差收敛",
+            "state": "短高长高",
+            "period": "2022-02 到 2022-06",
+            "note": "首次加息后长端补涨，10Y-2Y 价差从高位继续压缩。",
+            "us10": yield_leg(us10, date(2022, 2, 28), date(2022, 6, 14), mode="close"),
+            "us2": yield_leg(us2, date(2022, 2, 28), date(2022, 6, 14), mode="close"),
+            "chart_start": "2022-02-28",
+            "chart_end": "2022-06-14",
+            "chart_points": paired_yield_points(us2, us10, date(2022, 2, 28), date(2022, 6, 14)),
+        },
+    ]
+
+    spread_start_10 = at_or_before(us10, date(2022, 2, 28))
+    spread_start_2 = at_or_before(us2, date(2022, 2, 28))
+    spread_end_10 = at_or_before(us10, date(2022, 6, 14))
+    spread_end_2 = at_or_before(us2, date(2022, 6, 14))
+    spread = None
+    if spread_start_10 and spread_start_2 and spread_end_10 and spread_end_2:
+        spread = {
+            "start_bp": (spread_start_10["close"] - spread_start_2["close"]) * 100,
+            "end_bp": (spread_end_10["close"] - spread_end_2["close"]) * 100,
+        }
+
+    return {
+        "source": "US2YR.OTC / US10YR.OTC 本地日线",
+        "chart_start": start.isoformat(),
+        "chart_end": end.isoformat(),
+        "first_hike": "2022-03-16",
+        "points": points,
+        "phases": phase_specs,
+        "spread": spread,
+    }
 
 
 def build_source_audit(series: dict[str, list[dict[str, Any]]], specs: dict[str, SeriesSpec]) -> list[dict[str, Any]]:
@@ -1149,6 +1377,260 @@ def fmt_derivative(metric: dict[str, Any] | None, unit: str) -> str:
         f'<div><span class="tag {signal_cls}">{escape(signal)}</span></div>'
         "</div>"
     )
+
+
+def fmt_hike_pct(value: float | None) -> str:
+    if value is None or math.isnan(value):
+        return "缺失"
+    return f"{value:+.1f}%"
+
+
+def fmt_hike_bp(value: float | None) -> str:
+    if value is None or math.isnan(value):
+        return "缺失"
+    return f"{value:+.1f}bp"
+
+
+def render_hike_leg(label: str, leg: dict[str, Any] | None) -> str:
+    if not leg:
+        return f'<div class="hike-leg"><span>{escape(label)}</span><strong>缺失</strong></div>'
+    cls = "pos" if (leg.get("pct") or 0) > 0 else "neg" if (leg.get("pct") or 0) < 0 else "flat"
+    return (
+        '<div class="hike-leg">'
+        f'<span>{escape(label)}</span>'
+        f'<strong>{leg["start"]:.3f}% -> {leg["end"]:.3f}%</strong>'
+        f'<em class="{cls}">{fmt_hike_pct(leg.get("pct"))} / {fmt_hike_bp(leg.get("bp"))}</em>'
+        f'<small>{escape(leg["start_date"])} -> {escape(leg["end_date"])}</small>'
+        "</div>"
+    )
+
+
+def render_hike_chart(example: dict[str, Any]) -> str:
+    points = example.get("points") or []
+    if len(points) < 2:
+        return '<div class="hike-chart-empty">缺少 US 2Y/10Y 历史数据。</div>'
+
+    sampled = points[::5]
+    if sampled[-1]["date"] != points[-1]["date"]:
+        sampled.append(points[-1])
+    width, height = 760, 270
+    left, right, top, bottom = 54, 18, 18, 42
+    plot_w = width - left - right
+    plot_h = height - top - bottom
+    start_ord = date.fromisoformat(points[0]["date"]).toordinal()
+    end_ord = date.fromisoformat(points[-1]["date"]).toordinal()
+    values = [point["us2y_index"] for point in sampled] + [point["us10y_index"] for point in sampled]
+    log_min = math.log(max(1, min(values) * 0.9))
+    log_max = math.log(max(values) * 1.08)
+    if log_max == log_min:
+        log_max += 1
+
+    def xy(point: dict[str, Any], key: str) -> tuple[float, float]:
+        current_ord = date.fromisoformat(point["date"]).toordinal()
+        x = left + (current_ord - start_ord) / max(1, end_ord - start_ord) * plot_w
+        y = top + (log_max - math.log(max(1e-9, point[key]))) / (log_max - log_min) * plot_h
+        return x, y
+
+    def path_for(key: str) -> str:
+        coords = [xy(point, key) for point in sampled]
+        return " ".join(("M" if index == 0 else "L") + f"{x:.1f},{y:.1f}" for index, (x, y) in enumerate(coords))
+
+    def marker_x(date_text: str) -> float:
+        current_ord = date.fromisoformat(date_text).toordinal()
+        return left + (current_ord - start_ord) / max(1, end_ord - start_ord) * plot_w
+
+    first_hike_x = marker_x(example["first_hike"])
+    y_ticks = [100, 200, 500, 1000, 2000]
+    tick_html = []
+    for tick in y_ticks:
+        if math.log(tick) < log_min or math.log(tick) > log_max:
+            continue
+        y = top + (log_max - math.log(tick)) / (log_max - log_min) * plot_h
+        tick_html.append(
+            f'<line x1="{left}" y1="{y:.1f}" x2="{width - right}" y2="{y:.1f}" class="hike-grid-line" />'
+            f'<text x="{left - 8}" y="{y + 4:.1f}" text-anchor="end">{tick}</text>'
+        )
+
+    svg = (
+        f'<svg class="hike-chart" viewBox="0 0 {width} {height}" role="img" '
+        'aria-label="2022 加息周期美国 2Y 与 10Y 国债收益率归一化走势">'
+        f'<rect x="{left}" y="{top}" width="{plot_w}" height="{plot_h}" class="hike-chart-bg" />'
+        + "".join(tick_html)
+        + f'<line x1="{first_hike_x:.1f}" y1="{top}" x2="{first_hike_x:.1f}" y2="{top + plot_h}" class="hike-event-line" />'
+        + f'<path d="{path_for("us10y_index")}" class="hike-line hike-line-10y" />'
+        + f'<path d="{path_for("us2y_index")}" class="hike-line hike-line-2y" />'
+        + f'<text x="{left}" y="{height - 14}" class="hike-axis-label">{escape(example["chart_start"])}</text>'
+        + f'<text x="{width - right}" y="{height - 14}" text-anchor="end" class="hike-axis-label">{escape(example["chart_end"])}</text>'
+        + f'<text x="{left}" y="12" class="hike-axis-label">指数，2020-07-01=100，对数刻度</text>'
+        + '</svg>'
+    )
+    return (
+        '<div class="hike-overview-wrap">'
+        '<div class="hike-overview-legend">'
+        '<span><i class="legend-line legend-line-10y"></i>10Y</span>'
+        '<span><i class="legend-line legend-line-2y"></i>2Y</span>'
+        '</div>'
+        + svg
+        + '<div class="hike-event-note">虚线：2022-03-16 首次加息</div>'
+        + '</div>'
+    )
+
+
+def render_hike_phase_chart(phase: dict[str, Any], index: int) -> str:
+    points = phase.get("chart_points") or []
+    if len(points) < 2:
+        return '<div class="hike-phase-chart-empty">阶段收益率走势缺失。</div>'
+
+    sampled = points[::2]
+    if sampled[-1]["date"] != points[-1]["date"]:
+        sampled.append(points[-1])
+    width, height = 420, 150
+    left, right, top, bottom = 38, 12, 14, 26
+    plot_w = width - left - right
+    plot_h = height - top - bottom
+    start_ord = date.fromisoformat(points[0]["date"]).toordinal()
+    end_ord = date.fromisoformat(points[-1]["date"]).toordinal()
+    values = [point["us2y"] for point in sampled] + [point["us10y"] for point in sampled]
+    y_min = min(values)
+    y_max = max(values)
+    pad = max(0.05, (y_max - y_min) * 0.12)
+    y_min = max(0, y_min - pad)
+    y_max += pad
+    if y_max == y_min:
+        y_max += 0.1
+
+    def xy(point: dict[str, Any], key: str) -> tuple[float, float]:
+        current_ord = date.fromisoformat(point["date"]).toordinal()
+        x = left + (current_ord - start_ord) / max(1, end_ord - start_ord) * plot_w
+        y = top + (y_max - point[key]) / (y_max - y_min) * plot_h
+        return x, y
+
+    def path_for(key: str) -> str:
+        coords = [xy(point, key) for point in sampled]
+        return " ".join(("M" if item_index == 0 else "L") + f"{x:.1f},{y:.1f}" for item_index, (x, y) in enumerate(coords))
+
+    top_label = f"{y_max:.2f}%"
+    bottom_label = f"{y_min:.2f}%"
+    svg = (
+        f'<svg class="hike-phase-chart" viewBox="0 0 {width} {height}" role="img" '
+        f'aria-label="{escape(phase["title"])} 阶段收益率走势">'
+        f'<rect x="{left}" y="{top}" width="{plot_w}" height="{plot_h}" class="hike-chart-bg" />'
+        f'<line x1="{left}" y1="{top}" x2="{width - right}" y2="{top}" class="hike-grid-line" />'
+        f'<line x1="{left}" y1="{top + plot_h}" x2="{width - right}" y2="{top + plot_h}" class="hike-grid-line" />'
+        f'<text x="{left - 7}" y="{top + 4}" text-anchor="end">{top_label}</text>'
+        f'<text x="{left - 7}" y="{top + plot_h + 4}" text-anchor="end">{bottom_label}</text>'
+        f'<path d="{path_for("us10y")}" class="hike-line hike-line-10y" />'
+        f'<path d="{path_for("us2y")}" class="hike-line hike-line-2y" />'
+        f'<text x="{left}" y="{height - 8}" class="hike-axis-label">{escape(phase["chart_start"])}</text>'
+        f'<text x="{width - right}" y="{height - 8}" text-anchor="end" class="hike-axis-label">{escape(phase["chart_end"])}</text>'
+        f'<text x="{width - right - 76}" y="11" class="hike-phase-caption">10Y</text>'
+        f'<text x="{width - right - 36}" y="11" class="hike-phase-caption">2Y</text>'
+        "</svg>"
+    )
+    return f'<div class="hike-chart-wrap"><div class="hike-chart-label">阶段收益率走势</div>{svg}</div>'
+
+
+def render_hike_focus_chart(chart: dict[str, Any]) -> str:
+    raw_points = chart.get("points") or []
+    if len(raw_points) < 2:
+        return '<div class="hike-phase-chart-empty">焦点收益率走势缺失。</div>'
+
+    mode = chart.get("mode") or "yield"
+    base_value = raw_points[0]["value"] or 1
+    points = []
+    for point in raw_points:
+        value = point["value"] / base_value * 100 if mode == "index" else point["value"]
+        points.append({"date": point["date"], "value": value})
+
+    sampled = points[::2]
+    if sampled[-1]["date"] != points[-1]["date"]:
+        sampled.append(points[-1])
+    width, height = 420, 150
+    left, right, top, bottom = 42, 12, 18, 26
+    plot_w = width - left - right
+    plot_h = height - top - bottom
+    start_ord = date.fromisoformat(points[0]["date"]).toordinal()
+    end_ord = date.fromisoformat(points[-1]["date"]).toordinal()
+    values = [point["value"] for point in sampled]
+    y_min = min(values)
+    y_max = max(values)
+    pad = max(0.05 if mode != "index" else 10, (y_max - y_min) * 0.12)
+    y_min = max(0, y_min - pad)
+    y_max += pad
+    if y_max == y_min:
+        y_max += 0.1
+
+    def xy(point: dict[str, Any]) -> tuple[float, float]:
+        current_ord = date.fromisoformat(point["date"]).toordinal()
+        x = left + (current_ord - start_ord) / max(1, end_ord - start_ord) * plot_w
+        y = top + (y_max - point["value"]) / (y_max - y_min) * plot_h
+        return x, y
+
+    coords = [xy(point) for point in sampled]
+    path = " ".join(("M" if item_index == 0 else "L") + f"{x:.1f},{y:.1f}" for item_index, (x, y) in enumerate(coords))
+    line_class = "hike-line-2y" if chart.get("asset") == "us2y" else "hike-line-10y"
+    unit = "指数" if mode == "index" else "%"
+    top_label = f"{y_max:.0f}" if mode == "index" else f"{y_max:.2f}%"
+    bottom_label = f"{y_min:.0f}" if mode == "index" else f"{y_min:.2f}%"
+    svg = (
+        f'<svg class="hike-phase-chart" viewBox="0 0 {width} {height}" role="img" '
+        f'aria-label="{escape(chart["label"])} 焦点收益率走势">'
+        f'<rect x="{left}" y="{top}" width="{plot_w}" height="{plot_h}" class="hike-chart-bg" />'
+        f'<line x1="{left}" y1="{top}" x2="{width - right}" y2="{top}" class="hike-grid-line" />'
+        f'<line x1="{left}" y1="{top + plot_h}" x2="{width - right}" y2="{top + plot_h}" class="hike-grid-line" />'
+        f'<text x="{left - 7}" y="{top + 4}" text-anchor="end">{top_label}</text>'
+        f'<text x="{left - 7}" y="{top + plot_h + 4}" text-anchor="end">{bottom_label}</text>'
+        f'<path d="{path}" class="hike-line {line_class}" />'
+        f'<text x="{left}" y="{height - 8}" class="hike-axis-label">{escape(chart["start"])}</text>'
+        f'<text x="{width - right}" y="{height - 8}" text-anchor="end" class="hike-axis-label">{escape(chart["end"])}</text>'
+        f'<text x="{width - right}" y="11" text-anchor="end" class="hike-phase-caption">{escape(unit)}</text>'
+        "</svg>"
+    )
+    return f'<div class="hike-chart-wrap"><div class="hike-chart-label">{escape(chart["label"])}</div>{svg}</div>'
+
+
+def render_hike_phase_charts(phase: dict[str, Any]) -> str:
+    focus_charts = phase.get("focus_charts") or []
+    if focus_charts:
+        default_chart = render_hike_phase_chart(phase, 0) if phase.get("include_default_chart") else ""
+        return default_chart + '<div class="hike-focus-grid">' + "".join(render_hike_focus_chart(chart) for chart in focus_charts) + "</div>"
+    return render_hike_phase_chart(phase, 0)
+
+
+def render_hike_cycle_example(example: dict[str, Any]) -> str:
+    if not example:
+        return ""
+    spread = example.get("spread") or {}
+    spread_text = ""
+    if spread:
+        spread_text = f'；10Y-2Y 价差 {spread["start_bp"]:.1f}bp -> {spread["end_bp"]:.1f}bp'
+    html = [
+        '<div class="hike-example">',
+        '<div class="hike-example-head">',
+        "<h4>2022 加息周期长短债例子</h4>",
+        f'<span>{escape(example["source"])}</span>',
+        "</div>",
+        render_hike_chart(example),
+        '<div class="hike-phase-grid">',
+    ]
+    for phase in example.get("phases", []):
+        html.append(
+            '<div class="hike-phase">'
+            f'<div class="hike-phase-title"><strong>{escape(phase["title"])}</strong><b>{escape(phase["state"])}</b></div>'
+            f'<p class="muted">{escape(phase["period"])}｜{escape(phase["note"])}</p>'
+            + render_hike_phase_charts(phase)
+            + render_hike_leg("10Y", phase.get("us10"))
+            + render_hike_leg("2Y", phase.get("us2"))
+            + "</div>"
+        )
+    html.extend(
+        [
+            "</div>",
+            f'<p class="hike-example-note">阶段算法：第一/三段取区间低点到高点；第二段取高点到低点；第四段取区间 close 起止{escape(spread_text)}。</p>',
+            "</div>",
+        ]
+    )
+    return "".join(html)
 
 
 def render_html(snapshot: dict[str, Any]) -> str:
@@ -1387,7 +1869,10 @@ def render_html(snapshot: dict[str, Any]) -> str:
                 f'<b>{escape(state)}</b>'
                 "</div>"
             )
-        html.append("</div></div>")
+        html.append("</div>")
+        if cycle_title == "加息周期":
+            html.append(render_hike_cycle_example(snapshot.get("hike_cycle_example", {})))
+        html.append("</div>")
     html.append('<p class="hedge-footnote">前两种偏缩，后两种偏扩；第一次加息常见长短债交叉。</p>')
     html.append("</section>")
 
@@ -1628,12 +2113,51 @@ th:first-child, td:first-child { text-align: left; }
 .hedge-case p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
 .hedge-case b { justify-self: start; color: var(--ink); background: #eef2f7; border-radius: 6px; padding: 3px 7px; font-size: 12px; }
 .hedge-footnote { margin: 12px 0 0; color: var(--muted); font-size: 12px; }
+.hike-example { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 12px; }
+.hike-example-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.hike-example-head h4 { margin: 0; font-size: 14px; letter-spacing: 0; }
+.hike-example-head span { color: var(--muted); font-size: 12px; text-align: right; }
+.hike-overview-wrap { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 8px; }
+.hike-overview-legend { display: flex; justify-content: flex-end; gap: 16px; align-items: center; margin-bottom: 4px; color: var(--ink); font-size: 12px; font-weight: 700; }
+.hike-overview-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend-line { display: inline-block; width: 26px; height: 3px; border-radius: 999px; }
+.legend-line-10y { background: #2563eb; }
+.legend-line-2y { background: #dc2626; }
+.hike-chart { width: 100%; height: auto; display: block; background: #fff; }
+.hike-chart-bg { fill: #fbfcfe; }
+.hike-grid-line { stroke: #e5e9ef; stroke-width: 1; }
+.hike-chart text { fill: var(--muted); font-size: 11px; }
+.hike-line { fill: none; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+.hike-line-10y { stroke: #2563eb; }
+.hike-line-2y { stroke: #dc2626; }
+.hike-event-line { stroke: #64748b; stroke-width: 1.2; stroke-dasharray: 4 4; }
+.hike-event-note { color: var(--muted); font-size: 12px; margin-top: 4px; text-align: right; }
+.hike-phase-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+.hike-phase { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 10px; }
+.hike-phase-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 5px; }
+.hike-phase-title strong { font-size: 13px; }
+.hike-phase-title b { color: var(--blue); background: #eaf2ff; border-radius: 6px; padding: 3px 7px; font-size: 12px; white-space: nowrap; }
+.hike-chart-wrap { margin: 8px 0; }
+.hike-chart-label { color: var(--ink); font-weight: 700; font-size: 12px; line-height: 1.35; margin-bottom: 4px; overflow-wrap: anywhere; }
+.hike-phase-chart { width: 100%; height: auto; display: block; border: 1px solid #eef2f7; border-radius: 6px; background: #fff; }
+.hike-phase-chart text { fill: var(--muted); font-size: 10px; }
+.hike-phase-caption { font-weight: 700; }
+.hike-phase-chart-empty { margin: 8px 0; color: var(--muted); font-size: 12px; }
+.hike-focus-grid { display: grid; gap: 8px; }
+.hike-leg { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; padding-top: 6px; border-top: 1px solid #eef2f7; }
+.hike-leg span { color: var(--muted); font-weight: 700; }
+.hike-leg strong { font-size: 12px; }
+.hike-leg em { font-style: normal; font-weight: 700; font-size: 12px; }
+.hike-leg small { grid-column: 2 / 4; color: var(--muted); font-size: 11px; }
+.hike-example-note { margin: 8px 0 0; color: var(--muted); font-size: 12px; }
 @media (max-width: 900px) {
   main { padding: 14px; }
   .topbar { align-items: flex-start; flex-direction: column; }
   .ranking-grid, .flow-grid { grid-template-columns: 1fr; }
   .flow-detail-grid { grid-template-columns: 1fr; }
   .hedge-case-grid { grid-template-columns: 1fr; }
+  .hike-example-head { align-items: flex-start; flex-direction: column; }
+  .hike-phase-grid { grid-template-columns: 1fr; }
   .ranking-block + .ranking-block { border-left: 0; border-top: 1px solid var(--line); padding-left: 0; padding-top: 12px; }
 }
 """
