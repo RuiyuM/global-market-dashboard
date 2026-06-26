@@ -920,6 +920,8 @@ def build_fx_cross_details(series: dict[str, list[dict[str, Any]]]) -> dict[str,
                 continue
             previous = prior_row_before(cross_rows, latest["date"])
             move = change(cross_rows, None, unit="pct")
+            move_7d = change(cross_rows, 7, unit="pct")
+            move_30d = change(cross_rows, 30, unit="pct")
             rows.append(
                 {
                     "pair": f"{base_ccy}/{target_ccy}",
@@ -929,6 +931,20 @@ def build_fx_cross_details(series: dict[str, list[dict[str, Any]]]) -> dict[str,
                     "change": latest["close"] - previous["close"] if previous else None,
                     "pct_change": move["value"] if move else None,
                     "base_date": move["base_date"] if move else "",
+                    "pct_change_7d": move_7d["value"] if move_7d else None,
+                    "pct_change_30d": move_30d["value"] if move_30d else None,
+                    "change_7d_dates": {
+                        "base_date": move_7d["base_date"],
+                        "latest_date": move_7d["latest_date"],
+                    }
+                    if move_7d
+                    else None,
+                    "change_30d_dates": {
+                        "base_date": move_30d["base_date"],
+                        "latest_date": move_30d["latest_date"],
+                    }
+                    if move_30d
+                    else None,
                     "range_7d": fx_range(cross_rows, 7),
                     "range_30d": fx_range(cross_rows, 30),
                     "source": f"{base_key}/{target_key}",
@@ -1493,6 +1509,12 @@ def fmt_signed_pct(value: float | None) -> str:
     return f"{value:+.2f}%"
 
 
+def value_class(value: float | None) -> str:
+    if value is None or not math.isfinite(value):
+        return "flat"
+    return "pos" if value > 0 else "neg" if value < 0 else "flat"
+
+
 def fmt_fx_range(value: dict[str, Any] | None) -> str:
     if not value:
         return "缺失"
@@ -1512,7 +1534,9 @@ def render_fx_rank_detail(code: str, fx_details: dict[str, Any]) -> str:
     for row in rows:
         pct_change = row.get("pct_change")
         change = row.get("change")
-        cls = "pos" if pct_change and pct_change > 0 else "neg" if pct_change and pct_change < 0 else "flat"
+        cls = value_class(pct_change)
+        cls_7d = value_class(row.get("pct_change_7d"))
+        cls_30d = value_class(row.get("pct_change_30d"))
         body.append(
             '<div class="fx-rank-card">'
             f'<div class="fx-pair-cell"><strong>{escape(row["pair"])}</strong><span>{escape(row["name"])}</span></div>'
@@ -1521,9 +1545,13 @@ def render_fx_rank_detail(code: str, fx_details: dict[str, Any]) -> str:
             f'<span class="{cls}"><em>变化</em>{escape(fmt_signed_fx_price(change))}</span>'
             f'<span class="{cls}"><em>涨跌幅</em>{escape(fmt_signed_pct(pct_change))}</span>'
             "</div>"
+            '<div class="fx-rank-moves">'
+            f'<span class="{cls_7d}"><em>7D涨跌</em>{escape(fmt_signed_pct(row.get("pct_change_7d")))}</span>'
+            f'<span class="{cls_30d}"><em>30D涨跌</em>{escape(fmt_signed_pct(row.get("pct_change_30d")))}</span>'
+            "</div>"
             '<div class="fx-rank-ranges">'
-            f'<span><em>7D</em>{escape(fmt_fx_range(row.get("range_7d")))}</span>'
-            f'<span><em>30D</em>{escape(fmt_fx_range(row.get("range_30d")))}</span>'
+            f'<span><em>7D区间</em>{escape(fmt_fx_range(row.get("range_7d")))}</span>'
+            f'<span><em>30D区间</em>{escape(fmt_fx_range(row.get("range_30d")))}</span>'
             "</div>"
             "</div>"
         )
@@ -2352,10 +2380,11 @@ h3 { margin: 0 0 10px; font-size: 15px; letter-spacing: 0; }
 .fx-rank-card:last-child { border-bottom: 0; }
 .fx-pair-cell strong { display: block; color: var(--ink); font-size: 13px; }
 .fx-pair-cell span { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
-.fx-rank-metrics, .fx-rank-ranges { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; font-variant-numeric: tabular-nums; }
+.fx-rank-metrics, .fx-rank-moves, .fx-rank-ranges { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; font-variant-numeric: tabular-nums; }
+.fx-rank-moves,
 .fx-rank-ranges { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.fx-rank-metrics span, .fx-rank-ranges span { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
-.fx-rank-metrics em, .fx-rank-ranges em { display: block; color: var(--muted); font-style: normal; font-size: 10px; line-height: 1.2; }
+.fx-rank-metrics span, .fx-rank-moves span, .fx-rank-ranges span { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.fx-rank-metrics em, .fx-rank-moves em, .fx-rank-ranges em { display: block; color: var(--muted); font-style: normal; font-size: 10px; line-height: 1.2; }
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; }
 th, td { border-bottom: 1px solid var(--line); padding: 9px 8px; text-align: right; vertical-align: top; white-space: nowrap; }
