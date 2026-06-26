@@ -185,6 +185,10 @@ def main() -> int:
             errors.append(f"missing default OHLC marker: {marker}")
     for marker in [
         'class="ohlc-toolbar"',
+        'class="ohlc-mode active"',
+        'data-mode="move"',
+        "renderMoveChart",
+        "涨跌幅模式",
         'data-window="90"',
         'data-window="180"',
         'data-window="360"',
@@ -242,6 +246,8 @@ def main() -> int:
                 if key not in bar:
                     errors.append(f"{row.get('country')} {row.get('label')} OHLC missing {key}")
                     break
+        if len(ohlc) > 1 and not any("change_pct" in bar for bar in ohlc):
+            errors.append(f"{row.get('country')} {row.get('label')} OHLC missing daily percent moves")
         if row.get("group") == "债券曲线":
             if row.get("chart_type") != "bond_curve":
                 errors.append(f"{row.get('country')} bond curve missing chart_type")

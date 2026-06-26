@@ -703,16 +703,29 @@ def build_second_order_monitor(
 
 def recent_ohlc_rows(rows: list[dict[str, Any]], limit: int = 90) -> list[dict[str, Any]]:
     out = []
-    for row in rows[-limit:]:
-        out.append(
-            {
-                "date": row["date"].isoformat(),
-                "open": row["open"],
-                "high": row["high"],
-                "low": row["low"],
-                "close": row["close"],
-            }
-        )
+    start = max(0, len(rows) - limit)
+    for index in range(start, len(rows)):
+        row = rows[index]
+        item = {
+            "date": row["date"].isoformat(),
+            "open": row["open"],
+            "high": row["high"],
+            "low": row["low"],
+            "close": row["close"],
+        }
+        if index > 0:
+            prev_close = rows[index - 1].get("close")
+            close = row.get("close")
+            if (
+                prev_close is not None
+                and close is not None
+                and math.isfinite(float(prev_close))
+                and math.isfinite(float(close))
+                and float(prev_close) != 0
+            ):
+                item["prev_close"] = prev_close
+                item["change_pct"] = (float(close) - float(prev_close)) / float(prev_close) * 100
+        out.append(item)
     return out
 
 
@@ -2110,6 +2123,10 @@ def render_html(snapshot: dict[str, Any]) -> str:
             '<section class="panel ohlc-panel" id="ohlc-panel">',
             "<h2>日线 OHLC 可视化</h2>",
             '<div class="ohlc-toolbar">',
+            '<div class="segmented" aria-label="OHLC 图表模式">',
+            '<button type="button" class="ohlc-mode active" data-mode="move">涨跌幅</button>',
+            '<button type="button" class="ohlc-mode" data-mode="ohlc">K线</button>',
+            "</div>",
             '<div class="segmented" aria-label="OHLC 时间窗口">',
             '<button type="button" class="ohlc-window active" data-window="90">90D</button>',
             '<button type="button" class="ohlc-window" data-window="180">180D</button>',
@@ -2459,6 +2476,13 @@ th:first-child, td:first-child { text-align: left; }
   font-variant-numeric: tabular-nums;
 }
 .chart-tooltip strong { display: block; margin-bottom: 4px; }
+.chart-tooltip.dark {
+  background: rgba(15, 23, 42, 0.92);
+  border-color: rgba(15, 23, 42, 0.92);
+  color: #fff;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.28);
+}
+.chart-tooltip.dark .muted { color: #cbd5e1; }
 .flow-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .flow-block { padding: 12px; }
 .flow-row { display: grid; grid-template-columns: 52px 1fr; gap: 10px; border-top: 1px solid var(--line); padding: 10px 0 0; margin-top: 10px; }
@@ -2630,12 +2654,14 @@ JS = """
   const tooltip = document.getElementById("ohlc-tooltip");
   const panel = document.getElementById("ohlc-panel");
   const rangeLabel = document.getElementById("ohlc-range-label");
+  const modeButtons = Array.from(document.querySelectorAll(".ohlc-mode"));
   const windowButtons = Array.from(document.querySelectorAll(".ohlc-window"));
   const zoomInButton = document.getElementById("ohlc-zoom-in");
   const zoomOutButton = document.getElementById("ohlc-zoom-out");
   const resetButton = document.getElementById("ohlc-reset");
   const windowSteps = [90, 180, 360];
   let currentKey = null;
+  let chartMode = "move";
   let visibleWindow = 90;
   const viewEndByKey = {};
   let dragStart = null;
@@ -2660,6 +2686,13 @@ JS = """
     const number = Number(value);
     if (!Number.isFinite(number)) return "缺失";
     return `${number >= 0 ? "+" : ""}${number.toFixed(digits)}`;
+  };
+
+  const pctLabel = (value, digits = 2) => {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return "缺失";
+    if (Math.abs(number) < 0.005) return "0.00%";
+    return `${number >= 0 ? "+" : ""}${number.toFixed(digits)}%`;
   };
 
   const precise = (value, digits = 8) => {
@@ -2893,6 +2926,9 @@ JS = """
   };
 
   const updateControls = (item) => {
+    modeButtons.forEach((button) => {
+      button.classList.toggle("active", button.dataset.mode === chartMode);
+    });
     windowButtons.forEach((button) => {
       button.classList.toggle("active", Number(button.dataset.window) === visibleWindow);
     });
@@ -2922,6 +2958,123 @@ JS = """
     setVisibleWindow(windowSteps[nextIndex]);
   };
 
+  const renderMoveChart = (item) => {
+    const bars = item.ohlc || [];
+    const width = 980;
+    const height = 360;
+    const margin = { left: 64, right: 22, top: 22, bottom: 58 };
+    const innerW = width - margin.left - margin.right;
+    const innerH = height - margin.top - margin.bottom;
+    tooltip.classList.add("dark");
+    if (!bars.length) {
+      svg.innerHTML = `<text x="490" y="180" text-anchor="middle" fill="#66717d">没有日线涨跌幅数据</text>`;
+      return;
+    }
+    const moves = bars.map((bar, index) => ({
+      bar,
+      index,
+      value: Number(bar.change_pct)
+    })).filter((item) => Number.isFinite(item.value));
+    if (!moves.length) {
+      svg.innerHTML = `<text x="490" y="180" text-anchor="middle" fill="#66717d">没有可计算的前收盘涨跌幅</text>`;
+      return;
+    }
+
+    const maxAbs = Math.max(0.1, ...moves.map((move) => Math.abs(move.value))) * 1.16;
+    const min = -maxAbs;
+    const max = maxAbs;
+    const xStep = innerW / Math.max(1, bars.length - 1);
+    const x = (index) => bars.length === 1 ? margin.left + innerW / 2 : margin.left + index * xStep;
+    const y = (value) => margin.top + (max - Number(value)) / (max - min) * innerH;
+    const zeroY = y(0);
+    const barW = Math.max(2, Math.min(8, xStep * 0.42));
+    const linePath = moves.map((move, pathIndex) => `${pathIndex === 0 ? "M" : "L"} ${x(move.index).toFixed(2)} ${y(move.value).toFixed(2)}`).join(" ");
+    const labelCount = Math.min(24, Math.max(8, Math.round(moves.length / 4)));
+    const labelThreshold = [...moves]
+      .map((move) => Math.abs(move.value))
+      .sort((a, b) => b - a)[labelCount - 1] || Infinity;
+
+    const grid = yTicks(min, max, 7).map((tick) => {
+      const yy = y(tick);
+      const zero = Math.abs(tick) < 0.00001;
+      return `<line x1="${margin.left}" x2="${width - margin.right}" y1="${yy}" y2="${yy}" stroke="${zero ? "#b8c1cc" : "#edf1f5"}" stroke-width="${zero ? 1.4 : 1}" />`
+        + `<text x="${margin.left - 10}" y="${yy + 4}" text-anchor="end" fill="#66717d" font-size="11">${zero ? "0%" : pctLabel(tick)}</text>`;
+    }).join("");
+
+    const dateTicks = [];
+    const tickCount = Math.min(10, bars.length);
+    for (let i = 0; i < tickCount; i += 1) {
+      const index = Math.round(i * (bars.length - 1) / Math.max(1, tickCount - 1));
+      const xx = x(index);
+      dateTicks.push(`<text x="${xx}" y="${height - 16}" transform="rotate(-48 ${xx} ${height - 16})" text-anchor="end" fill="#66717d" font-size="10">${esc(bars[index].date.slice(5))}</text>`);
+    }
+
+    const moveBars = moves.map((move) => {
+      const xx = x(move.index);
+      const yy = y(move.value);
+      const positive = move.value >= 0;
+      const color = positive ? "#3b82f6" : "#ff5b8a";
+      const rectY = Math.min(zeroY, yy);
+      const rectH = Math.max(1.2, Math.abs(zeroY - yy));
+      return `<rect x="${xx - barW / 2}" y="${rectY}" width="${barW}" height="${rectH}" rx="1" fill="${color}" opacity="0.84" />`;
+    }).join("");
+
+    const dots = moves.map((move) => {
+      const xx = x(move.index);
+      const yy = y(move.value);
+      const showLabel = Math.abs(move.value) >= labelThreshold && Math.abs(move.value) >= maxAbs * 0.18;
+      const labelY = yy + (move.value >= 0 ? -8 : 15);
+      const label = showLabel
+        ? `<text x="${xx}" y="${labelY}" text-anchor="middle" fill="#f2a51a" font-size="9" font-weight="650">${pctLabel(move.value)}</text>`
+        : "";
+      return `<circle cx="${xx}" cy="${yy}" r="2.4" fill="#f4b43f" stroke="#fff" stroke-width="0.8" />${label}`;
+    }).join("");
+
+    const hitW = Math.max(8, xStep);
+    const hits = bars.map((bar, index) => (
+      `<g class="move-hit" data-index="${index}">`
+      + `<line class="move-crosshair" x1="${x(index)}" x2="${x(index)}" y1="${margin.top}" y2="${height - margin.bottom}" stroke="#98a2b3" stroke-width="1" opacity="0" />`
+      + `<rect x="${x(index) - hitW / 2}" y="${margin.top}" width="${hitW}" height="${innerH}" fill="transparent" />`
+      + `</g>`
+    )).join("");
+
+    svg.innerHTML = `<rect width="${width}" height="${height}" fill="#fff" />`
+      + grid
+      + `<line x1="${margin.left}" x2="${margin.left}" y1="${margin.top}" y2="${height - margin.bottom}" stroke="#d5dbe3" />`
+      + `<line x1="${margin.left}" x2="${width - margin.right}" y1="${height - margin.bottom}" y2="${height - margin.bottom}" stroke="#d5dbe3" />`
+      + dateTicks.join("")
+      + moveBars
+      + `<path d="${linePath}" fill="none" stroke="#f4b43f" stroke-width="1.8" />`
+      + dots
+      + hits;
+
+    Array.from(svg.querySelectorAll(".move-hit")).forEach((node) => {
+      const bar = bars[Number(node.dataset.index)];
+      const change = Number(bar.change_pct);
+      node.addEventListener("mousemove", (event) => {
+        Array.from(svg.querySelectorAll(".move-crosshair")).forEach((line) => { line.setAttribute("opacity", "0"); });
+        const crosshair = node.querySelector(".move-crosshair");
+        if (crosshair) crosshair.setAttribute("opacity", "1");
+        const bounds = panel.getBoundingClientRect();
+        tooltip.classList.add("dark");
+        tooltip.style.display = "block";
+        tooltip.style.left = `${Math.min(bounds.width - 236, Math.max(8, event.clientX - bounds.left + 14))}px`;
+        tooltip.style.top = `${Math.max(8, event.clientY - bounds.top - 96)}px`;
+        const moveText = Number.isFinite(change) ? pctLabel(change) : "缺失";
+        tooltip.innerHTML = `<strong>${esc(bar.date)}</strong>`
+          + `<div>${esc(item.country)} ${esc(item.label)} 涨跌幅：<b>${moveText}</b></div>`
+          + `<div class="muted">Prev close: ${fmt(bar.prev_close)}</div>`
+          + `<div>Open: ${fmt(bar.open)} · High: ${fmt(bar.high)}</div>`
+          + `<div>Low: ${fmt(bar.low)} · Close: ${fmt(bar.close)}</div>`;
+      });
+      node.addEventListener("mouseleave", () => {
+        const crosshair = node.querySelector(".move-crosshair");
+        if (crosshair) crosshair.setAttribute("opacity", "0");
+        tooltip.style.display = "none";
+      });
+    });
+  };
+
   const renderChart = (item) => {
     const bars = item.ohlc || [];
     const width = 980;
@@ -2929,6 +3082,7 @@ JS = """
     const margin = { left: 64, right: 22, top: 22, bottom: 38 };
     const innerW = width - margin.left - margin.right;
     const innerH = height - margin.top - margin.bottom;
+    tooltip.classList.remove("dark");
     if (!bars.length) {
       svg.innerHTML = `<text x="490" y="180" text-anchor="middle" fill="#66717d">没有 OHLC 数据</text>`;
       return;
@@ -3016,6 +3170,7 @@ JS = """
     const margin = { left: 64, right: 22, top: 34, bottom: 38 };
     const innerW = width - margin.left - margin.right;
     const innerH = height - margin.top - margin.bottom;
+    tooltip.classList.remove("dark");
     if (!bars.length) {
       svg.innerHTML = `<text x="490" y="180" text-anchor="middle" fill="#66717d">没有 2Y/10Y 曲线数据</text>`;
       return;
@@ -3119,8 +3274,13 @@ JS = """
       renderBondCurveChart(item);
     } else {
       const total = item.range?.total || item.ohlc.length;
-      head.textContent = `${item.country} / ${item.group} / ${item.label}：显示 ${item.ohlc.length}/${total} 条日线，鼠标悬停显示 OHLC；拖动图表可平移。`;
-      renderChart(item);
+      if (chartMode === "move") {
+        head.textContent = `${item.country} / ${item.group} / ${item.label}：涨跌幅模式，显示 ${item.ohlc.length}/${total} 条日线；柱=单日涨跌幅，橙线=同一涨跌幅序列，悬停看 OHLC。`;
+        renderMoveChart(item);
+      } else {
+        head.textContent = `${item.country} / ${item.group} / ${item.label}：K线模式，显示 ${item.ohlc.length}/${total} 条日线，鼠标悬停显示 OHLC；拖动图表可平移。`;
+        renderChart(item);
+      }
     }
     updateControls(item);
     if (scroll) {
@@ -3190,6 +3350,13 @@ JS = """
       detail.hidden = !nextExpanded;
       const icon = button.querySelector(".toggle-icon");
       if (icon) icon.textContent = nextExpanded ? "▾" : "▸";
+    });
+  });
+
+  modeButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      chartMode = button.dataset.mode || "move";
+      rerenderCurrent();
     });
   });
 
