@@ -67,6 +67,7 @@ def test_quant_fund_link_is_plain_notes_link_to_separate_page() -> None:
     assert "本金已配置" not in html
     assert "base_usd" not in html
     assert "等待本金" not in html
+    assert "历史种子" not in html
 
 
 def test_quant_fund_separate_page_contains_curves_and_back_link() -> None:
@@ -90,6 +91,7 @@ def test_quant_fund_separate_page_contains_curves_and_back_link() -> None:
     assert "本金已配置" not in html
     assert "本金未配置" not in html
     assert "等待本金" not in html
+    assert "历史种子" not in html
     assert "百分比曲线" not in html
     assert 'class="quant-curve-line"' in html
     assert 'class="quant-curve quant-curve-large"' in html

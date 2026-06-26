@@ -1809,7 +1809,7 @@ def load_quant_fund_snapshot() -> dict[str, Any]:
 def quant_status_text(status: str) -> str:
     return {
         "ok": "已更新",
-        "seeded": "历史种子",
+        "seeded": "已记录",
         "stale": "待更新",
         "missing_base": "待配置",
         "missing_credentials": "等待密钥",
