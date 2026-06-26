@@ -112,10 +112,44 @@ def main() -> int:
         errors.append("volatility ranking panel should be a collapsed details block")
     volatility_index = html.find("波动率排名")
     policy_index = html.find("政策新闻雷达")
+    daily_alert_index = html.find("每日异动")
     if policy_index < 0:
         errors.append("missing policy news panel")
     elif volatility_index >= 0 and policy_index > volatility_index:
         errors.append("policy news panel should render before volatility ranking")
+    if daily_alert_index < 0:
+        errors.append("missing daily move alert panel")
+    elif volatility_index >= 0 and daily_alert_index > volatility_index:
+        errors.append("daily move alert should render before volatility ranking")
+    daily_alert = snapshot.get("daily_move_alert", {})
+    if daily_alert.get("window") != "30D":
+        errors.append(f"daily move alert window mismatch: {daily_alert.get('window')}")
+    if daily_alert.get("threshold_top_pct") != 20.0:
+        errors.append(f"daily move alert threshold mismatch: {daily_alert.get('threshold_top_pct')}")
+    if "items" not in daily_alert or "top_candidate" not in daily_alert:
+        errors.append("daily move alert missing items/top_candidate keys")
+    items = daily_alert.get("items") or []
+    if daily_alert.get("shown_count") != len(items):
+        errors.append("daily move alert shown_count should equal rendered item count")
+    groups = [item.get("group") for item in items]
+    for required_group in ["债券", "汇率"]:
+        if required_group not in groups:
+            errors.append(f"daily move alert missing fixed group: {required_group}")
+    if groups.count("债券") > 1 or groups.count("汇率") > 1 or groups.count("股指") > 1:
+        errors.append(f"daily move alert should show at most one row per group: {groups}")
+    for item in items:
+        for key in ["country", "group", "label", "move", "rank", "sample_count", "top_pct", "latest_date", "warning", "display_policy"]:
+            if key not in item:
+                errors.append(f"daily move alert item missing {key}")
+        if item.get("group") in {"债券", "汇率"} and item.get("display_policy") != "固定显示":
+            errors.append(f"daily move alert fixed group has wrong policy: {item.get('group')}")
+        if item.get("group") == "股指":
+            if item.get("display_policy") != "触发显示":
+                errors.append("daily move alert equity should be trigger-only")
+            if item.get("top_pct", 100) > daily_alert.get("threshold_top_pct", 20.0):
+                errors.append("daily move alert equity item is outside threshold")
+            if not item.get("warning"):
+                errors.append("daily move alert equity item should be warning")
     if "sk-" in html or "OPENAI_API_KEY" in html:
         errors.append("HTML should not expose API keys or API key env names")
     if "sk-" in json.dumps(snapshot, ensure_ascii=False):

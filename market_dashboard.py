@@ -38,6 +38,8 @@ SNAPSHOT_JSON = DASHBOARD / "latest_market_snapshot.json"
 HTML_OUT = DASHBOARD / "index.html"
 DEFAULT_FX_FLOW_CODE = ROOT / "fx_flow_logic.py"
 USER_FX_FLOW_CODE = Path(os.environ.get("FX_FLOW_CODE_PATH", str(DEFAULT_FX_FLOW_CODE)))
+DAILY_MOVE_ALERT_WINDOW = 30
+DAILY_MOVE_ALERT_TOP_PCT = 20.0
 
 
 @dataclass(frozen=True)
@@ -898,6 +900,134 @@ def volatility_rankings(country_rows: list[dict[str, Any]]) -> dict[str, list[di
     return rankings
 
 
+def daily_move_distribution(
+    rows: list[dict[str, Any]],
+    *,
+    unit: str,
+    periods: int = DAILY_MOVE_ALERT_WINDOW,
+) -> dict[str, Any] | None:
+    if len(rows) < 2:
+        return None
+
+    window = rows[-(periods + 1) :]
+    moves = []
+    for previous, current in zip(window, window[1:]):
+        previous_close = previous.get("close")
+        current_close = current.get("close")
+        if previous_close is None or current_close is None or previous_close == 0:
+            continue
+        if unit == "pct" and (previous_close <= 0 or current_close <= 0):
+            continue
+        value = (current_close - previous_close) * 100 if unit == "bp" else math.log(current_close / previous_close) * 100
+        moves.append(
+            {
+                "value": value,
+                "abs_value": abs(value),
+                "base_date": previous["date"].isoformat(),
+                "latest_date": current["date"].isoformat(),
+            }
+        )
+
+    if len(moves) < min(periods, 10):
+        return None
+    latest = moves[-1]
+    if latest["abs_value"] == 0:
+        return None
+
+    epsilon = 1e-12
+    count_at_least = sum(1 for move in moves if move["abs_value"] >= latest["abs_value"] - epsilon)
+    count_greater = sum(1 for move in moves if move["abs_value"] > latest["abs_value"] + epsilon)
+    median_abs_move = statistics.median(move["abs_value"] for move in moves)
+    surprise_ratio = latest["abs_value"] / median_abs_move if median_abs_move > 0 else None
+    return {
+        "move": latest["value"],
+        "abs_move": latest["abs_value"],
+        "base_date": latest["base_date"],
+        "latest_date": latest["latest_date"],
+        "rank": count_greater + 1,
+        "sample_count": len(moves),
+        "top_pct": count_at_least / len(moves) * 100,
+        "median_abs_move": median_abs_move,
+        "surprise_ratio": surprise_ratio,
+    }
+
+
+def build_daily_move_alert(
+    series: dict[str, list[dict[str, Any]]],
+    specs: dict[str, SeriesSpec],
+) -> dict[str, Any]:
+    candidates = []
+    for country in COUNTRIES:
+        instruments = [
+            *([("债券", country["bond_1y"], "bp")] if country.get("bond_1y") else []),
+            ("债券", country["bond_2y"], "bp"),
+            ("债券", country["bond_10y"], "bp"),
+            ("股指", country["equity"], "pct"),
+            ("汇率", country["fx"], "pct"),
+        ]
+        for group, key, unit in instruments:
+            if key == "CNY_BASE":
+                continue
+            metrics = daily_move_distribution(series.get(key, []), unit=unit)
+            if not metrics:
+                continue
+            spec = specs.get(key)
+            move = metrics["move"]
+            if unit == "bp":
+                direction = "收益率跳升" if move > 0 else "收益率回落" if move < 0 else "持平"
+            else:
+                direction = "上涨" if move > 0 else "下跌" if move < 0 else "持平"
+            candidates.append(
+                {
+                    **metrics,
+                    "key": key,
+                    "country": country["name"],
+                    "code": country["code"],
+                    "group": group,
+                    "label": spec.label if spec else key,
+                    "unit": unit,
+                    "direction": direction,
+                    "threshold_top_pct": DAILY_MOVE_ALERT_TOP_PCT,
+                }
+            )
+
+    def candidate_score(item: dict[str, Any]) -> tuple[float, float, float]:
+        surprise = item.get("surprise_ratio")
+        surprise_value = surprise if surprise is not None and math.isfinite(surprise) else 0.0
+        return (item["top_pct"], -surprise_value, -item["abs_move"])
+
+    candidates.sort(key=candidate_score)
+    by_group = {}
+    for candidate in candidates:
+        by_group.setdefault(candidate["group"], candidate)
+
+    items = []
+    for group in ["债券", "汇率"]:
+        item = by_group.get(group)
+        if item:
+            display_item = {**item}
+            display_item["warning"] = display_item["top_pct"] <= DAILY_MOVE_ALERT_TOP_PCT
+            display_item["display_policy"] = "固定显示"
+            items.append(display_item)
+
+    equity = by_group.get("股指")
+    if equity and equity["top_pct"] <= DAILY_MOVE_ALERT_TOP_PCT:
+        display_item = {**equity}
+        display_item["warning"] = True
+        display_item["display_policy"] = "触发显示"
+        items.append(display_item)
+
+    return {
+        "window": f"{DAILY_MOVE_ALERT_WINDOW}D",
+        "threshold_top_pct": DAILY_MOVE_ALERT_TOP_PCT,
+        "candidate_count": len(candidates),
+        "shown_count": len(items),
+        "items": items,
+        "winner": items[0] if items else None,
+        "top_candidate": candidates[0] if candidates else None,
+    }
+
+
 def fx_range(rows: list[dict[str, Any]], days: int) -> dict[str, Any] | None:
     latest = latest_row(rows)
     if not latest:
@@ -1113,6 +1243,7 @@ def build_snapshot(fetch_records: list[dict[str, str]], *, fetch_policy_news: bo
         "policy_news": build_policy_news_snapshot(fetch_news=fetch_policy_news),
         "countries": countries,
         "asset_class_vol": asset_class_vol(countries),
+        "daily_move_alert": build_daily_move_alert(series, specs),
         "volatility_rankings": volatility_rankings(countries),
         "fx_rank_details": build_fx_cross_details(series),
         "second_order_monitor": build_second_order_monitor(series, specs),
@@ -1502,6 +1633,26 @@ def fmt_volatility_value(value: float | None, unit: str) -> str:
     return f"{value:.2f}{suffix}"
 
 
+def fmt_daily_move_value(value: float | None, unit: str) -> str:
+    if value is None or not math.isfinite(value):
+        return "缺失"
+    suffix = "bp" if unit == "bp" else "%"
+    return f"{value:+.2f}{suffix}"
+
+
+def fmt_abs_daily_move_value(value: float | None, unit: str) -> str:
+    if value is None or not math.isfinite(value):
+        return "缺失"
+    suffix = "bp" if unit == "bp" else "%"
+    return f"{value:.2f}{suffix}"
+
+
+def fmt_top_pct(value: float | None) -> str:
+    if value is None or not math.isfinite(value):
+        return "缺失"
+    return f"前 {value:.1f}%"
+
+
 def fmt_fx_price(value: float | None) -> str:
     if value is None or not math.isfinite(value):
         return "缺失"
@@ -1573,6 +1724,65 @@ def render_fx_rank_detail(code: str, fx_details: dict[str, Any]) -> str:
         f"{''.join(body)}"
         "</div>"
     )
+
+
+def render_daily_move_alert(alert: dict[str, Any]) -> str:
+    threshold = alert.get("threshold_top_pct", DAILY_MOVE_ALERT_TOP_PCT)
+    window = alert.get("window", f"{DAILY_MOVE_ALERT_WINDOW}D")
+    items = alert.get("items") or ([alert["winner"]] if alert.get("winner") else [])
+    header = (
+        '<section class="panel daily-alert-panel">'
+        '<div class="daily-alert-head">'
+        "<h2>每日异动</h2>"
+        f'<span>{escape(str(window))} 日变化排名 / 债券和汇率固定显示 / 股指前 {threshold:.0f}% 才显示</span>'
+        "</div>"
+    )
+    if not items:
+        top_candidate = alert.get("top_candidate") or {}
+        extra = ""
+        if top_candidate:
+            extra = (
+                f' 今日最高：{escape(top_candidate.get("country", ""))} / '
+                f'{escape(top_candidate.get("label", ""))}，'
+                f'{escape(fmt_top_pct(top_candidate.get("top_pct")))}。'
+            )
+        return header + f'<div class="daily-alert-card quiet">暂无进入前 {threshold:.0f}% 的每日异动。{extra}</div></section>'
+
+    html = [
+        header,
+        '<div class="daily-alert-list">',
+    ]
+    for item in items:
+        unit = item.get("unit", "pct")
+        move = item.get("move")
+        cls = value_class(move)
+        card_cls = "warning" if item.get("warning") else "watch"
+        surprise = item.get("surprise_ratio")
+        surprise_text = f"{surprise:.1f}x" if surprise is not None and math.isfinite(surprise) else "缺失"
+        policy = item.get("display_policy") or ("触发显示" if item.get("warning") else "固定显示")
+        html.extend(
+            [
+                f'<div class="daily-alert-card {card_cls}">',
+                '<div class="daily-alert-main">',
+                f'<strong>{escape(item.get("group", ""))}｜{escape(item.get("country", ""))}｜{escape(item.get("label", ""))}</strong>',
+                f'<p>{escape(item.get("direction", ""))} <span class="{cls}">{escape(fmt_daily_move_value(move, unit))}</span></p>',
+                "</div>",
+                '<div class="daily-alert-metrics">',
+                f'<span><em>{escape(policy)}</em>第 {item.get("rank", "-")}/{item.get("sample_count", "-")} · {escape(fmt_top_pct(item.get("top_pct")))}</span>',
+                f'<span><em>相对中位日变</em>{escape(surprise_text)}</span>',
+                f'<span><em>30D中位日变</em>{escape(fmt_abs_daily_move_value(item.get("median_abs_move"), unit))}</span>',
+                f'<span><em>日期</em>{escape(item.get("latest_date", ""))}</span>',
+                "</div>",
+                "</div>",
+            ]
+        )
+    html.extend(
+        [
+            "</div>",
+            "</section>",
+        ]
+    )
+    return "".join(html)
 
 
 def fmt_asset_volatility(summary: dict[str, Any], unit: str) -> str:
@@ -2041,6 +2251,7 @@ def render_html(snapshot: dict[str, Any]) -> str:
     ]
 
     html.append(render_policy_news(snapshot.get("policy_news", {})))
+    html.append(render_daily_move_alert(snapshot.get("daily_move_alert", {})))
 
     html.extend(
         [
@@ -2398,6 +2609,21 @@ h3 { margin: 0 0 10px; font-size: 15px; letter-spacing: 0; }
 }
 .policy-actions-toggle:hover { background: #f8fafc; border-color: #b7c2cf; }
 .policy-actions-expanded { margin-top: 7px; }
+.daily-alert-panel { display: grid; gap: 12px; }
+.daily-alert-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.daily-alert-head h2 { margin: 0; }
+.daily-alert-head span { color: var(--muted); font-size: 12px; font-weight: 650; }
+.daily-alert-list { display: grid; gap: 8px; }
+.daily-alert-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: center; border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 12px 14px; }
+.daily-alert-card.warning { border-color: #f3c987; background: #fffaf1; }
+.daily-alert-card.watch { border-color: #dbe3ee; background: #fff; }
+.daily-alert-card.quiet { display: block; color: var(--muted); font-size: 13px; }
+.daily-alert-main strong { display: block; color: var(--ink); font-size: 15px; }
+.daily-alert-main p { margin: 5px 0 0; color: var(--muted); font-weight: 700; }
+.daily-alert-main p span { margin-left: 4px; font-variant-numeric: tabular-nums; }
+.daily-alert-metrics { display: grid; grid-template-columns: repeat(4, max-content); gap: 12px; color: var(--ink); font-size: 12px; font-variant-numeric: tabular-nums; }
+.daily-alert-metrics span { min-width: 0; }
+.daily-alert-metrics em { display: block; color: var(--muted); font-style: normal; font-size: 10px; line-height: 1.2; }
 .volatility-panel, .status-panel { padding: 0; overflow: hidden; }
 .volatility-panel summary, .status-panel summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; padding: 16px; font-weight: 750; list-style: none; }
 .volatility-panel summary::-webkit-details-marker, .status-panel summary::-webkit-details-marker { display: none; }
@@ -2645,6 +2871,9 @@ th:first-child, td:first-child { text-align: left; }
 @media (max-width: 900px) {
   main { padding: 14px; }
   .topbar { align-items: flex-start; flex-direction: column; }
+  .daily-alert-head, .daily-alert-card { align-items: flex-start; grid-template-columns: 1fr; }
+  .daily-alert-head { flex-direction: column; }
+  .daily-alert-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .policy-news-head { align-items: flex-start; flex-direction: column; }
   .policy-news-grid, .ranking-grid, .flow-grid { grid-template-columns: 1fr; }
   .policy-actions-head { align-items: flex-start; flex-direction: column; }
