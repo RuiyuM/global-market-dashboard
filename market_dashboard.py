@@ -37,6 +37,7 @@ DASHBOARD_DATA = DASHBOARD / "data"
 SNAPSHOT_JSON = DASHBOARD / "latest_market_snapshot.json"
 QUANT_FUND_JSON = DASHBOARD / "quant_fund_snapshot.json"
 HTML_OUT = DASHBOARD / "index.html"
+QUANT_FUND_HTML_OUT = DASHBOARD / "quant_fund.html"
 DEFAULT_FX_FLOW_CODE = ROOT / "fx_flow_logic.py"
 USER_FX_FLOW_CODE = Path(os.environ.get("FX_FLOW_CODE_PATH", str(DEFAULT_FX_FLOW_CODE)))
 DAILY_MOVE_ALERT_WINDOW = 30
@@ -1920,11 +1921,11 @@ def render_quant_fund(snapshot: dict[str, Any]) -> str:
     generated_at = str(fund.get("generated_at") or "")
     generated_short = generated_at[5:16].replace("T", " ") if len(generated_at) >= 16 else "待更新"
     return (
-        '<section class="panel quant-fund-detail" id="quant-fund">'
+        '<section class="panel quant-fund-detail">'
         '<div class="quant-fund-head">'
         '<div><h2>量化基金</h2>'
         f'<p>每日更新 · {escape(generated_short)} · 全部为百分比曲线</p></div>'
-        '<a class="quant-close" href="#">收起</a>'
+        '<a class="quant-back" href="index.html">返回</a>'
         "</div>"
         '<div class="quant-fund-grid">'
         f'{render_quant_card("期货", fund.get("futures", {}))}'
@@ -1932,6 +1933,37 @@ def render_quant_fund(snapshot: dict[str, Any]) -> str:
         f'{render_quant_card("股指", fund.get("equity", {"label": "股指", "status": "pending", "points": []}))}'
         "</div>"
         "</section>"
+    )
+
+
+def render_quant_fund_page(snapshot: dict[str, Any]) -> str:
+    generated_at = escape(str((snapshot or {}).get("generated_at") or ""))
+    return "".join(
+        [
+            "<!doctype html>",
+            '<html lang="zh-CN">',
+            "<head>",
+            '<meta charset="utf-8">',
+            '<meta name="viewport" content="width=device-width, initial-scale=1">',
+            "<title>量化基金</title>",
+            "<style>",
+            CSS,
+            "</style>",
+            "</head>",
+            "<body>",
+            "<main>",
+            '<section class="topbar">',
+            "<div>",
+            "<h1>量化基金</h1>",
+            f'<p class="muted">生成时间：{generated_at or "待更新"}</p>',
+            "</div>",
+            '<a class="button" href="index.html">Dashboard</a>',
+            "</section>",
+            render_quant_fund(snapshot),
+            "</main>",
+            "</body>",
+            "</html>",
+        ]
     )
 
 
@@ -2660,13 +2692,11 @@ def render_html(snapshot: dict[str, Any]) -> str:
     html.extend(['<section class="notes">'])
     notes = snapshot["notes"]
     for index, note in enumerate(notes):
-        suffix = ' <a class="quiet-quant-link" href="#quant-fund">量化基金</a>' if index == len(notes) - 1 else ""
+        suffix = ' <a class="quiet-quant-link" href="quant_fund.html">量化基金</a>' if index == len(notes) - 1 else ""
         html.append(f"<p>{escape(note)}{suffix}</p>")
     if not notes:
-        html.append('<p><a class="quiet-quant-link" href="#quant-fund">量化基金</a></p>')
+        html.append('<p><a class="quiet-quant-link" href="quant_fund.html">量化基金</a></p>')
     html.append("</section>")
-    html.append(render_quant_fund(snapshot.get("quant_fund", {})))
-
     html.extend(
         [
             f'<script id="ohlc-data" type="application/json">{ohlc_json}</script>',
@@ -2781,13 +2811,12 @@ h3 { margin: 0 0 10px; font-size: 15px; letter-spacing: 0; }
 .daily-alert-metrics em { display: block; color: var(--muted); font-style: normal; font-size: 10px; line-height: 1.2; }
 .quiet-quant-link { color: inherit; font: inherit; font-weight: inherit; text-decoration: none; }
 .quiet-quant-link:hover { text-decoration: underline; text-underline-offset: 2px; }
-.quant-fund-detail { display: none; margin-top: 10px; scroll-margin-top: 16px; }
-.quant-fund-detail:target { display: block; }
+.quant-fund-detail { margin-top: 10px; }
 .quant-fund-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
 .quant-fund-head h2 { margin: 0 0 4px; font-size: 18px; }
 .quant-fund-head p { margin: 0; color: var(--muted); font-weight: 650; }
-.quant-close { border: 1px solid #cfd8e3; border-radius: 999px; padding: 4px 8px; color: var(--muted); font-size: 11px; font-weight: 750; text-decoration: none; white-space: nowrap; }
-.quant-close:hover { background: #f8fafc; }
+.quant-back { border: 1px solid #cfd8e3; border-radius: 999px; padding: 4px 8px; color: var(--muted); font-size: 11px; font-weight: 750; text-decoration: none; white-space: nowrap; }
+.quant-back:hover { background: #f8fafc; }
 .quant-fund-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .quant-card { border: 1px solid #e5eaf1; border-radius: 8px; padding: 8px; background: #fff; }
 .quant-card-head, .quant-card-main { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
@@ -3990,7 +4019,9 @@ def main() -> int:
     DASHBOARD.mkdir(parents=True, exist_ok=True)
     SNAPSHOT_JSON.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     HTML_OUT.write_text(render_html(snapshot), encoding="utf-8")
+    QUANT_FUND_HTML_OUT.write_text(render_quant_fund_page(snapshot.get("quant_fund", {})), encoding="utf-8")
     print(f"wrote {HTML_OUT}")
+    print(f"wrote {QUANT_FUND_HTML_OUT}")
     print(f"wrote {SNAPSHOT_JSON}")
     return 0
 

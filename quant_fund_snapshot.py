@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import csv
 import json
 import math
 import os
@@ -117,6 +118,23 @@ def fetch_futures_trades(api_key: str, api_secret: str, symbol: str, start: date
             last_time = max(int(item.get("time", page_start_ms)) for item in batch)
             page_start_ms = last_time + 1
         chunk_start = chunk_end + timedelta(milliseconds=1)
+    return trades
+
+
+
+def load_futures_trades_csv(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    trades: list[dict[str, Any]] = []
+    with path.open(newline="", encoding="utf-8") as handle:
+        for row in csv.DictReader(handle):
+            try:
+                timestamp = int(row["time"])
+                realized_pnl = float(row.get("realizedPnl", 0) or 0)
+            except (KeyError, TypeError, ValueError):
+                continue
+            if math.isfinite(realized_pnl):
+                trades.append({"time": timestamp, "realizedPnl": realized_pnl})
     return trades
 
 
@@ -255,6 +273,8 @@ def build_snapshot() -> dict[str, Any]:
     futures_secret = os.environ.get("BINANCE_FUTURES_API_SECRET", "")
     option_key = os.environ.get("BINANCE_OPTION_API_KEY", "")
     option_secret = os.environ.get("BINANCE_OPTION_API_SECRET", "")
+    futures_csv_raw = os.environ.get("QUANT_FUND_FUTURES_TRADES_CSV", "").strip()
+    futures_csv = Path(futures_csv_raw).expanduser() if futures_csv_raw else None
     existing = load_existing_public_snapshot()
     existing_futures_points = public_points(existing.get("futures") if isinstance(existing.get("futures"), dict) else None)
     existing_options_points = public_points(existing.get("options") if isinstance(existing.get("options"), dict) else None)
@@ -270,6 +290,17 @@ def build_snapshot() -> dict[str, Any]:
             "base_configured": False,
             "points": existing_futures_points,
             "trade_count": 0,
+        }
+    elif futures_csv and futures_csv.exists():
+        trades = load_futures_trades_csv(futures_csv)
+        futures_points = aggregate_futures_trade_curve(trades, base_usd=futures_base, start=start)
+        snapshot["futures"] = {
+            "label": "期货",
+            "status": "ok" if futures_points else "no_trades",
+            "base_configured": True,
+            "points": futures_points,
+            "latest_pct": latest_pct(futures_points),
+            "trade_count": len(trades),
         }
     elif futures_key and futures_secret and symbol:
         try:

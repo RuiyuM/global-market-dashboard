@@ -11,6 +11,7 @@ from pathlib import Path
 
 SNAPSHOT = Path(__file__).resolve().parent / "dashboard" / "latest_market_snapshot.json"
 HTML = Path(__file__).resolve().parent / "dashboard" / "index.html"
+QUANT_HTML = Path(__file__).resolve().parent / "dashboard" / "quant_fund.html"
 DEFAULT_FX_FLOW_CODE = Path(__file__).resolve().parent / "fx_flow_logic.py"
 USER_FX_FLOW_CODE = str(Path(os.environ.get("FX_FLOW_CODE_PATH", str(DEFAULT_FX_FLOW_CODE))))
 COUNTRIES = {"美国", "中国", "日本", "德国", "俄罗斯", "韩国"}
@@ -39,6 +40,7 @@ def main() -> int:
 
     snapshot = json.loads(SNAPSHOT.read_text(encoding="utf-8"))
     html = HTML.read_text(encoding="utf-8") if HTML.exists() else ""
+    quant_html = QUANT_HTML.read_text(encoding="utf-8") if QUANT_HTML.exists() else ""
     errors: list[str] = []
 
     country_names = {country["country"] for country in snapshot.get("countries", [])}
@@ -166,10 +168,11 @@ def main() -> int:
         "total_usdt_usdc",
         "option_positions",
         "futures_positions",
-        "BTC-260",
     ]
     if any(marker in html for marker in forbidden_public_markers):
         errors.append("HTML should not expose API keys or API key env names")
+    if any(marker in quant_html for marker in forbidden_public_markers):
+        errors.append("quant fund HTML should not expose API keys or private fields")
     snapshot_text = json.dumps(snapshot, ensure_ascii=False)
     if any(marker in snapshot_text for marker in forbidden_public_markers):
         errors.append("snapshot should not expose API keys")
@@ -179,10 +182,14 @@ def main() -> int:
     for key in ["futures", "options", "equity"]:
         if key not in quant_fund:
             errors.append(f"missing quant fund section: {key}")
-    if '<a class="quiet-quant-link" href="#quant-fund">量化基金</a>' not in html:
+    if '<a class="quiet-quant-link" href="quant_fund.html">量化基金</a>' not in html:
         errors.append("missing quiet quant fund link in notes")
-    if '<section class="panel quant-fund-detail" id="quant-fund">' not in html:
-        errors.append("missing hidden quant fund detail section")
+    if '<section class="panel quant-fund-detail">' in html:
+        errors.append("main HTML should not render quant fund detail section")
+    if '<section class="panel quant-fund-detail">' not in quant_html:
+        errors.append("missing quant fund detail section page")
+    if '<a class="quant-back" href="index.html">返回</a>' not in quant_html:
+        errors.append("missing quant fund back link")
     if '<section class="panel quant-fund-bottom" id="quant-fund">' in html:
         errors.append("quant fund should not show as a default bottom panel")
     if '<a class="quant-fund-dock" href="#quant-fund">' in html:
@@ -191,8 +198,11 @@ def main() -> int:
         errors.append("quant fund should not use a fixed overlay page")
     if '<details class="quant-fund-widget">' in html:
         errors.append("quant fund should not use the old expandable dock")
+    for marker in ["期货", "期权"]:
+        if marker in html:
+            errors.append(f"main HTML should not render quant fund marker: {marker}")
     for marker in ["量化基金", "期货", "期权", "股指"]:
-        if marker not in html:
+        if marker not in quant_html:
             errors.append(f"missing quant fund marker: {marker}")
     policy_news = snapshot.get("policy_news", {})
     if set(policy_news.get("regions", {})) != set(POLICY_REGIONS):

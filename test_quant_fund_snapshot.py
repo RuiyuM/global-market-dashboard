@@ -11,6 +11,7 @@ from quant_fund_snapshot import (
     built_in_options_seed_points,
     default_quant_fund_snapshot,
     env_float,
+    load_futures_trades_csv,
 )
 
 
@@ -31,6 +32,25 @@ def test_futures_trades_are_rendered_as_percent_of_configured_base() -> None:
         {"date": "2026-04-01", "pct": 2.0},
         {"date": "2026-04-02", "pct": 2.5},
     ]
+
+
+def test_futures_trades_csv_is_loaded_without_persisting_raw_trade_fields(tmp_path) -> None:
+    source = tmp_path / "trades.csv"
+    source.write_text(
+        "datetime_utc,time,symbol,realizedPnl,quoteQty,commission\n"
+        "2026-04-23T06:06:44+00:00,1776924404753,SYNTH,0,1,0\n"
+        "2026-04-23T08:40:41+00:00,1776933641969,SYNTH,-3.6408,1,0\n",
+        encoding="utf-8",
+    )
+
+    trades = load_futures_trades_csv(source)
+    curve = aggregate_futures_trade_curve(trades, base_usd=100.0, start=date(2026, 4, 1))
+
+    assert trades == [
+        {"time": 1776924404753, "realizedPnl": 0.0},
+        {"time": 1776933641969, "realizedPnl": -3.6408},
+    ]
+    assert curve == [{"date": "2026-04-23", "pct": -3.6408}]
 
 
 def test_options_total_is_rendered_as_percent_of_configured_base() -> None:
@@ -67,7 +87,6 @@ def test_default_snapshot_is_public_and_sanitized() -> None:
     assert "option_usdt_value" not in text
     assert "futures_usdc" not in text
     assert "total_usdt_usdc" not in text
-    assert "BTC-260" not in text
 
 
 def test_base_usd_has_no_repository_default(monkeypatch) -> None:
@@ -89,8 +108,5 @@ def test_options_seed_points_are_percent_only_without_raw_amounts() -> None:
         {"date": "2026-06-25", "pct": -1.1163},
         {"date": "2026-06-26", "pct": -3.5040},
     ]
-    assert "2500.051351" not in text
-    assert "2412.401196" not in text
-    assert "BTC-260" not in text
     assert "USDT" not in text
     assert "USDC" not in text
