@@ -1811,7 +1811,7 @@ def quant_status_text(status: str) -> str:
         "ok": "已更新",
         "seeded": "历史种子",
         "stale": "待更新",
-        "missing_base": "等待本金",
+        "missing_base": "待配置",
         "missing_credentials": "等待密钥",
         "missing_symbol": "等待标的",
         "no_trades": "暂无交易",

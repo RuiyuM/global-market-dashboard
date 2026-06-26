@@ -204,7 +204,7 @@ def main() -> int:
             errors.append(f"missing quant fund detail panel: {key}")
     if "coming soon in 2026 3季度末" not in quant_html:
         errors.append("missing equity coming-soon copy")
-    if "本金已配置" in quant_html or "本金未配置" in quant_html or "百分比曲线" in quant_html:
+    if "本金已配置" in quant_html or "本金未配置" in quant_html or "等待本金" in quant_html or "百分比曲线" in quant_html:
         errors.append("quant fund page should not spell out principal or percent-curve copy")
     if '<section class="panel quant-fund-bottom" id="quant-fund">' in html:
         errors.append("quant fund should not show as a default bottom panel")
