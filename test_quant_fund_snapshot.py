@@ -14,6 +14,7 @@ from quant_fund_snapshot import (
     default_quant_fund_snapshot,
     env_float,
     load_futures_trades_csv,
+    merge_percent_points,
 )
 
 
@@ -53,6 +54,29 @@ def test_futures_trades_csv_is_loaded_without_persisting_raw_trade_fields(tmp_pa
         {"time": 1776933641969, "realizedPnl": -3.6408, "commission": 0.3, "commissionAsset": ""},
     ]
     assert curve == [{"date": "2026-04-23", "pct": -4.2508}]
+
+
+def test_futures_api_update_appends_to_existing_public_curve_without_resetting() -> None:
+    existing = [
+        {"date": "2026-04-23", "pct": -0.8529},
+        {"date": "2026-06-22", "pct": -0.8969},
+        {"date": "2026-06-24", "pct": 2.9086},
+    ]
+    api_curve = [
+        {"date": "2026-06-24", "pct": -0.1976},
+        {"date": "2026-06-25", "pct": -0.3966},
+        {"date": "2026-06-26", "pct": 7.1930},
+    ]
+
+    merged = merge_percent_points(existing, api_curve)
+
+    assert merged == [
+        {"date": "2026-04-23", "pct": -0.8529},
+        {"date": "2026-06-22", "pct": -0.8969},
+        {"date": "2026-06-24", "pct": 2.9086},
+        {"date": "2026-06-25", "pct": 2.7096},
+        {"date": "2026-06-26", "pct": 10.2992},
+    ]
 
 
 def test_options_total_is_rendered_as_percent_of_configured_base() -> None:
@@ -201,6 +225,42 @@ def test_api_options_update_writes_only_public_percent_points(monkeypatch, tmp_p
     assert "option_usdt_value" not in text
     assert "futures_usdc" not in text
     assert "total_usdt_usdc" not in text
+
+
+def test_option_wallet_total_uses_sapi_options_wallet(monkeypatch) -> None:
+    calls = []
+
+    def fake_signed_get(base, path, api_key, api_secret, params=None):
+        calls.append((base, path, api_key, api_secret, params))
+        return [
+            {"walletName": "Spot", "balance": "100"},
+            {"walletName": "Options", "balance": "2450.5"},
+        ]
+
+    monkeypatch.setattr(qfs, "signed_get", fake_signed_get)
+
+    assert qfs.fetch_option_wallet_total("option-key", "option-secret") == 2450.5
+    assert calls == [
+        (
+            qfs.SAPI_BASE,
+            "/sapi/v1/asset/wallet/balance",
+            "option-key",
+            "option-secret",
+            {"quoteAsset": "USDT"},
+        )
+    ]
+
+
+def test_futures_stable_balance_matches_options_publisher_usdc_only(monkeypatch) -> None:
+    def fake_signed_get(base, path, api_key, api_secret, params=None):
+        return [
+            {"asset": "USDT", "balance": "4000", "crossUnPnl": "0"},
+            {"asset": "USDC", "balance": "496", "crossUnPnl": "4"},
+        ]
+
+    monkeypatch.setattr(qfs, "signed_get", fake_signed_get)
+
+    assert qfs.fetch_futures_stable_balance("futures-key", "futures-secret") == 500.0
 
 
 def test_base_usd_has_no_repository_default(monkeypatch) -> None:

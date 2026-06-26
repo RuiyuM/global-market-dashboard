@@ -26,6 +26,7 @@ PRIVATE_ENV = PRIVATE_DIR / "quant_fund.env"
 
 FAPI_BASE = "https://fapi.binance.com"
 EAPI_BASE = "https://eapi.binance.com"
+SAPI_BASE = "https://api.binance.com"
 
 DEFAULT_SYMBOL = ""
 
@@ -189,21 +190,18 @@ def aggregate_futures_trade_curve(
 
 def fetch_futures_stable_balance(api_key: str, api_secret: str) -> float:
     rows = signed_get(FAPI_BASE, "/fapi/v2/balance", api_key, api_secret)
-    total = 0.0
     for item in rows if isinstance(rows, list) else []:
-        if item.get("asset") not in {"USDT", "USDC"}:
-            continue
-        total += float(item.get("balance", 0) or 0) + float(item.get("crossUnPnl", 0) or 0)
-    return total
+        if str(item.get("asset", "")).upper() == "USDC":
+            return float(item.get("balance", 0) or 0) + float(item.get("crossUnPnl", 0) or 0)
+    return 0.0
 
 
 def fetch_option_wallet_total(api_key: str, api_secret: str) -> float:
-    rows = signed_get(EAPI_BASE, "/eapi/v1/account", api_key, api_secret)
-    total = 0.0
-    for asset in rows.get("asset", []) if isinstance(rows, dict) else []:
-        if asset.get("asset") == "USDT":
-            total += float(asset.get("equity", asset.get("marginBalance", 0)) or 0)
-    return total
+    rows = signed_get(SAPI_BASE, "/sapi/v1/asset/wallet/balance", api_key, api_secret, {"quoteAsset": "USDT"})
+    for wallet in rows if isinstance(rows, list) else []:
+        if str(wallet.get("walletName", "")).lower() == "options":
+            return float(wallet.get("balance", 0) or 0)
+    return 0.0
 
 
 def load_existing_public_snapshot(path: Path = PUBLIC_SNAPSHOT) -> dict[str, Any]:
@@ -250,6 +248,35 @@ def upsert_percent_point(points: list[dict[str, Any]], day: date, pct: float) ->
     rows.append({"date": day.isoformat(), "pct": round(pct, 4)})
     rows.sort(key=lambda row: row["date"])
     return rows
+
+
+def merge_percent_points(existing: list[dict[str, Any]], updates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    existing_rows = public_points({"points": existing})
+    update_rows = public_points({"points": updates})
+    if not existing_rows:
+        return update_rows
+    if not update_rows:
+        return existing_rows
+
+    latest_existing = existing_rows[-1]
+    latest_existing_date = latest_existing["date"]
+    latest_existing_pct = float(latest_existing["pct"])
+    baseline_update = None
+    for row in update_rows:
+        if row["date"] <= latest_existing_date:
+            baseline_update = float(row["pct"])
+        else:
+            break
+    if baseline_update is None:
+        baseline_update = 0.0
+
+    merged = list(existing_rows)
+    for row in update_rows:
+        if row["date"] <= latest_existing_date:
+            continue
+        merged.append({"date": row["date"], "pct": round(latest_existing_pct + float(row["pct"]) - baseline_update, 4)})
+    merged.sort(key=lambda item: item["date"])
+    return merged
 
 
 def default_quant_fund_snapshot() -> dict[str, Any]:
@@ -318,7 +345,8 @@ def build_snapshot() -> dict[str, Any]:
     elif futures_key and futures_secret and symbol:
         try:
             trades = fetch_futures_trades(futures_key, futures_secret, symbol, start, now.date())
-            futures_points = aggregate_futures_trade_curve(trades, base_usd=futures_base, start=start)
+            fetched_points = aggregate_futures_trade_curve(trades, base_usd=futures_base, start=start)
+            futures_points = merge_percent_points(existing_futures_points, fetched_points)
             snapshot["futures"] = {
                 "label": "期货",
                 "status": "ok" if futures_points else "no_trades",
