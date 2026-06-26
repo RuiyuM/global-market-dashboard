@@ -6,7 +6,7 @@ from __future__ import annotations
 from market_dashboard import render_html
 
 
-def test_quant_fund_is_bottom_page_section_with_smooth_percent_curves() -> None:
+def test_quant_fund_is_hidden_behind_plain_notes_link_with_smooth_percent_curves() -> None:
     html = render_html(
         {
             "countries": [],
@@ -15,7 +15,7 @@ def test_quant_fund_is_bottom_page_section_with_smooth_percent_curves() -> None:
             "second_order_monitor": [],
             "fx_flows": [],
             "series_status": [],
-            "notes": [],
+            "notes": ["政策新闻雷达只做加息、降息、维持利率相关文本筛选。"],
             "generated_at": "2026-06-26T00:00:00",
             "quant_fund": {
                 "generated_at": "2026-06-26T00:00:00",
@@ -44,14 +44,20 @@ def test_quant_fund_is_bottom_page_section_with_smooth_percent_curves() -> None:
         }
     )
 
-    assert '<section class="panel quant-fund-bottom" id="quant-fund">' in html
+    assert '<a class="quiet-quant-link" href="#quant-fund">量化基金</a>' in html
+    assert '<section class="panel quant-fund-detail" id="quant-fund">' in html
     assert '<div class="quant-fund-head">' in html
-    assert html.index('<section class="notes">') < html.index('<section class="panel quant-fund-bottom" id="quant-fund">')
+    assert html.index('<section class="notes">') < html.index('<a class="quiet-quant-link" href="#quant-fund">量化基金</a>')
+    assert html.index('<a class="quiet-quant-link" href="#quant-fund">量化基金</a>') < html.index('<section class="panel quant-fund-detail" id="quant-fund">')
+    assert '<section class="panel quant-fund-bottom" id="quant-fund">' not in html
     assert '<a class="quant-fund-dock" href="#quant-fund">' not in html
     assert '<section class="quant-fund-page" id="quant-fund">' not in html
     assert '<a class="quant-back" href="#">← 返回</a>' not in html
     assert '<details class="quant-fund-widget">' not in html
-    assert ".quant-fund-bottom {" in html
+    assert ".quiet-quant-link {" in html
+    assert ".quant-fund-detail { display: none;" in html
+    assert ".quant-fund-detail:target { display: block;" in html
+    assert ".quant-fund-bottom {" not in html
     assert ".quant-fund-dock {" not in html
     assert ".quant-fund-page { display: none;" not in html
     assert ".quant-fund-page:target" not in html

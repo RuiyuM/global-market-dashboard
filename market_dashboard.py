@@ -1920,11 +1920,11 @@ def render_quant_fund(snapshot: dict[str, Any]) -> str:
     generated_at = str(fund.get("generated_at") or "")
     generated_short = generated_at[5:16].replace("T", " ") if len(generated_at) >= 16 else "待更新"
     return (
-        '<section class="panel quant-fund-bottom" id="quant-fund">'
+        '<section class="panel quant-fund-detail" id="quant-fund">'
         '<div class="quant-fund-head">'
         '<div><h2>量化基金</h2>'
         f'<p>每日更新 · {escape(generated_short)} · 全部为百分比曲线</p></div>'
-        '<span>低频</span>'
+        '<a class="quant-close" href="#">收起</a>'
         "</div>"
         '<div class="quant-fund-grid">'
         f'{render_quant_card("期货", fund.get("futures", {}))}'
@@ -2658,8 +2658,12 @@ def render_html(snapshot: dict[str, Any]) -> str:
     html.extend(["</tbody></table></div></details>"])
 
     html.extend(['<section class="notes">'])
-    for note in snapshot["notes"]:
-        html.append(f"<p>{escape(note)}</p>")
+    notes = snapshot["notes"]
+    for index, note in enumerate(notes):
+        suffix = ' <a class="quiet-quant-link" href="#quant-fund">量化基金</a>' if index == len(notes) - 1 else ""
+        html.append(f"<p>{escape(note)}{suffix}</p>")
+    if not notes:
+        html.append('<p><a class="quiet-quant-link" href="#quant-fund">量化基金</a></p>')
     html.append("</section>")
     html.append(render_quant_fund(snapshot.get("quant_fund", {})))
 
@@ -2775,11 +2779,15 @@ h3 { margin: 0 0 10px; font-size: 15px; letter-spacing: 0; }
 .daily-alert-metrics { display: grid; grid-template-columns: repeat(4, max-content); gap: 12px; color: var(--ink); font-size: 12px; font-variant-numeric: tabular-nums; }
 .daily-alert-metrics span { min-width: 0; }
 .daily-alert-metrics em { display: block; color: var(--muted); font-style: normal; font-size: 10px; line-height: 1.2; }
-.quant-fund-bottom { margin-top: 10px; }
+.quiet-quant-link { color: inherit; font: inherit; font-weight: inherit; text-decoration: none; }
+.quiet-quant-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+.quant-fund-detail { display: none; margin-top: 10px; scroll-margin-top: 16px; }
+.quant-fund-detail:target { display: block; }
 .quant-fund-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
 .quant-fund-head h2 { margin: 0 0 4px; font-size: 18px; }
 .quant-fund-head p { margin: 0; color: var(--muted); font-weight: 650; }
-.quant-fund-head span { border: 1px solid #cfd8e3; border-radius: 999px; padding: 4px 8px; color: var(--muted); font-size: 11px; font-weight: 750; white-space: nowrap; }
+.quant-close { border: 1px solid #cfd8e3; border-radius: 999px; padding: 4px 8px; color: var(--muted); font-size: 11px; font-weight: 750; text-decoration: none; white-space: nowrap; }
+.quant-close:hover { background: #f8fafc; }
 .quant-fund-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .quant-card { border: 1px solid #e5eaf1; border-radius: 8px; padding: 8px; background: #fff; }
 .quant-card-head, .quant-card-main { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }

@@ -179,8 +179,12 @@ def main() -> int:
     for key in ["futures", "options", "equity"]:
         if key not in quant_fund:
             errors.append(f"missing quant fund section: {key}")
-    if '<section class="panel quant-fund-bottom" id="quant-fund">' not in html:
-        errors.append("missing bottom quant fund section")
+    if '<a class="quiet-quant-link" href="#quant-fund">量化基金</a>' not in html:
+        errors.append("missing quiet quant fund link in notes")
+    if '<section class="panel quant-fund-detail" id="quant-fund">' not in html:
+        errors.append("missing hidden quant fund detail section")
+    if '<section class="panel quant-fund-bottom" id="quant-fund">' in html:
+        errors.append("quant fund should not show as a default bottom panel")
     if '<a class="quant-fund-dock" href="#quant-fund">' in html:
         errors.append("quant fund should not be a fixed dock")
     if '<section class="quant-fund-page" id="quant-fund">' in html:
