@@ -85,3 +85,10 @@ def test_move_chart_only_mentions_blue_compare_line_when_comparison_exists() -> 
 def test_ohlc_zoom_buttons_use_requested_direction() -> None:
     assert 'zoomInButton?.addEventListener("click", () => zoomChart(1));' in JS
     assert 'zoomOutButton?.addEventListener("click", () => zoomChart(-1));' in JS
+
+
+def test_ohlc_comparison_legend_stacks_rows_to_avoid_overlap() -> None:
+    assert "const legendPrimaryY = 18;" in JS
+    assert "const legendCompareY = 36;" in JS
+    assert 'y="${legendCompareY}"' in JS
+    assert 'x="${margin.left + 184}" y="16"' not in JS
