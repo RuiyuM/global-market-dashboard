@@ -79,6 +79,8 @@ def test_quant_fund_separate_page_contains_curves_and_back_link() -> None:
     assert '<section class="panel quant-detail-panel" id="quant-detail-futures">' in html
     assert '<section class="panel quant-detail-panel" id="quant-detail-options">' in html
     assert '<section class="panel quant-detail-panel quant-detail-empty" id="quant-detail-equity">' in html
+    assert ".quant-detail-panel { display: none;" in html
+    assert ".quant-detail-panel:target { display: block;" in html
     assert "期货" in html
     assert "期权" in html
     assert "股指" in html
@@ -89,11 +91,14 @@ def test_quant_fund_separate_page_contains_curves_and_back_link() -> None:
     assert "百分比曲线" not in html
     assert 'class="quant-curve-line"' in html
     assert 'class="quant-curve quant-curve-large"' in html
-    assert 'class="quant-drawdown-line"' in html
+    assert 'class="quant-peak-line"' in html
     assert 'class="quant-start-line"' in html
     assert "Max DD" in html
     assert " C " in html
     assert "<polyline" not in html
+    assert "quant-drawdown-line" not in html
+    assert "quant-drawdown-area" not in html
+    assert "Curve and Drawdown" not in html
     assert "Entry Price" not in html
     assert "USD" not in html
     assert "base_configured" not in html

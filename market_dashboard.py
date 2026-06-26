@@ -1865,12 +1865,10 @@ def render_quant_curve(points: list[dict[str, Any]], *, large: bool = False) -> 
 
     if large:
         width = 920
-        height = 430
+        height = 310
         pad_x = 58
-        top_top = 38
-        top_bottom = 205
-        bottom_top = 258
-        bottom_bottom = 398
+        chart_top = 34
+        chart_bottom = 270
 
         min_value = min(value for _, value in values)
         max_value = max(value for _, value in values)
@@ -1882,91 +1880,68 @@ def render_quant_curve(points: list[dict[str, Any]], *, large: bool = False) -> 
         max_value += padding
         spread = max_value - min_value
 
-        top_coords = []
-        drawdowns: list[tuple[str, float]] = []
+        coords = []
+        peak_coords = []
+        drawdowns = []
         running_peak = values[0][1]
         for index, (day, value) in enumerate(values):
             running_peak = max(running_peak, value)
             drawdowns.append((day, value - running_peak))
             x = pad_x + index * (width - 2 * pad_x) / (len(values) - 1)
-            y = top_bottom - ((value - min_value) / spread) * (top_bottom - top_top)
-            top_coords.append((x, y))
+            y = chart_bottom - ((value - min_value) / spread) * (chart_bottom - chart_top)
+            peak_y = chart_bottom - ((running_peak - min_value) / spread) * (chart_bottom - chart_top)
+            coords.append((x, y))
+            peak_coords.append((x, peak_y))
 
-        min_dd = min(value for _, value in drawdowns)
-        dd_floor = min(min_dd * 1.2, -0.25)
-        dd_spread = abs(dd_floor)
-        dd_coords = []
-        for index, (_, value) in enumerate(drawdowns):
-            x = pad_x + index * (width - 2 * pad_x) / (len(drawdowns) - 1)
-            y = bottom_top + ((0 - value) / dd_spread) * (bottom_bottom - bottom_top)
-            dd_coords.append((x, y))
-
-        top_grid_lines = []
+        grid_lines = []
         for step in range(5):
             ratio = step / 4
-            y = top_top + ratio * (top_bottom - top_top)
+            y = chart_top + ratio * (chart_bottom - chart_top)
             value = max_value - ratio * spread
-            top_grid_lines.append(
+            grid_lines.append(
                 f'<line class="quant-grid-line" x1="{pad_x}" x2="{width - pad_x}" y1="{y:.2f}" y2="{y:.2f}" />'
                 f'<text x="{pad_x - 10}" y="{y + 4:.2f}" text-anchor="end">{value:+.1f}%</text>'
             )
-        dd_grid_lines = []
-        for step in range(4):
-            ratio = step / 3
-            y = bottom_top + ratio * (bottom_bottom - bottom_top)
-            value = 0 + ratio * dd_floor
-            dd_grid_lines.append(
-                f'<line class="quant-grid-line" x1="{pad_x}" x2="{width - pad_x}" y1="{y:.2f}" y2="{y:.2f}" />'
-                f'<text x="{pad_x - 10}" y="{y + 4:.2f}" text-anchor="end">{value:.1f}%</text>'
-            )
 
-        top_path = smooth_svg_path(top_coords)
-        dd_path = smooth_svg_path(dd_coords)
+        path = smooth_svg_path(coords)
+        peak_path = " ".join(
+            f"{'M' if index == 0 else 'L'} {x:.2f} {y:.2f}" for index, (x, y) in enumerate(peak_coords)
+        )
         latest_day, latest_value = values[-1]
         max_dd_index, (max_dd_day, max_dd_value) = min(enumerate(drawdowns), key=lambda item: item[1][1])
-        max_dd_x, max_dd_y = dd_coords[max_dd_index]
+        max_dd_x, max_dd_y = coords[max_dd_index]
         top_zero = ""
         if min_value <= 0 <= max_value:
-            zero_y = top_bottom - ((0 - min_value) / spread) * (top_bottom - top_top)
+            zero_y = chart_bottom - ((0 - min_value) / spread) * (chart_bottom - chart_top)
             top_zero = f'<line class="quant-start-line" x1="{pad_x}" x2="{width - pad_x}" y1="{zero_y:.2f}" y2="{zero_y:.2f}" />'
         top_area = (
-            f'M {top_coords[0][0]:.2f} {top_bottom:.2f} '
-            f'L {top_coords[0][0]:.2f} {top_coords[0][1]:.2f} '
-            f'{top_path[1:]} '
-            f'L {top_coords[-1][0]:.2f} {top_bottom:.2f} Z'
-        )
-        dd_area = (
-            f'M {dd_coords[0][0]:.2f} {bottom_top:.2f} '
-            f'L {dd_coords[0][0]:.2f} {dd_coords[0][1]:.2f} '
-            f'{dd_path[1:]} '
-            f'L {dd_coords[-1][0]:.2f} {bottom_top:.2f} Z'
+            f'M {coords[0][0]:.2f} {chart_bottom:.2f} '
+            f'L {coords[0][0]:.2f} {coords[0][1]:.2f} '
+            f'{path[1:]} '
+            f'L {coords[-1][0]:.2f} {chart_bottom:.2f} Z'
         )
         point_marks = "".join(
             f'<circle class="quant-detail-dot" cx="{x:.2f}" cy="{y:.2f}" r="2.5">'
             f"<title>{escape(day)} {value:+.2f}%</title>"
             "</circle>"
-            for (day, value), (x, y) in zip(values, top_coords)
+            for (day, value), (x, y) in zip(values, coords)
         )
         return (
             f'<svg class="quant-curve quant-curve-large" viewBox="0 0 {width} {height}" role="img" aria-label="量化基金曲线">'
             f'<rect class="quant-chart-bg" x="0" y="0" width="{width}" height="{height}" />'
-            f'<text class="quant-chart-title" x="{pad_x}" y="22">Curve and Drawdown</text>'
+            f'<text class="quant-chart-title" x="{pad_x}" y="22">Curve</text>'
             f'<text class="quant-chart-subtitle" x="{pad_x}" y="36">daily percentage points</text>'
-            f'{"".join(top_grid_lines)}'
+            f'{"".join(grid_lines)}'
             f"{top_zero}"
             f'<path class="quant-area-fill" d="{escape(top_area)}" />'
-            f'<path class="quant-curve-line" d="{escape(top_path)}" />'
+            f'<path class="quant-peak-line" d="{escape(peak_path)}" />'
+            f'<path class="quant-curve-line" d="{escape(path)}" />'
             f"{point_marks}"
-            f'<text x="{pad_x}" y="{top_bottom + 22}">{escape(values[0][0][5:])}</text>'
-            f'<text x="{width - pad_x}" y="{top_bottom + 22}" text-anchor="end">{escape(latest_day[5:])} {latest_value:+.2f}%</text>'
-            f'{"".join(dd_grid_lines)}'
-            f'<line class="quant-start-line" x1="{pad_x}" x2="{width - pad_x}" y1="{bottom_top:.2f}" y2="{bottom_top:.2f}" />'
-            f'<path class="quant-drawdown-area" d="{escape(dd_area)}" />'
-            f'<path class="quant-drawdown-line" d="{escape(dd_path)}" />'
             f'<circle class="quant-dd-dot" cx="{max_dd_x:.2f}" cy="{max_dd_y:.2f}" r="4.2" />'
-            f'<text class="quant-dd-label" x="{max(pad_x, max_dd_x - 78):.2f}" y="{min(bottom_bottom - 8, max_dd_y + 24):.2f}">Max DD {max_dd_value:.2f}%</text>'
-            f'<text x="{pad_x}" y="{height - 8}">{escape(drawdowns[0][0][5:])}</text>'
-            f'<text x="{width - pad_x}" y="{height - 8}" text-anchor="end">{escape(max_dd_day[5:])}</text>'
+            f'<line class="quant-dd-callout" x1="{max_dd_x:.2f}" y1="{max_dd_y:.2f}" x2="{min(width - pad_x - 80, max_dd_x + 70):.2f}" y2="{min(chart_bottom - 28, max_dd_y + 28):.2f}" />'
+            f'<text class="quant-dd-label" x="{min(width - pad_x - 132, max_dd_x + 76):.2f}" y="{min(chart_bottom - 30, max_dd_y + 32):.2f}">Max DD {max_dd_value:.2f}%</text>'
+            f'<text x="{pad_x}" y="{height - 12}">{escape(values[0][0][5:])}</text>'
+            f'<text x="{width - pad_x}" y="{height - 12}" text-anchor="end">{escape(latest_day[5:])} {latest_value:+.2f}%</text>'
             "</svg>"
         )
 
@@ -2961,7 +2936,7 @@ h3 { margin: 0 0 10px; font-size: 15px; letter-spacing: 0; }
 .quant-card-meta { margin-top: 2px; color: var(--muted); font-size: 11px; }
 .quant-empty { display: flex; align-items: center; justify-content: center; height: 54px; color: var(--muted); font-size: 11px; border-top: 1px solid #f0f3f7; margin-top: 6px; }
 .quant-curve { width: 100%; height: 76px; display: block; margin-top: 4px; }
-.quant-curve-large { height: clamp(340px, 46vw, 470px); margin-top: 10px; background: #f8f6ee; border-radius: 6px; }
+.quant-curve-large { height: clamp(240px, 33vw, 360px); margin-top: 10px; background: #f8f6ee; border-radius: 6px; }
 .quant-curve text { fill: var(--muted); font-size: 9px; font-weight: 650; }
 .quant-curve-large text { font-size: 11px; }
 .quant-zero { stroke: #e4e9f0; stroke-width: 1; }
@@ -2971,18 +2946,18 @@ h3 { margin: 0 0 10px; font-size: 15px; letter-spacing: 0; }
 .quant-curve-large .quant-curve-line { stroke: #0f7d65; stroke-width: 3.4; }
 .quant-curve-dot { fill: #5b8def; stroke: #fff; stroke-width: 1.5; }
 .quant-area-fill { fill: #efe4d4; fill-opacity: 0.72; }
-.quant-drawdown-area { fill: #cf5e46; fill-opacity: 0.10; }
-.quant-drawdown-line { fill: none; stroke: #d56d4d; stroke-width: 2.2; stroke-dasharray: 5 5; stroke-linecap: round; stroke-linejoin: round; }
+.quant-peak-line { fill: none; stroke: #d56d4d; stroke-width: 2; stroke-dasharray: 5 5; stroke-linecap: round; stroke-linejoin: round; opacity: 0.8; }
 .quant-detail-dot { fill: #5b8def; fill-opacity: 0.08; stroke: transparent; }
 .quant-detail-dot:hover { fill-opacity: 0.35; }
 .quant-dd-dot { fill: #bd3b2f; stroke: #f8f6ee; stroke-width: 2; }
+.quant-dd-callout { stroke: #a94439; stroke-width: 1.2; }
 .quant-dd-label { fill: #a94439; font-size: 12px; font-weight: 750; }
 .quant-chart-bg { fill: #f8f6ee; }
 .quant-chart-title { fill: #24302d; font-size: 20px; font-weight: 750; }
 .quant-chart-subtitle { fill: #66736d; font-size: 11px; font-weight: 650; }
 .quant-detail-stack { display: grid; gap: 12px; margin-top: 12px; }
-.quant-detail-panel { scroll-margin-top: 16px; transition: border-color 120ms ease, box-shadow 120ms ease; }
-.quant-detail-panel:target { border-color: #8fb5f5; box-shadow: 0 0 0 3px rgba(91, 141, 239, 0.14); }
+.quant-detail-panel { display: none; scroll-margin-top: 16px; transition: border-color 120ms ease, box-shadow 120ms ease; }
+.quant-detail-panel:target { display: block; border-color: #8fb5f5; box-shadow: 0 0 0 3px rgba(91, 141, 239, 0.14); }
 .quant-detail-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .quant-detail-head h3 { margin: 0; font-size: 16px; }
 .quant-detail-head span { color: var(--muted); font-size: 12px; font-weight: 700; }
