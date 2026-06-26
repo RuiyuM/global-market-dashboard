@@ -1,1 +1,6 @@
 .private/
+__pycache__/
+.pytest_cache/
+dashboard/index.html
+dashboard/latest_market_snapshot.json
+dashboard/quant_fund_snapshot.json
