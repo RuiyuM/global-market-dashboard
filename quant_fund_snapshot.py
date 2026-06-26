@@ -1,0 +1,335 @@
+#!/usr/bin/env python3
+"""Build a sanitized quant-fund snapshot for the public dashboard."""
+
+from __future__ import annotations
+
+import hashlib
+import hmac
+import json
+import math
+import os
+import time
+from collections import defaultdict
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
+
+
+ROOT = Path(__file__).resolve().parent
+DASHBOARD = ROOT / "dashboard"
+PRIVATE_DIR = ROOT / ".private"
+PUBLIC_SNAPSHOT = DASHBOARD / "quant_fund_snapshot.json"
+PRIVATE_ENV = PRIVATE_DIR / "quant_fund.env"
+
+FAPI_BASE = "https://fapi.binance.com"
+EAPI_BASE = "https://eapi.binance.com"
+
+DEFAULT_SYMBOL = "BTCUSDT"
+
+def today_utc() -> date:
+    return datetime.now(timezone.utc).date()
+
+
+def default_start_date(today: date | None = None) -> date:
+    current = today or today_utc()
+    start = date(current.year, 4, 1)
+    return start if current >= start else date(current.year - 1, 4, 1)
+
+
+def load_env_file(path: Path = PRIVATE_ENV) -> None:
+    if not path.exists():
+        return
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+def env_float(name: str) -> float | None:
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return None
+    try:
+        value = float(raw)
+    except ValueError:
+        return None
+    return value if math.isfinite(value) and value > 0 else None
+
+
+def parse_ymd(value: str) -> date:
+    return datetime.strptime(value, "%Y-%m-%d").date()
+
+
+def signed_get(base: str, path: str, api_key: str, api_secret: str, params: dict[str, Any] | None = None) -> Any:
+    query = dict(params or {})
+    query["timestamp"] = int(time.time() * 1000)
+    query.setdefault("recvWindow", 5000)
+    encoded = urlencode(query, doseq=True)
+    signature = hmac.new(api_secret.encode("utf-8"), encoded.encode("utf-8"), hashlib.sha256).hexdigest()
+    request = Request(f"{base}{path}?{encoded}&signature={signature}", headers={"X-MBX-APIKEY": api_key})
+    with urlopen(request, timeout=20) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def fetch_futures_trades(api_key: str, api_secret: str, symbol: str, start: date, end: date) -> list[dict[str, Any]]:
+    trades: list[dict[str, Any]] = []
+    chunk_start = datetime(start.year, start.month, start.day, tzinfo=timezone.utc)
+    final = datetime(end.year, end.month, end.day, 23, 59, 59, tzinfo=timezone.utc)
+    max_chunk = timedelta(days=6, hours=23, minutes=59)
+    while chunk_start <= final:
+        chunk_end = min(final, chunk_start + max_chunk)
+        page_start_ms = int(chunk_start.timestamp() * 1000)
+        chunk_end_ms = int(chunk_end.timestamp() * 1000)
+        while page_start_ms <= chunk_end_ms:
+            batch = signed_get(
+                FAPI_BASE,
+                "/fapi/v1/userTrades",
+                api_key,
+                api_secret,
+                {"symbol": symbol, "startTime": page_start_ms, "endTime": chunk_end_ms, "limit": 1000},
+            )
+            if not isinstance(batch, list) or not batch:
+                break
+            trades.extend(batch)
+            if len(batch) < 1000:
+                break
+            last_time = max(int(item.get("time", page_start_ms)) for item in batch)
+            page_start_ms = last_time + 1
+        chunk_start = chunk_end + timedelta(milliseconds=1)
+    return trades
+
+
+def aggregate_futures_trade_curve(
+    trades: list[dict[str, Any]],
+    *,
+    base_usd: float,
+    start: date | None = None,
+) -> list[dict[str, Any]]:
+    if base_usd <= 0:
+        return []
+    daily: dict[str, float] = defaultdict(float)
+    for trade in trades:
+        try:
+            pnl = float(trade.get("realizedPnl", 0) or 0)
+            timestamp = int(trade["time"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not math.isfinite(pnl):
+            continue
+        day = datetime.fromtimestamp(timestamp / 1000, tz=timezone.utc).date()
+        if start and day < start:
+            continue
+        daily[day.isoformat()] += pnl
+    points: list[dict[str, Any]] = []
+    cumulative = 0.0
+    for day in sorted(daily):
+        cumulative += daily[day]
+        points.append({"date": day, "pct": round(cumulative / base_usd * 100, 4)})
+    return points
+
+
+def fetch_futures_stable_balance(api_key: str, api_secret: str) -> float:
+    rows = signed_get(FAPI_BASE, "/fapi/v2/balance", api_key, api_secret)
+    total = 0.0
+    for item in rows if isinstance(rows, list) else []:
+        if item.get("asset") not in {"USDT", "USDC"}:
+            continue
+        total += float(item.get("balance", 0) or 0) + float(item.get("crossUnPnl", 0) or 0)
+    return total
+
+
+def fetch_option_wallet_total(api_key: str, api_secret: str) -> float:
+    rows = signed_get(EAPI_BASE, "/eapi/v1/account", api_key, api_secret)
+    total = 0.0
+    for asset in rows.get("asset", []) if isinstance(rows, dict) else []:
+        if asset.get("asset") == "USDT":
+            total += float(asset.get("equity", asset.get("marginBalance", 0)) or 0)
+    return total
+
+
+def load_existing_public_snapshot(path: Path = PUBLIC_SNAPSHOT) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def build_options_percent_history(history: list[dict[str, Any]], *, base_usd: float) -> list[dict[str, Any]]:
+    if base_usd <= 0:
+        return []
+    points: list[dict[str, Any]] = []
+    for row in sorted(history, key=lambda item: item.get("date", "")):
+        try:
+            total = float(row["total"])
+            day = str(row["date"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if math.isfinite(total):
+            points.append({"date": day, "pct": round((total - base_usd) / base_usd * 100, 4)})
+    return points
+
+
+def public_points(section: dict[str, Any] | None) -> list[dict[str, Any]]:
+    rows = []
+    for point in (section or {}).get("points", []) if isinstance(section, dict) else []:
+        try:
+            day = str(point["date"])
+            pct = float(point["pct"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if math.isfinite(pct):
+            rows.append({"date": day, "pct": round(pct, 4)})
+    rows.sort(key=lambda row: row["date"])
+    return rows
+
+
+def upsert_percent_point(points: list[dict[str, Any]], day: date, pct: float) -> list[dict[str, Any]]:
+    rows = [row for row in public_points({"points": points}) if row["date"] != day.isoformat()]
+    rows.append({"date": day.isoformat(), "pct": round(pct, 4)})
+    rows.sort(key=lambda row: row["date"])
+    return rows
+
+
+def default_quant_fund_snapshot() -> dict[str, Any]:
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "start_date": default_start_date().isoformat(),
+        "futures": {
+            "label": "BTCUSDT 期货",
+            "status": "missing_base",
+            "base_configured": False,
+            "points": [],
+            "trade_count": 0,
+        },
+        "options": {
+            "label": "期权 USDT+USDC",
+            "status": "missing_base",
+            "base_configured": False,
+            "points": [],
+        },
+        "equity": {"label": "股指", "status": "pending", "points": []},
+    }
+
+
+def latest_pct(points: list[dict[str, Any]]) -> float | None:
+    if not points:
+        return None
+    try:
+        return float(points[-1]["pct"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def build_snapshot() -> dict[str, Any]:
+    load_env_file()
+    now = datetime.now(timezone.utc)
+    start = parse_ymd(os.environ.get("QUANT_FUND_START_DATE", default_start_date(now.date()).isoformat()))
+    symbol = os.environ.get("QUANT_FUND_SYMBOL", DEFAULT_SYMBOL).strip().upper() or DEFAULT_SYMBOL
+    futures_base = env_float("QUANT_FUND_FUTURES_BASE_USD")
+    options_base = env_float("QUANT_FUND_OPTIONS_BASE_USD")
+    futures_key = os.environ.get("BINANCE_FUTURES_API_KEY", "")
+    futures_secret = os.environ.get("BINANCE_FUTURES_API_SECRET", "")
+    option_key = os.environ.get("BINANCE_OPTION_API_KEY", "")
+    option_secret = os.environ.get("BINANCE_OPTION_API_SECRET", "")
+    existing = load_existing_public_snapshot()
+    existing_futures_points = public_points(existing.get("futures") if isinstance(existing.get("futures"), dict) else None)
+    existing_options_points = public_points(existing.get("options") if isinstance(existing.get("options"), dict) else None)
+
+    snapshot = default_quant_fund_snapshot()
+    snapshot["generated_at"] = now.isoformat(timespec="seconds")
+    snapshot["start_date"] = start.isoformat()
+
+    if futures_base is None:
+        snapshot["futures"] = {
+            "label": f"{symbol} 期货",
+            "status": "missing_base",
+            "base_configured": False,
+            "points": existing_futures_points,
+            "trade_count": 0,
+        }
+    elif futures_key and futures_secret:
+        try:
+            trades = fetch_futures_trades(futures_key, futures_secret, symbol, start, now.date())
+            futures_points = aggregate_futures_trade_curve(trades, base_usd=futures_base, start=start)
+            snapshot["futures"] = {
+                "label": f"{symbol} 期货",
+                "status": "ok" if futures_points else "no_trades",
+                "base_configured": True,
+                "points": futures_points,
+                "latest_pct": latest_pct(futures_points),
+                "trade_count": len(trades),
+            }
+        except Exception as exc:  # noqa: BLE001
+            snapshot["futures"] = {
+                "label": f"{symbol} 期货",
+                "status": "error",
+                "base_configured": True,
+                "points": [],
+                "trade_count": 0,
+                "error": exc.__class__.__name__,
+            }
+    else:
+        snapshot["futures"] = {
+            "label": f"{symbol} 期货",
+            "status": "missing_credentials",
+            "base_configured": True,
+            "points": existing_futures_points,
+            "trade_count": 0,
+        }
+
+    if options_base is None:
+        option_points = existing_options_points
+        option_status = "missing_base"
+        option_base_configured = False
+    elif option_key and option_secret and futures_key and futures_secret:
+        try:
+            total = fetch_option_wallet_total(option_key, option_secret) + fetch_futures_stable_balance(futures_key, futures_secret)
+            pct = (total - options_base) / options_base * 100
+            option_points = upsert_percent_point(existing_options_points, now.date(), pct)
+            option_status = "ok" if option_points else "no_history"
+            option_base_configured = True
+        except Exception as exc:  # noqa: BLE001
+            option_points = existing_options_points
+            option_status = "error"
+            option_base_configured = True
+            snapshot["options_error"] = exc.__class__.__name__
+    else:
+        option_points = existing_options_points
+        option_status = "stale" if option_points else "missing_credentials"
+        option_base_configured = True
+
+    snapshot["options"] = {
+        "label": "期权 USDT+USDC",
+        "status": option_status,
+        "base_configured": option_base_configured,
+        "points": option_points,
+        "latest_pct": latest_pct(option_points),
+    }
+    snapshot["equity"] = {"label": "股指", "status": "pending", "points": []}
+    return snapshot
+
+
+def write_public_snapshot(snapshot: dict[str, Any], path: Path = PUBLIC_SNAPSHOT) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def main() -> int:
+    snapshot = build_snapshot()
+    write_public_snapshot(snapshot)
+    print(f"wrote {PUBLIC_SNAPSHOT}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -35,6 +35,7 @@ LOCAL_DATA = ROOT / "data"
 DASHBOARD = ROOT / "dashboard"
 DASHBOARD_DATA = DASHBOARD / "data"
 SNAPSHOT_JSON = DASHBOARD / "latest_market_snapshot.json"
+QUANT_FUND_JSON = DASHBOARD / "quant_fund_snapshot.json"
 HTML_OUT = DASHBOARD / "index.html"
 DEFAULT_FX_FLOW_CODE = ROOT / "fx_flow_logic.py"
 USER_FX_FLOW_CODE = Path(os.environ.get("FX_FLOW_CODE_PATH", str(DEFAULT_FX_FLOW_CODE)))
@@ -1244,6 +1245,7 @@ def build_snapshot(fetch_records: list[dict[str, str]], *, fetch_policy_news: bo
         "countries": countries,
         "asset_class_vol": asset_class_vol(countries),
         "daily_move_alert": build_daily_move_alert(series, specs),
+        "quant_fund": load_quant_fund_snapshot(),
         "volatility_rankings": volatility_rankings(countries),
         "fx_rank_details": build_fx_cross_details(series),
         "second_order_monitor": build_second_order_monitor(series, specs),
@@ -1785,6 +1787,150 @@ def render_daily_move_alert(alert: dict[str, Any]) -> str:
     return "".join(html)
 
 
+def load_quant_fund_snapshot() -> dict[str, Any]:
+    fallback = {
+        "generated_at": "",
+        "futures": {"label": "BTCUSDT 期货", "status": "missing_base", "base_configured": False, "points": []},
+        "options": {"label": "期权 USDT+USDC", "status": "missing_base", "base_configured": False, "points": []},
+        "equity": {"label": "股指", "status": "pending", "points": []},
+    }
+    if not QUANT_FUND_JSON.exists():
+        return fallback
+    try:
+        data = json.loads(QUANT_FUND_JSON.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        fallback["futures"]["status"] = "error"
+        fallback["options"]["status"] = "error"
+        return fallback
+    return data if isinstance(data, dict) else fallback
+
+
+def quant_status_text(status: str) -> str:
+    return {
+        "ok": "已更新",
+        "seeded": "历史种子",
+        "stale": "待更新",
+        "missing_base": "等待本金",
+        "missing_credentials": "等待密钥",
+        "no_trades": "暂无交易",
+        "no_history": "暂无历史",
+        "pending": "待定",
+        "error": "更新失败",
+    }.get(status, status or "缺失")
+
+
+def quant_latest_pct(points: list[dict[str, Any]]) -> float | None:
+    if not points:
+        return None
+    try:
+        value = float(points[-1].get("pct"))
+    except (TypeError, ValueError):
+        return None
+    return value if math.isfinite(value) else None
+
+
+def smooth_svg_path(points: list[tuple[float, float]]) -> str:
+    if not points:
+        return ""
+    if len(points) == 1:
+        return f"M {points[0][0]:.2f} {points[0][1]:.2f}"
+    path = [f"M {points[0][0]:.2f} {points[0][1]:.2f}"]
+    for index in range(len(points) - 1):
+        p0 = points[index - 1] if index > 0 else points[index]
+        p1 = points[index]
+        p2 = points[index + 1]
+        p3 = points[index + 2] if index + 2 < len(points) else p2
+        c1x = p1[0] + (p2[0] - p0[0]) / 6
+        c1y = p1[1] + (p2[1] - p0[1]) / 6
+        c2x = p2[0] - (p3[0] - p1[0]) / 6
+        c2y = p2[1] - (p3[1] - p1[1]) / 6
+        path.append(f"C {c1x:.2f} {c1y:.2f} {c2x:.2f} {c2y:.2f} {p2[0]:.2f} {p2[1]:.2f}")
+    return " ".join(path)
+
+
+def render_quant_curve(points: list[dict[str, Any]]) -> str:
+    values: list[tuple[str, float]] = []
+    for point in points:
+        try:
+            day = str(point["date"])
+            pct = float(point["pct"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if math.isfinite(pct):
+            values.append((day, pct))
+    if len(values) < 2:
+        return '<div class="quant-empty">暂无曲线</div>'
+
+    width = 220
+    height = 76
+    pad_x = 10
+    pad_y = 13
+    min_value = min(value for _, value in values)
+    max_value = max(value for _, value in values)
+    if min_value == max_value:
+        min_value -= 1
+        max_value += 1
+    padding = max((max_value - min_value) * 0.14, 0.5)
+    min_value -= padding
+    max_value += padding
+    spread = max_value - min_value
+    coords = []
+    for index, (_, value) in enumerate(values):
+        x = pad_x + index * (width - 2 * pad_x) / (len(values) - 1)
+        y = height - pad_y - ((value - min_value) / spread) * (height - 2 * pad_y)
+        coords.append((x, y))
+    zero_line = ""
+    if min_value <= 0 <= max_value:
+        zero_y = height - pad_y - ((0 - min_value) / spread) * (height - 2 * pad_y)
+        zero_line = f'<line class="quant-zero" x1="8" x2="212" y1="{zero_y:.2f}" y2="{zero_y:.2f}" />'
+    path = smooth_svg_path(coords)
+    latest_day, latest_value = values[-1]
+    return (
+        f'<svg class="quant-curve" viewBox="0 0 {width} {height}" role="img" aria-label="量化基金百分比曲线">'
+        f"{zero_line}"
+        f'<path class="quant-curve-line" d="{escape(path)}" />'
+        f'<circle class="quant-curve-dot" cx="{coords[-1][0]:.2f}" cy="{coords[-1][1]:.2f}" r="2.4" />'
+        f'<text x="10" y="12">{escape(values[0][0][5:])}</text>'
+        f'<text x="210" y="12" text-anchor="end">{escape(latest_day[5:])} {latest_value:+.2f}%</text>'
+        "</svg>"
+    )
+
+
+def render_quant_card(title: str, section: dict[str, Any]) -> str:
+    points = section.get("points") or []
+    latest = quant_latest_pct(points)
+    latest_cls = value_class(latest)
+    configured = bool(section.get("base_configured"))
+    base_text = "本金已配置" if configured else "本金未配置"
+    status = quant_status_text(str(section.get("status", "")))
+    latest_text = fmt_signed_pct(latest) if latest is not None else status
+    return (
+        '<div class="quant-card">'
+        f'<div class="quant-card-head"><strong>{escape(title)}</strong><span>{escape(status)}</span></div>'
+        f'<div class="quant-card-main"><span>{escape(section.get("label", title))}</span><b class="{latest_cls}">{escape(latest_text)}</b></div>'
+        f'<div class="quant-card-meta">{escape(base_text)} · 百分比</div>'
+        f"{render_quant_curve(points)}"
+        "</div>"
+    )
+
+
+def render_quant_fund(snapshot: dict[str, Any]) -> str:
+    fund = snapshot or {}
+    generated_at = str(fund.get("generated_at") or "")
+    generated_short = generated_at[5:16].replace("T", " ") if len(generated_at) >= 16 else "待更新"
+    return (
+        '<details class="quant-fund-widget">'
+        '<summary><span>量化基金</span><small>低频</small></summary>'
+        '<div class="quant-fund-body">'
+        f'<div class="quant-fund-meta">每日更新 · {escape(generated_short)}</div>'
+        f'{render_quant_card("期货", fund.get("futures", {}))}'
+        f'{render_quant_card("期权", fund.get("options", {}))}'
+        f'{render_quant_card("股指", fund.get("equity", {"label": "股指", "status": "pending", "points": []}))}'
+        "</div>"
+        "</details>"
+    )
+
+
 def fmt_asset_volatility(summary: dict[str, Any], unit: str) -> str:
     windows = summary.get("avg_abs_vol") or {}
     return (
@@ -2252,6 +2398,7 @@ def render_html(snapshot: dict[str, Any]) -> str:
 
     html.append(render_policy_news(snapshot.get("policy_news", {})))
     html.append(render_daily_move_alert(snapshot.get("daily_move_alert", {})))
+    html.append(render_quant_fund(snapshot.get("quant_fund", {})))
 
     html.extend(
         [
@@ -2624,6 +2771,47 @@ h3 { margin: 0 0 10px; font-size: 15px; letter-spacing: 0; }
 .daily-alert-metrics { display: grid; grid-template-columns: repeat(4, max-content); gap: 12px; color: var(--ink); font-size: 12px; font-variant-numeric: tabular-nums; }
 .daily-alert-metrics span { min-width: 0; }
 .daily-alert-metrics em { display: block; color: var(--muted); font-style: normal; font-size: 10px; line-height: 1.2; }
+.quant-fund-widget {
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
+  z-index: 30;
+  width: min(360px, calc(100vw - 28px));
+  border: 1px solid #cfd8e3;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 12px 34px rgba(15, 23, 42, 0.12);
+  overflow: hidden;
+}
+.quant-fund-widget summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 11px;
+  cursor: pointer;
+  list-style: none;
+  color: var(--ink);
+  font-weight: 800;
+}
+.quant-fund-widget summary::-webkit-details-marker { display: none; }
+.quant-fund-widget summary small { color: var(--muted); font-size: 11px; font-weight: 650; }
+.quant-fund-body { display: grid; gap: 8px; padding: 0 10px 10px; }
+.quant-fund-meta { color: var(--muted); font-size: 11px; font-weight: 650; }
+.quant-card { border: 1px solid #e5eaf1; border-radius: 8px; padding: 8px; background: #fff; }
+.quant-card-head, .quant-card-main { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.quant-card-head strong { font-size: 12px; }
+.quant-card-head span { color: var(--muted); font-size: 11px; }
+.quant-card-main { margin-top: 3px; font-variant-numeric: tabular-nums; }
+.quant-card-main span { min-width: 0; color: var(--ink); font-size: 12px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.quant-card-main b { font-size: 14px; }
+.quant-card-meta { margin-top: 2px; color: var(--muted); font-size: 11px; }
+.quant-empty { display: flex; align-items: center; justify-content: center; height: 54px; color: var(--muted); font-size: 11px; border-top: 1px solid #f0f3f7; margin-top: 6px; }
+.quant-curve { width: 100%; height: 76px; display: block; margin-top: 4px; }
+.quant-curve text { fill: var(--muted); font-size: 9px; font-weight: 650; }
+.quant-zero { stroke: #e4e9f0; stroke-width: 1; }
+.quant-curve-line { fill: none; stroke: #5b8def; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.quant-curve-dot { fill: #5b8def; stroke: #fff; stroke-width: 1.5; }
 .volatility-panel, .status-panel { padding: 0; overflow: hidden; }
 .volatility-panel summary, .status-panel summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; padding: 16px; font-weight: 750; list-style: none; }
 .volatility-panel summary::-webkit-details-marker, .status-panel summary::-webkit-details-marker { display: none; }

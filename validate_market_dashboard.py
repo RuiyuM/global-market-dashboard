@@ -150,10 +150,25 @@ def main() -> int:
                 errors.append("daily move alert equity item is outside threshold")
             if not item.get("warning"):
                 errors.append("daily move alert equity item should be warning")
-    if "sk-" in html or "OPENAI_API_KEY" in html:
+    forbidden_public_markers = ["sk-", "OPENAI_API_KEY", "BINANCE_", "API_KEY", "API_SECRET", "apiKey", "apiSecret", "base_usd"]
+    if any(marker in html for marker in forbidden_public_markers):
         errors.append("HTML should not expose API keys or API key env names")
-    if "sk-" in json.dumps(snapshot, ensure_ascii=False):
+    snapshot_text = json.dumps(snapshot, ensure_ascii=False)
+    if any(marker in snapshot_text for marker in forbidden_public_markers):
         errors.append("snapshot should not expose API keys")
+    quant_fund = snapshot.get("quant_fund", {})
+    if not quant_fund:
+        errors.append("missing quant fund snapshot")
+    for key in ["futures", "options", "equity"]:
+        if key not in quant_fund:
+            errors.append(f"missing quant fund section: {key}")
+    if '<details class="quant-fund-widget">' not in html:
+        errors.append("missing collapsed quant fund widget")
+    if '<details class="quant-fund-widget" open' in html:
+        errors.append("quant fund widget should default collapsed")
+    for marker in ["量化基金", "期货", "期权", "股指"]:
+        if marker not in html:
+            errors.append(f"missing quant fund marker: {marker}")
     policy_news = snapshot.get("policy_news", {})
     if set(policy_news.get("regions", {})) != set(POLICY_REGIONS):
         errors.append(f"policy news regions mismatch: {sorted(policy_news.get('regions', {}))}")

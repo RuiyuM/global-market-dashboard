@@ -1,6 +1,1 @@
-__pycache__/
-*.py[cod]
-.DS_Store
-dashboard/index.html
-dashboard/latest_market_snapshot.json
-*.log
+.private/
