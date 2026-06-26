@@ -72,3 +72,11 @@ def test_ohlc_javascript_supports_comparison_normalization() -> None:
     assert 'const compareSelect = document.getElementById("ohlc-compare-select");' in JS
     assert "const comparisonFor = (primaryItem) =>" in JS
     assert "const normalizeOhlcSeries = (bars) =>" in JS
+    assert "range_min" in JS
+    assert "(number - rangeMin) / spread * 100" in JS
+    assert "区间归一化 0-100" in JS
+
+
+def test_move_chart_only_mentions_blue_compare_line_when_comparison_exists() -> None:
+    assert "const moveCompareNote = compareItem ?" in JS
+    assert "柱=主标的单日涨跌幅，蓝线=比较标的" not in JS

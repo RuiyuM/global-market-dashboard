@@ -2956,17 +2956,23 @@ JS = """
   };
 
   const normalizeOhlcSeries = (bars) => {
-    const base = (bars || [])
-      .map((bar) => Number(bar.close))
-      .find((value) => Number.isFinite(value) && value !== 0);
-    if (!Number.isFinite(base)) return [];
+    const values = (bars || [])
+      .flatMap((bar) => [bar.open, bar.high, bar.low, bar.close].map(Number))
+      .filter(Number.isFinite);
+    if (!values.length) return [];
+    const rangeMin = Math.min(...values);
+    const rangeMax = Math.max(...values);
+    const spread = rangeMax - rangeMin;
     const normalize = (value) => {
       const number = Number(value);
-      return Number.isFinite(number) ? number / base * 100 : NaN;
+      if (!Number.isFinite(number)) return NaN;
+      if (spread === 0) return 50;
+      return (number - rangeMin) / spread * 100;
     };
     return bars.map((bar) => ({
       ...bar,
-      base_close: base,
+      range_min: rangeMin,
+      range_max: rangeMax,
       open_norm: normalize(bar.open),
       high_norm: normalize(bar.high),
       low_norm: normalize(bar.low),
@@ -3200,15 +3206,17 @@ JS = """
     }
     const highs = plottedValues.map((bar) => Number(bar[highField]));
     const lows = plottedValues.map((bar) => Number(bar[lowField]));
-    let min = Math.min(...lows);
-    let max = Math.max(...highs);
-    if (min === max) {
-      min -= 1;
-      max += 1;
+    let min = normalized ? 0 : Math.min(...lows);
+    let max = normalized ? 100 : Math.max(...highs);
+    if (!normalized) {
+      if (min === max) {
+        min -= 1;
+        max += 1;
+      }
+      const pad = (max - min) * 0.08;
+      min -= pad;
+      max += pad;
     }
-    const pad = (max - min) * 0.08;
-    min -= pad;
-    max += pad;
     const xStep = innerW / Math.max(1, bars.length - 1);
     const candleW = Math.max(2, Math.min(9, xStep * 0.56));
     const y = (value) => margin.top + (max - Number(value)) / (max - min) * innerH;
@@ -3257,7 +3265,7 @@ JS = """
     }).join("");
     const compareCandles = compareSeries.map((bar) => candleSvg(bar, "compare", "compare-candle")).join("");
     const legend = normalized
-      ? `<text x="${margin.left}" y="16" fill="#344054" font-size="12" font-weight="700">指数=100：${esc(item.label)}</text>`
+      ? `<text x="${margin.left}" y="16" fill="#344054" font-size="12" font-weight="700">区间归一化 0-100：${esc(item.label)}</text>`
         + `<text x="${margin.left + 184}" y="16" fill="#2563eb" font-size="12" font-weight="700">比较：${esc(compareItem.label)}</text>`
       : "";
 
@@ -3284,10 +3292,10 @@ JS = """
         const compareBar = compareByDate.get(bar.date);
         const compareNorm = normalizedCompareByDate.get(bar.date);
         const normalizedHtml = normalized && primaryNorm
-          ? `<div class="muted">主 close 指数：${fmt(primaryNorm.close_norm)}</div>`
+          ? `<div class="muted">主 close 归一：${fmt(primaryNorm.close_norm)} / 100</div>`
           : "";
         const compareHtml = compareBar
-          ? `<div class="muted">比较 ${esc(compareItem.label)} Close: ${fmt(compareBar.close)}${compareNorm ? ` · 指数: ${fmt(compareNorm.close_norm)}` : ""}</div>`
+          ? `<div class="muted">比较 ${esc(compareItem.label)} Close: ${fmt(compareBar.close)}${compareNorm ? ` · 归一: ${fmt(compareNorm.close_norm)} / 100` : ""}</div>`
           : "";
         tooltip.innerHTML = `<strong>${esc(bar.date)}</strong>`
           + `<div>Open: ${fmt(bar.open)}</div>`
@@ -3418,10 +3426,11 @@ JS = """
       const total = item.range?.total || item.ohlc.length;
       const compareText = compareItem ? `；比较 ${compareItem.country} / ${compareItem.label}，共同日期 ${compareItem.ohlc.length} 条` : "";
       if (chartMode === "move") {
-        head.textContent = `${item.country} / ${item.group} / ${item.label}：涨跌幅模式，显示 ${item.ohlc.length}/${total} 条日线；柱=主标的单日涨跌幅，蓝线=比较标的${compareText}。`;
+        const moveCompareNote = compareItem ? `，蓝线=比较标的${compareText}` : "";
+        head.textContent = `${item.country} / ${item.group} / ${item.label}：涨跌幅模式，显示 ${item.ohlc.length}/${total} 条日线；柱=主标的单日涨跌幅，橙线=主标的${moveCompareNote}。`;
         renderMoveChart(item, compareItem);
       } else {
-        head.textContent = `${item.country} / ${item.group} / ${item.label}：K线模式，显示 ${item.ohlc.length}/${total} 条日线${compareItem ? "，已按各自首个 close 归一到 100" : ""}${compareText}。`;
+        head.textContent = `${item.country} / ${item.group} / ${item.label}：K线模式，显示 ${item.ohlc.length}/${total} 条日线${compareItem ? "，已按当前窗口各自 OHLC 区间归一化到 0-100" : ""}${compareText}。`;
         renderChart(item, compareItem);
       }
     }
