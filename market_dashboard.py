@@ -1791,8 +1791,8 @@ def render_daily_move_alert(alert: dict[str, Any]) -> str:
 def load_quant_fund_snapshot() -> dict[str, Any]:
     fallback = {
         "generated_at": "",
-        "futures": {"label": "期货", "status": "missing_base", "base_configured": False, "points": []},
-        "options": {"label": "期权", "status": "missing_base", "base_configured": False, "points": []},
+        "futures": {"label": "期货", "status": "missing_base", "points": []},
+        "options": {"label": "期权", "status": "missing_base", "points": []},
         "equity": {"label": "股指", "status": "pending", "points": []},
     }
     if not QUANT_FUND_JSON.exists():
@@ -1850,7 +1850,7 @@ def smooth_svg_path(points: list[tuple[float, float]]) -> str:
     return " ".join(path)
 
 
-def render_quant_curve(points: list[dict[str, Any]]) -> str:
+def render_quant_curve(points: list[dict[str, Any]], *, large: bool = False) -> str:
     values: list[tuple[str, float]] = []
     for point in points:
         try:
@@ -1862,6 +1862,113 @@ def render_quant_curve(points: list[dict[str, Any]]) -> str:
             values.append((day, pct))
     if len(values) < 2:
         return '<div class="quant-empty">暂无曲线</div>'
+
+    if large:
+        width = 920
+        height = 430
+        pad_x = 58
+        top_top = 38
+        top_bottom = 205
+        bottom_top = 258
+        bottom_bottom = 398
+
+        min_value = min(value for _, value in values)
+        max_value = max(value for _, value in values)
+        if min_value == max_value:
+            min_value -= 1
+            max_value += 1
+        padding = max((max_value - min_value) * 0.12, 0.5)
+        min_value -= padding
+        max_value += padding
+        spread = max_value - min_value
+
+        top_coords = []
+        drawdowns: list[tuple[str, float]] = []
+        running_peak = values[0][1]
+        for index, (day, value) in enumerate(values):
+            running_peak = max(running_peak, value)
+            drawdowns.append((day, value - running_peak))
+            x = pad_x + index * (width - 2 * pad_x) / (len(values) - 1)
+            y = top_bottom - ((value - min_value) / spread) * (top_bottom - top_top)
+            top_coords.append((x, y))
+
+        min_dd = min(value for _, value in drawdowns)
+        dd_floor = min(min_dd * 1.2, -0.25)
+        dd_spread = abs(dd_floor)
+        dd_coords = []
+        for index, (_, value) in enumerate(drawdowns):
+            x = pad_x + index * (width - 2 * pad_x) / (len(drawdowns) - 1)
+            y = bottom_top + ((0 - value) / dd_spread) * (bottom_bottom - bottom_top)
+            dd_coords.append((x, y))
+
+        top_grid_lines = []
+        for step in range(5):
+            ratio = step / 4
+            y = top_top + ratio * (top_bottom - top_top)
+            value = max_value - ratio * spread
+            top_grid_lines.append(
+                f'<line class="quant-grid-line" x1="{pad_x}" x2="{width - pad_x}" y1="{y:.2f}" y2="{y:.2f}" />'
+                f'<text x="{pad_x - 10}" y="{y + 4:.2f}" text-anchor="end">{value:+.1f}%</text>'
+            )
+        dd_grid_lines = []
+        for step in range(4):
+            ratio = step / 3
+            y = bottom_top + ratio * (bottom_bottom - bottom_top)
+            value = 0 + ratio * dd_floor
+            dd_grid_lines.append(
+                f'<line class="quant-grid-line" x1="{pad_x}" x2="{width - pad_x}" y1="{y:.2f}" y2="{y:.2f}" />'
+                f'<text x="{pad_x - 10}" y="{y + 4:.2f}" text-anchor="end">{value:.1f}%</text>'
+            )
+
+        top_path = smooth_svg_path(top_coords)
+        dd_path = smooth_svg_path(dd_coords)
+        latest_day, latest_value = values[-1]
+        max_dd_index, (max_dd_day, max_dd_value) = min(enumerate(drawdowns), key=lambda item: item[1][1])
+        max_dd_x, max_dd_y = dd_coords[max_dd_index]
+        top_zero = ""
+        if min_value <= 0 <= max_value:
+            zero_y = top_bottom - ((0 - min_value) / spread) * (top_bottom - top_top)
+            top_zero = f'<line class="quant-start-line" x1="{pad_x}" x2="{width - pad_x}" y1="{zero_y:.2f}" y2="{zero_y:.2f}" />'
+        top_area = (
+            f'M {top_coords[0][0]:.2f} {top_bottom:.2f} '
+            f'L {top_coords[0][0]:.2f} {top_coords[0][1]:.2f} '
+            f'{top_path[1:]} '
+            f'L {top_coords[-1][0]:.2f} {top_bottom:.2f} Z'
+        )
+        dd_area = (
+            f'M {dd_coords[0][0]:.2f} {bottom_top:.2f} '
+            f'L {dd_coords[0][0]:.2f} {dd_coords[0][1]:.2f} '
+            f'{dd_path[1:]} '
+            f'L {dd_coords[-1][0]:.2f} {bottom_top:.2f} Z'
+        )
+        point_marks = "".join(
+            f'<circle class="quant-detail-dot" cx="{x:.2f}" cy="{y:.2f}" r="2.5">'
+            f"<title>{escape(day)} {value:+.2f}%</title>"
+            "</circle>"
+            for (day, value), (x, y) in zip(values, top_coords)
+        )
+        return (
+            f'<svg class="quant-curve quant-curve-large" viewBox="0 0 {width} {height}" role="img" aria-label="量化基金曲线">'
+            f'<rect class="quant-chart-bg" x="0" y="0" width="{width}" height="{height}" />'
+            f'<text class="quant-chart-title" x="{pad_x}" y="22">Curve and Drawdown</text>'
+            f'<text class="quant-chart-subtitle" x="{pad_x}" y="36">daily percentage points</text>'
+            f'{"".join(top_grid_lines)}'
+            f"{top_zero}"
+            f'<path class="quant-area-fill" d="{escape(top_area)}" />'
+            f'<path class="quant-curve-line" d="{escape(top_path)}" />'
+            f"{point_marks}"
+            f'<text x="{pad_x}" y="{top_bottom + 22}">{escape(values[0][0][5:])}</text>'
+            f'<text x="{width - pad_x}" y="{top_bottom + 22}" text-anchor="end">{escape(latest_day[5:])} {latest_value:+.2f}%</text>'
+            f'{"".join(dd_grid_lines)}'
+            f'<line class="quant-start-line" x1="{pad_x}" x2="{width - pad_x}" y1="{bottom_top:.2f}" y2="{bottom_top:.2f}" />'
+            f'<path class="quant-drawdown-area" d="{escape(dd_area)}" />'
+            f'<path class="quant-drawdown-line" d="{escape(dd_path)}" />'
+            f'<circle class="quant-dd-dot" cx="{max_dd_x:.2f}" cy="{max_dd_y:.2f}" r="4.2" />'
+            f'<text class="quant-dd-label" x="{max(pad_x, max_dd_x - 78):.2f}" y="{min(bottom_bottom - 8, max_dd_y + 24):.2f}">Max DD {max_dd_value:.2f}%</text>'
+            f'<text x="{pad_x}" y="{height - 8}">{escape(drawdowns[0][0][5:])}</text>'
+            f'<text x="{width - pad_x}" y="{height - 8}" text-anchor="end">{escape(max_dd_day[5:])}</text>'
+            "</svg>"
+        )
 
     width = 220
     height = 76
@@ -1884,35 +1991,54 @@ def render_quant_curve(points: list[dict[str, Any]]) -> str:
     zero_line = ""
     if min_value <= 0 <= max_value:
         zero_y = height - pad_y - ((0 - min_value) / spread) * (height - 2 * pad_y)
-        zero_line = f'<line class="quant-zero" x1="8" x2="212" y1="{zero_y:.2f}" y2="{zero_y:.2f}" />'
+        zero_line = f'<line class="quant-zero" x1="{pad_x - 2}" x2="{width - pad_x + 2}" y1="{zero_y:.2f}" y2="{zero_y:.2f}" />'
     path = smooth_svg_path(coords)
     latest_day, latest_value = values[-1]
     return (
-        f'<svg class="quant-curve" viewBox="0 0 {width} {height}" role="img" aria-label="量化基金百分比曲线">'
+        f'<svg class="quant-curve" viewBox="0 0 {width} {height}" role="img" aria-label="量化基金曲线">'
         f"{zero_line}"
         f'<path class="quant-curve-line" d="{escape(path)}" />'
         f'<circle class="quant-curve-dot" cx="{coords[-1][0]:.2f}" cy="{coords[-1][1]:.2f}" r="2.4" />'
         f'<text x="10" y="12">{escape(values[0][0][5:])}</text>'
-        f'<text x="210" y="12" text-anchor="end">{escape(latest_day[5:])} {latest_value:+.2f}%</text>'
+        f'<text x="{width - 10}" y="12" text-anchor="end">{escape(latest_day[5:])} {latest_value:+.2f}%</text>'
         "</svg>"
     )
 
 
-def render_quant_card(title: str, section: dict[str, Any]) -> str:
+def render_quant_card(key: str, title: str, section: dict[str, Any]) -> str:
     points = section.get("points") or []
     latest = quant_latest_pct(points)
     latest_cls = value_class(latest)
-    configured = bool(section.get("base_configured"))
-    base_text = "本金已配置" if configured else "本金未配置"
     status = quant_status_text(str(section.get("status", "")))
     latest_text = fmt_signed_pct(latest) if latest is not None else status
+    point_count = len(points) if isinstance(points, list) else 0
+    meta = f"{point_count}个日点" if point_count else status
     return (
-        '<div class="quant-card">'
+        f'<a class="quant-card" href="#quant-detail-{escape(key)}">'
         f'<div class="quant-card-head"><strong>{escape(title)}</strong><span>{escape(status)}</span></div>'
         f'<div class="quant-card-main"><span>{escape(section.get("label", title))}</span><b class="{latest_cls}">{escape(latest_text)}</b></div>'
-        f'<div class="quant-card-meta">{escape(base_text)} · 百分比</div>'
+        f'<div class="quant-card-meta">{escape(meta)}</div>'
         f"{render_quant_curve(points)}"
-        "</div>"
+        "</a>"
+    )
+
+
+def render_quant_detail_panel(key: str, title: str, section: dict[str, Any]) -> str:
+    points = section.get("points") or []
+    status = quant_status_text(str(section.get("status", "")))
+    if key == "equity":
+        return (
+            f'<section class="panel quant-detail-panel quant-detail-empty" id="quant-detail-{escape(key)}">'
+            f'<div class="quant-detail-head"><h3>{escape(title)}</h3><span>{escape(status)}</span></div>'
+            '<div class="quant-empty quant-empty-large">coming soon in 2026 3季度末</div>'
+            "</section>"
+        )
+    point_count = len(points) if isinstance(points, list) else 0
+    return (
+        f'<section class="panel quant-detail-panel" id="quant-detail-{escape(key)}">'
+        f'<div class="quant-detail-head"><h3>{escape(title)}</h3><span>{escape(status)} · {point_count}个日点</span></div>'
+        f"{render_quant_curve(points, large=True)}"
+        "</section>"
     )
 
 
@@ -1924,15 +2050,20 @@ def render_quant_fund(snapshot: dict[str, Any]) -> str:
         '<section class="panel quant-fund-detail">'
         '<div class="quant-fund-head">'
         '<div><h2>量化基金</h2>'
-        f'<p>每日更新 · {escape(generated_short)} · 全部为百分比曲线</p></div>'
+        f'<p>每日更新 · {escape(generated_short)}</p></div>'
         '<a class="quant-back" href="index.html">返回</a>'
         "</div>"
         '<div class="quant-fund-grid">'
-        f'{render_quant_card("期货", fund.get("futures", {}))}'
-        f'{render_quant_card("期权", fund.get("options", {}))}'
-        f'{render_quant_card("股指", fund.get("equity", {"label": "股指", "status": "pending", "points": []}))}'
+        f'{render_quant_card("futures", "期货", fund.get("futures", {}))}'
+        f'{render_quant_card("options", "期权", fund.get("options", {}))}'
+        f'{render_quant_card("equity", "股指", fund.get("equity", {"label": "股指", "status": "pending", "points": []}))}'
         "</div>"
         "</section>"
+        '<div class="quant-detail-stack">'
+        f'{render_quant_detail_panel("futures", "期货", fund.get("futures", {}))}'
+        f'{render_quant_detail_panel("options", "期权", fund.get("options", {}))}'
+        f'{render_quant_detail_panel("equity", "股指", fund.get("equity", {"label": "股指", "status": "pending", "points": []}))}'
+        "</div>"
     )
 
 
@@ -2697,6 +2828,7 @@ def render_html(snapshot: dict[str, Any]) -> str:
     if not notes:
         html.append('<p><a class="quiet-quant-link" href="quant_fund.html">量化基金</a></p>')
     html.append("</section>")
+
     html.extend(
         [
             f'<script id="ohlc-data" type="application/json">{ohlc_json}</script>',
@@ -2818,7 +2950,8 @@ h3 { margin: 0 0 10px; font-size: 15px; letter-spacing: 0; }
 .quant-back { border: 1px solid #cfd8e3; border-radius: 999px; padding: 4px 8px; color: var(--muted); font-size: 11px; font-weight: 750; text-decoration: none; white-space: nowrap; }
 .quant-back:hover { background: #f8fafc; }
 .quant-fund-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-.quant-card { border: 1px solid #e5eaf1; border-radius: 8px; padding: 8px; background: #fff; }
+.quant-card { border: 1px solid #e5eaf1; border-radius: 8px; padding: 8px; background: #fff; color: inherit; display: block; text-decoration: none; transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease; }
+.quant-card:hover { border-color: #b9c9df; box-shadow: 0 8px 18px rgba(18, 38, 63, 0.08); transform: translateY(-1px); }
 .quant-card-head, .quant-card-main { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .quant-card-head strong { font-size: 12px; }
 .quant-card-head span { color: var(--muted); font-size: 11px; }
@@ -2828,10 +2961,32 @@ h3 { margin: 0 0 10px; font-size: 15px; letter-spacing: 0; }
 .quant-card-meta { margin-top: 2px; color: var(--muted); font-size: 11px; }
 .quant-empty { display: flex; align-items: center; justify-content: center; height: 54px; color: var(--muted); font-size: 11px; border-top: 1px solid #f0f3f7; margin-top: 6px; }
 .quant-curve { width: 100%; height: 76px; display: block; margin-top: 4px; }
+.quant-curve-large { height: clamp(340px, 46vw, 470px); margin-top: 10px; background: #f8f6ee; border-radius: 6px; }
 .quant-curve text { fill: var(--muted); font-size: 9px; font-weight: 650; }
+.quant-curve-large text { font-size: 11px; }
 .quant-zero { stroke: #e4e9f0; stroke-width: 1; }
+.quant-start-line { stroke: #9da6a1; stroke-width: 1.4; stroke-dasharray: 5 5; opacity: 0.72; }
+.quant-grid-line { stroke: #dfe4d8; stroke-width: 1; }
 .quant-curve-line { fill: none; stroke: #5b8def; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.quant-curve-large .quant-curve-line { stroke: #0f7d65; stroke-width: 3.4; }
 .quant-curve-dot { fill: #5b8def; stroke: #fff; stroke-width: 1.5; }
+.quant-area-fill { fill: #efe4d4; fill-opacity: 0.72; }
+.quant-drawdown-area { fill: #cf5e46; fill-opacity: 0.10; }
+.quant-drawdown-line { fill: none; stroke: #d56d4d; stroke-width: 2.2; stroke-dasharray: 5 5; stroke-linecap: round; stroke-linejoin: round; }
+.quant-detail-dot { fill: #5b8def; fill-opacity: 0.08; stroke: transparent; }
+.quant-detail-dot:hover { fill-opacity: 0.35; }
+.quant-dd-dot { fill: #bd3b2f; stroke: #f8f6ee; stroke-width: 2; }
+.quant-dd-label { fill: #a94439; font-size: 12px; font-weight: 750; }
+.quant-chart-bg { fill: #f8f6ee; }
+.quant-chart-title { fill: #24302d; font-size: 20px; font-weight: 750; }
+.quant-chart-subtitle { fill: #66736d; font-size: 11px; font-weight: 650; }
+.quant-detail-stack { display: grid; gap: 12px; margin-top: 12px; }
+.quant-detail-panel { scroll-margin-top: 16px; transition: border-color 120ms ease, box-shadow 120ms ease; }
+.quant-detail-panel:target { border-color: #8fb5f5; box-shadow: 0 0 0 3px rgba(91, 141, 239, 0.14); }
+.quant-detail-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.quant-detail-head h3 { margin: 0; font-size: 16px; }
+.quant-detail-head span { color: var(--muted); font-size: 12px; font-weight: 700; }
+.quant-empty-large { height: 180px; border: 1px dashed #d6dee9; border-radius: 8px; font-size: 14px; font-weight: 750; }
 .volatility-panel, .status-panel { padding: 0; overflow: hidden; }
 .volatility-panel summary, .status-panel summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; padding: 16px; font-weight: 750; list-style: none; }
 .volatility-panel summary::-webkit-details-marker, .status-panel summary::-webkit-details-marker { display: none; }

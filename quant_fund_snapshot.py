@@ -121,7 +121,6 @@ def fetch_futures_trades(api_key: str, api_secret: str, symbol: str, start: date
     return trades
 
 
-
 def load_futures_trades_csv(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
@@ -131,11 +130,32 @@ def load_futures_trades_csv(path: Path) -> list[dict[str, Any]]:
             try:
                 timestamp = int(row["time"])
                 realized_pnl = float(row.get("realizedPnl", 0) or 0)
+                commission = float(row.get("commission", 0) or 0)
             except (KeyError, TypeError, ValueError):
                 continue
-            if math.isfinite(realized_pnl):
-                trades.append({"time": timestamp, "realizedPnl": realized_pnl})
+            if math.isfinite(realized_pnl) and math.isfinite(commission):
+                trades.append(
+                    {
+                        "time": timestamp,
+                        "realizedPnl": realized_pnl,
+                        "commission": commission,
+                        "commissionAsset": str(row.get("commissionAsset", "") or "").upper(),
+                    }
+                )
     return trades
+
+
+def stable_commission_amount(trade: dict[str, Any]) -> float:
+    try:
+        commission = float(trade.get("commission", 0) or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    if not math.isfinite(commission):
+        return 0.0
+    asset = str(trade.get("commissionAsset", "") or "").upper()
+    if asset and asset not in {"USD", "USDT", "USDC"}:
+        return 0.0
+    return commission
 
 
 def aggregate_futures_trade_curve(
@@ -158,7 +178,7 @@ def aggregate_futures_trade_curve(
         day = datetime.fromtimestamp(timestamp / 1000, tz=timezone.utc).date()
         if start and day < start:
             continue
-        daily[day.isoformat()] += pnl
+        daily[day.isoformat()] += pnl - stable_commission_amount(trade)
     points: list[dict[str, Any]] = []
     cumulative = 0.0
     for day in sorted(daily):
@@ -239,14 +259,11 @@ def default_quant_fund_snapshot() -> dict[str, Any]:
         "futures": {
             "label": "期货",
             "status": "missing_base",
-            "base_configured": False,
             "points": [],
-            "trade_count": 0,
         },
         "options": {
             "label": "期权",
             "status": "missing_base",
-            "base_configured": False,
             "points": [],
         },
         "equity": {"label": "股指", "status": "pending", "points": []},
@@ -287,9 +304,7 @@ def build_snapshot() -> dict[str, Any]:
         snapshot["futures"] = {
             "label": "期货",
             "status": "missing_base",
-            "base_configured": False,
             "points": existing_futures_points,
-            "trade_count": 0,
         }
     elif futures_csv and futures_csv.exists():
         trades = load_futures_trades_csv(futures_csv)
@@ -297,10 +312,8 @@ def build_snapshot() -> dict[str, Any]:
         snapshot["futures"] = {
             "label": "期货",
             "status": "ok" if futures_points else "no_trades",
-            "base_configured": True,
             "points": futures_points,
             "latest_pct": latest_pct(futures_points),
-            "trade_count": len(trades),
         }
     elif futures_key and futures_secret and symbol:
         try:
@@ -309,18 +322,14 @@ def build_snapshot() -> dict[str, Any]:
             snapshot["futures"] = {
                 "label": "期货",
                 "status": "ok" if futures_points else "no_trades",
-                "base_configured": True,
                 "points": futures_points,
                 "latest_pct": latest_pct(futures_points),
-                "trade_count": len(trades),
             }
         except Exception as exc:  # noqa: BLE001
             snapshot["futures"] = {
                 "label": "期货",
                 "status": "error",
-                "base_configured": True,
-                "points": [],
-                "trade_count": 0,
+                "points": existing_futures_points,
                 "error": exc.__class__.__name__,
             }
     else:
@@ -328,36 +337,29 @@ def build_snapshot() -> dict[str, Any]:
         snapshot["futures"] = {
             "label": "期货",
             "status": status,
-            "base_configured": True,
             "points": existing_futures_points,
-            "trade_count": 0,
         }
 
     if options_base is None:
         option_points = existing_options_points or built_in_options_seed_points()
         option_status = "seeded" if option_points else "missing_base"
-        option_base_configured = False
     elif option_key and option_secret and futures_key and futures_secret:
         try:
             total = fetch_option_wallet_total(option_key, option_secret) + fetch_futures_stable_balance(futures_key, futures_secret)
             pct = (total - options_base) / options_base * 100
             option_points = upsert_percent_point(existing_options_points, now.date(), pct)
             option_status = "ok" if option_points else "no_history"
-            option_base_configured = True
         except Exception as exc:  # noqa: BLE001
             option_points = existing_options_points
             option_status = "error"
-            option_base_configured = True
             snapshot["options_error"] = exc.__class__.__name__
     else:
         option_points = existing_options_points or built_in_options_seed_points()
         option_status = "stale" if option_points else "missing_credentials"
-        option_base_configured = True
 
     snapshot["options"] = {
         "label": "期权",
         "status": option_status,
-        "base_configured": option_base_configured,
         "points": option_points,
         "latest_pct": latest_pct(option_points),
     }

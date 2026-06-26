@@ -73,14 +73,31 @@ def test_quant_fund_separate_page_contains_curves_and_back_link() -> None:
 
     assert '<a class="quant-back" href="index.html">返回</a>' in html
     assert '<section class="panel quant-fund-detail">' in html
+    assert '<a class="quant-card" href="#quant-detail-futures">' in html
+    assert '<a class="quant-card" href="#quant-detail-options">' in html
+    assert '<a class="quant-card" href="#quant-detail-equity">' in html
+    assert '<section class="panel quant-detail-panel" id="quant-detail-futures">' in html
+    assert '<section class="panel quant-detail-panel" id="quant-detail-options">' in html
+    assert '<section class="panel quant-detail-panel quant-detail-empty" id="quant-detail-equity">' in html
     assert "期货" in html
     assert "期权" in html
     assert "股指" in html
     assert "待定" in html
-    assert "本金已配置" in html
+    assert "coming soon in 2026 3季度末" in html
+    assert "本金已配置" not in html
+    assert "本金未配置" not in html
+    assert "百分比曲线" not in html
     assert 'class="quant-curve-line"' in html
+    assert 'class="quant-curve quant-curve-large"' in html
+    assert 'class="quant-drawdown-line"' in html
+    assert 'class="quant-start-line"' in html
+    assert "Max DD" in html
     assert " C " in html
     assert "<polyline" not in html
+    assert "Entry Price" not in html
+    assert "USD" not in html
+    assert "base_configured" not in html
+    assert "trade_count" not in html
     assert "BINANCE" not in html
     assert "API_KEY" not in html
     assert "SECRET" not in html

@@ -161,6 +161,8 @@ def main() -> int:
         "apiKey",
         "apiSecret",
         "base_usd",
+        "base_configured",
+        "trade_count",
         "BTCUSDT",
         "USDT+USDC",
         "option_usdt_value",
@@ -190,6 +192,15 @@ def main() -> int:
         errors.append("missing quant fund detail section page")
     if '<a class="quant-back" href="index.html">返回</a>' not in quant_html:
         errors.append("missing quant fund back link")
+    for key in ["futures", "options", "equity"]:
+        if f'<a class="quant-card" href="#quant-detail-{key}">' not in quant_html:
+            errors.append(f"missing clickable quant fund card: {key}")
+        if f'id="quant-detail-{key}"' not in quant_html:
+            errors.append(f"missing quant fund detail panel: {key}")
+    if "coming soon in 2026 3季度末" not in quant_html:
+        errors.append("missing equity coming-soon copy")
+    if "本金已配置" in quant_html or "本金未配置" in quant_html or "百分比曲线" in quant_html:
+        errors.append("quant fund page should not spell out principal or percent-curve copy")
     if '<section class="panel quant-fund-bottom" id="quant-fund">' in html:
         errors.append("quant fund should not show as a default bottom panel")
     if '<a class="quant-fund-dock" href="#quant-fund">' in html:

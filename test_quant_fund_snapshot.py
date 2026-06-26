@@ -21,16 +21,16 @@ def utc_ms(year: int, month: int, day: int) -> int:
 
 def test_futures_trades_are_rendered_as_percent_of_configured_base() -> None:
     trades = [
-        {"time": utc_ms(2026, 4, 1), "realizedPnl": "30"},
-        {"time": utc_ms(2026, 4, 1), "realizedPnl": "-10"},
-        {"time": utc_ms(2026, 4, 2), "realizedPnl": "5"},
+        {"time": utc_ms(2026, 4, 1), "realizedPnl": "30", "commission": "1.5", "commissionAsset": "USDT"},
+        {"time": utc_ms(2026, 4, 1), "realizedPnl": "-10", "commission": "0.5", "commissionAsset": "USDT"},
+        {"time": utc_ms(2026, 4, 2), "realizedPnl": "5", "commission": "0.25", "commissionAsset": "USDT"},
     ]
 
     curve = aggregate_futures_trade_curve(trades, base_usd=1000.0, start=date(2026, 4, 1))
 
     assert curve == [
-        {"date": "2026-04-01", "pct": 2.0},
-        {"date": "2026-04-02", "pct": 2.5},
+        {"date": "2026-04-01", "pct": 1.8},
+        {"date": "2026-04-02", "pct": 2.275},
     ]
 
 
@@ -38,8 +38,8 @@ def test_futures_trades_csv_is_loaded_without_persisting_raw_trade_fields(tmp_pa
     source = tmp_path / "trades.csv"
     source.write_text(
         "datetime_utc,time,symbol,realizedPnl,quoteQty,commission\n"
-        "2026-04-23T06:06:44+00:00,1776924404753,SYNTH,0,1,0\n"
-        "2026-04-23T08:40:41+00:00,1776933641969,SYNTH,-3.6408,1,0\n",
+        "2026-04-23T06:06:44+00:00,1776924404753,SYNTH,0,1,0.31\n"
+        "2026-04-23T08:40:41+00:00,1776933641969,SYNTH,-3.6408,1,0.30\n",
         encoding="utf-8",
     )
 
@@ -47,10 +47,10 @@ def test_futures_trades_csv_is_loaded_without_persisting_raw_trade_fields(tmp_pa
     curve = aggregate_futures_trade_curve(trades, base_usd=100.0, start=date(2026, 4, 1))
 
     assert trades == [
-        {"time": 1776924404753, "realizedPnl": 0.0},
-        {"time": 1776933641969, "realizedPnl": -3.6408},
+        {"time": 1776924404753, "realizedPnl": 0.0, "commission": 0.31, "commissionAsset": ""},
+        {"time": 1776933641969, "realizedPnl": -3.6408, "commission": 0.3, "commissionAsset": ""},
     ]
-    assert curve == [{"date": "2026-04-23", "pct": -3.6408}]
+    assert curve == [{"date": "2026-04-23", "pct": -4.2508}]
 
 
 def test_options_total_is_rendered_as_percent_of_configured_base() -> None:
@@ -76,8 +76,8 @@ def test_default_snapshot_is_public_and_sanitized() -> None:
     assert snapshot["futures"]["label"] == "期货"
     assert snapshot["options"]["label"] == "期权"
     assert snapshot["futures"]["status"] == "missing_base"
-    assert snapshot["futures"]["base_configured"] is False
-    assert snapshot["options"]["base_configured"] is False
+    assert "base_configured" not in text
+    assert "trade_count" not in text
     assert "API_KEY" not in text
     assert "SECRET" not in text
     assert "BINANCE" not in text
