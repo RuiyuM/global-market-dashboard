@@ -80,3 +80,8 @@ def test_ohlc_javascript_supports_comparison_normalization() -> None:
 def test_move_chart_only_mentions_blue_compare_line_when_comparison_exists() -> None:
     assert "const moveCompareNote = compareItem ?" in JS
     assert "柱=主标的单日涨跌幅，蓝线=比较标的" not in JS
+
+
+def test_ohlc_zoom_buttons_use_requested_direction() -> None:
+    assert 'zoomInButton?.addEventListener("click", () => zoomChart(1));' in JS
+    assert 'zoomOutButton?.addEventListener("click", () => zoomChart(-1));' in JS

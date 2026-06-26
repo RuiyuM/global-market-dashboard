@@ -3520,8 +3520,8 @@ JS = """
   windowButtons.forEach((button) => {
     button.addEventListener("click", () => setVisibleWindow(Number(button.dataset.window)));
   });
-  zoomInButton?.addEventListener("click", () => zoomChart(-1));
-  zoomOutButton?.addEventListener("click", () => zoomChart(1));
+  zoomInButton?.addEventListener("click", () => zoomChart(1));
+  zoomOutButton?.addEventListener("click", () => zoomChart(-1));
   resetButton?.addEventListener("click", () => {
     if (!currentKey) return;
     viewEndByKey[currentKey] = sourceRows(ohlcData[currentKey]).length;
