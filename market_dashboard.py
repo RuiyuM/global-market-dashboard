@@ -2962,7 +2962,7 @@ JS = """
     const bars = item.ohlc || [];
     const width = 980;
     const height = 360;
-    const margin = { left: 64, right: 22, top: 22, bottom: 58 };
+    const margin = { left: 64, right: 22, top: 22, bottom: 84 };
     const innerW = width - margin.left - margin.right;
     const innerH = height - margin.top - margin.bottom;
     tooltip.classList.add("dark");
@@ -3002,11 +3002,12 @@ JS = """
     }).join("");
 
     const dateTicks = [];
+    const dateLabelY = height - 30;
     const tickCount = Math.min(10, bars.length);
     for (let i = 0; i < tickCount; i += 1) {
       const index = Math.round(i * (bars.length - 1) / Math.max(1, tickCount - 1));
       const xx = x(index);
-      dateTicks.push(`<text x="${xx}" y="${height - 16}" transform="rotate(-48 ${xx} ${height - 16})" text-anchor="end" fill="#66717d" font-size="10">${esc(bars[index].date.slice(5))}</text>`);
+      dateTicks.push(`<text x="${xx}" y="${dateLabelY}" transform="rotate(-48 ${xx} ${dateLabelY})" text-anchor="end" fill="#66717d" font-size="10">${esc(bars[index].date.slice(5))}</text>`);
     }
 
     const moveBars = moves.map((move) => {
