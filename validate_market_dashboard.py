@@ -403,8 +403,13 @@ def main() -> int:
     flow_expand_count = html.count('class="flow-expand"')
     if flow_expand_count != FLOW_PERIOD_COUNT:
         errors.append(f"flow route expand button count mismatch: {flow_expand_count}")
+    if 'class="flow-grid" data-flow-panel-body hidden' not in html:
+        errors.append("FX flow panel should be collapsed by default")
     for marker in [
         'id="fx-flow-data"',
+        'data-flow-panel-toggle',
+        'data-flow-panel-body',
+        "toggleFlowPanel",
         ".flow-routes[hidden]",
         ".flow-route-detail",
         ".flow-route-detail[hidden]",

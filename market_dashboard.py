@@ -2696,7 +2696,18 @@ def render_html(snapshot: dict[str, Any]) -> str:
         html.append("</tr>")
     html.extend(["</tbody></table></div></section>"])
 
-    html.extend(['<section class="panel">', "<h2>三币种资金流向</h2>", '<div class="flow-grid">'])
+    html.extend(
+        [
+            '<section class="panel flow-panel">',
+            '<div class="flow-panel-head">',
+            "<h2>三币种资金流向</h2>",
+            '<button type="button" class="flow-panel-toggle" data-flow-panel-toggle aria-expanded="false">'
+            '<span class="toggle-icon">▸</span><span>展开</span>'
+            "</button>",
+            "</div>",
+            '<div class="flow-grid" data-flow-panel-body hidden>',
+        ]
+    )
     for section_index, section in enumerate(snapshot["fx_flows"]):
         html.append('<div class="flow-block">')
         html.append(f'<h3>{escape(section["name"])}</h3>')
@@ -3080,7 +3091,26 @@ th:first-child, td:first-child { text-align: left; }
   box-shadow: 0 10px 28px rgba(15, 23, 42, 0.28);
 }
 .chart-tooltip.dark .muted { color: #cbd5e1; }
-.flow-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.flow-panel { padding: 14px; }
+.flow-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.flow-panel-head h2 { margin: 0; }
+.flow-panel-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--blue);
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.flow-panel-toggle:hover { background: #f8fafc; border-color: #b7c2cf; }
+.flow-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
+.flow-grid[hidden] { display: none; }
 .flow-block { padding: 12px; }
 .flow-row { display: grid; grid-template-columns: 52px 1fr; gap: 10px; border-top: 1px solid var(--line); padding: 10px 0 0; margin-top: 10px; }
 .period { color: var(--blue); font-weight: 700; }
@@ -3244,6 +3274,8 @@ JS = """
   const flowData = JSON.parse(flowRaw);
   const rows = Array.from(document.querySelectorAll(".derivative-row"));
   const countryToggles = Array.from(document.querySelectorAll(".country-toggle"));
+  const flowPanelToggle = document.querySelector("[data-flow-panel-toggle]");
+  const flowPanelBody = document.querySelector("[data-flow-panel-body]");
   const flowExpandButtons = Array.from(document.querySelectorAll(".flow-expand"));
   const flowRoutes = Array.from(document.querySelectorAll(".flow-route"));
   const policyActionToggles = Array.from(document.querySelectorAll("[data-policy-actions-toggle]"));
@@ -3487,6 +3519,17 @@ JS = """
     if (icon) icon.textContent = nextExpanded ? "▾" : "▸";
     const label = button.querySelector("span:last-child");
     if (label) label.textContent = nextExpanded ? "收起6条路线" : "查看6条路线";
+  };
+
+  const toggleFlowPanel = () => {
+    if (!flowPanelToggle || !flowPanelBody) return;
+    const nextExpanded = flowPanelToggle.getAttribute("aria-expanded") !== "true";
+    flowPanelToggle.setAttribute("aria-expanded", String(nextExpanded));
+    flowPanelBody.hidden = !nextExpanded;
+    const icon = flowPanelToggle.querySelector(".toggle-icon");
+    if (icon) icon.textContent = nextExpanded ? "▾" : "▸";
+    const label = flowPanelToggle.querySelector("span:last-child");
+    if (label) label.textContent = nextExpanded ? "收起" : "展开";
   };
 
   const yTicks = (min, max, count = 5) => {
@@ -4034,6 +4077,8 @@ JS = """
   flowExpandButtons.forEach((button) => {
     button.addEventListener("click", () => toggleFlowRoutes(button));
   });
+
+  flowPanelToggle?.addEventListener("click", toggleFlowPanel);
 
   flowRoutes.forEach((button) => {
     button.addEventListener("click", () => {
