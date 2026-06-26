@@ -1919,15 +1919,23 @@ def render_quant_fund(snapshot: dict[str, Any]) -> str:
     generated_at = str(fund.get("generated_at") or "")
     generated_short = generated_at[5:16].replace("T", " ") if len(generated_at) >= 16 else "待更新"
     return (
-        '<details class="quant-fund-widget">'
-        '<summary><span>量化基金</span><small>低频</small></summary>'
-        '<div class="quant-fund-body">'
-        f'<div class="quant-fund-meta">每日更新 · {escape(generated_short)}</div>'
+        '<a class="quant-fund-dock" href="#quant-fund">'
+        '<span>量化基金</span><small>低频</small>'
+        "</a>"
+        '<section class="quant-fund-page" id="quant-fund">'
+        '<div class="quant-fund-screen">'
+        '<div class="quant-fund-screen-head">'
+        '<a class="quant-back" href="#">← 返回</a>'
+        '<div><h2>量化基金</h2>'
+        f'<p>每日更新 · {escape(generated_short)} · 全部为百分比曲线</p></div>'
+        "</div>"
+        '<div class="quant-fund-grid">'
         f'{render_quant_card("期货", fund.get("futures", {}))}'
         f'{render_quant_card("期权", fund.get("options", {}))}'
         f'{render_quant_card("股指", fund.get("equity", {"label": "股指", "status": "pending", "points": []}))}'
         "</div>"
-        "</details>"
+        "</div>"
+        "</section>"
     )
 
 
@@ -2771,33 +2779,34 @@ h3 { margin: 0 0 10px; font-size: 15px; letter-spacing: 0; }
 .daily-alert-metrics { display: grid; grid-template-columns: repeat(4, max-content); gap: 12px; color: var(--ink); font-size: 12px; font-variant-numeric: tabular-nums; }
 .daily-alert-metrics span { min-width: 0; }
 .daily-alert-metrics em { display: block; color: var(--muted); font-style: normal; font-size: 10px; line-height: 1.2; }
-.quant-fund-widget {
+.quant-fund-dock {
   position: fixed;
   right: 14px;
   bottom: 14px;
   z-index: 30;
-  width: min(360px, calc(100vw - 28px));
-  border: 1px solid #cfd8e3;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 12px 34px rgba(15, 23, 42, 0.12);
-  overflow: hidden;
-}
-.quant-fund-widget summary {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 9px 11px;
-  cursor: pointer;
-  list-style: none;
+  min-width: 132px;
+  border: 1px solid #cfd8e3;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
   color: var(--ink);
+  text-decoration: none;
+  box-shadow: 0 12px 34px rgba(15, 23, 42, 0.12);
+  padding: 9px 11px;
   font-weight: 800;
 }
-.quant-fund-widget summary::-webkit-details-marker { display: none; }
-.quant-fund-widget summary small { color: var(--muted); font-size: 11px; font-weight: 650; }
-.quant-fund-body { display: grid; gap: 8px; padding: 0 10px 10px; }
-.quant-fund-meta { color: var(--muted); font-size: 11px; font-weight: 650; }
+.quant-fund-dock small { color: var(--muted); font-size: 11px; font-weight: 650; }
+.quant-fund-page { display: none; position: fixed; inset: 0; z-index: 60; overflow: auto; background: #f6f7f8; padding: 24px; }
+.quant-fund-page:target { display: block; }
+.quant-fund-screen { max-width: 980px; margin: 0 auto; }
+.quant-fund-screen-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.quant-fund-screen-head h2 { margin: 0 0 4px; font-size: 24px; }
+.quant-fund-screen-head p { margin: 0; color: var(--muted); font-weight: 650; }
+.quant-back { border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: #fff; text-decoration: none; padding: 8px 10px; font-weight: 750; }
+.quant-fund-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .quant-card { border: 1px solid #e5eaf1; border-radius: 8px; padding: 8px; background: #fff; }
 .quant-card-head, .quant-card-main { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .quant-card-head strong { font-size: 12px; }
@@ -3072,6 +3081,10 @@ th:first-child, td:first-child { text-align: left; }
   .hedge-case-grid { grid-template-columns: 1fr; }
   .hike-example-head { align-items: flex-start; flex-direction: column; }
   .hike-phase-grid { grid-template-columns: 1fr; }
+  .quant-fund-dock { right: 10px; bottom: 10px; }
+  .quant-fund-page { padding: 14px; }
+  .quant-fund-screen-head { flex-direction: column; }
+  .quant-fund-grid { grid-template-columns: 1fr; }
   .ranking-block + .ranking-block { border-left: 0; border-top: 1px solid var(--line); padding-left: 0; padding-top: 12px; }
 }
 """

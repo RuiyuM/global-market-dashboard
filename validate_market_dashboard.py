@@ -150,7 +150,24 @@ def main() -> int:
                 errors.append("daily move alert equity item is outside threshold")
             if not item.get("warning"):
                 errors.append("daily move alert equity item should be warning")
-    forbidden_public_markers = ["sk-", "OPENAI_API_KEY", "BINANCE_", "API_KEY", "API_SECRET", "apiKey", "apiSecret", "base_usd"]
+    forbidden_public_markers = [
+        "sk-",
+        "OPENAI_API_KEY",
+        "BINANCE_",
+        "API_KEY",
+        "API_SECRET",
+        "apiKey",
+        "apiSecret",
+        "base_usd",
+        "BTCUSDT",
+        "USDT+USDC",
+        "option_usdt_value",
+        "futures_usdc",
+        "total_usdt_usdc",
+        "option_positions",
+        "futures_positions",
+        "BTC-260",
+    ]
     if any(marker in html for marker in forbidden_public_markers):
         errors.append("HTML should not expose API keys or API key env names")
     snapshot_text = json.dumps(snapshot, ensure_ascii=False)
@@ -162,10 +179,12 @@ def main() -> int:
     for key in ["futures", "options", "equity"]:
         if key not in quant_fund:
             errors.append(f"missing quant fund section: {key}")
-    if '<details class="quant-fund-widget">' not in html:
-        errors.append("missing collapsed quant fund widget")
-    if '<details class="quant-fund-widget" open' in html:
-        errors.append("quant fund widget should default collapsed")
+    if '<a class="quant-fund-dock" href="#quant-fund">' not in html:
+        errors.append("missing bottom quant fund dock")
+    if '<section class="quant-fund-page" id="quant-fund">' not in html:
+        errors.append("missing dedicated quant fund page")
+    if '<details class="quant-fund-widget">' in html:
+        errors.append("quant fund should open a dedicated page instead of expanding the dock")
     for marker in ["量化基金", "期货", "期权", "股指"]:
         if marker not in html:
             errors.append(f"missing quant fund marker: {marker}")

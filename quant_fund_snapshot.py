@@ -28,6 +28,20 @@ EAPI_BASE = "https://eapi.binance.com"
 
 DEFAULT_SYMBOL = "BTCUSDT"
 
+
+OPTIONS_SEED_POINTS = [
+    {"date": "2026-06-22", "pct": 0.0021},
+    {"date": "2026-06-23", "pct": -0.3457},
+    {"date": "2026-06-24", "pct": 0.4213},
+    {"date": "2026-06-25", "pct": -1.1163},
+    {"date": "2026-06-26", "pct": -3.5040},
+]
+
+
+def built_in_options_seed_points() -> list[dict[str, Any]]:
+    return [dict(point) for point in OPTIONS_SEED_POINTS]
+
+
 def today_utc() -> date:
     return datetime.now(timezone.utc).date()
 
@@ -205,14 +219,14 @@ def default_quant_fund_snapshot() -> dict[str, Any]:
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "start_date": default_start_date().isoformat(),
         "futures": {
-            "label": "BTCUSDT 期货",
+            "label": "期货",
             "status": "missing_base",
             "base_configured": False,
             "points": [],
             "trade_count": 0,
         },
         "options": {
-            "label": "期权 USDT+USDC",
+            "label": "期权",
             "status": "missing_base",
             "base_configured": False,
             "points": [],
@@ -251,7 +265,7 @@ def build_snapshot() -> dict[str, Any]:
 
     if futures_base is None:
         snapshot["futures"] = {
-            "label": f"{symbol} 期货",
+            "label": "期货",
             "status": "missing_base",
             "base_configured": False,
             "points": existing_futures_points,
@@ -262,7 +276,7 @@ def build_snapshot() -> dict[str, Any]:
             trades = fetch_futures_trades(futures_key, futures_secret, symbol, start, now.date())
             futures_points = aggregate_futures_trade_curve(trades, base_usd=futures_base, start=start)
             snapshot["futures"] = {
-                "label": f"{symbol} 期货",
+                "label": "期货",
                 "status": "ok" if futures_points else "no_trades",
                 "base_configured": True,
                 "points": futures_points,
@@ -271,7 +285,7 @@ def build_snapshot() -> dict[str, Any]:
             }
         except Exception as exc:  # noqa: BLE001
             snapshot["futures"] = {
-                "label": f"{symbol} 期货",
+                "label": "期货",
                 "status": "error",
                 "base_configured": True,
                 "points": [],
@@ -280,7 +294,7 @@ def build_snapshot() -> dict[str, Any]:
             }
     else:
         snapshot["futures"] = {
-            "label": f"{symbol} 期货",
+            "label": "期货",
             "status": "missing_credentials",
             "base_configured": True,
             "points": existing_futures_points,
@@ -288,8 +302,8 @@ def build_snapshot() -> dict[str, Any]:
         }
 
     if options_base is None:
-        option_points = existing_options_points
-        option_status = "missing_base"
+        option_points = existing_options_points or built_in_options_seed_points()
+        option_status = "seeded" if option_points else "missing_base"
         option_base_configured = False
     elif option_key and option_secret and futures_key and futures_secret:
         try:
@@ -304,12 +318,12 @@ def build_snapshot() -> dict[str, Any]:
             option_base_configured = True
             snapshot["options_error"] = exc.__class__.__name__
     else:
-        option_points = existing_options_points
+        option_points = existing_options_points or built_in_options_seed_points()
         option_status = "stale" if option_points else "missing_credentials"
         option_base_configured = True
 
     snapshot["options"] = {
-        "label": "期权 USDT+USDC",
+        "label": "期权",
         "status": option_status,
         "base_configured": option_base_configured,
         "points": option_points,
