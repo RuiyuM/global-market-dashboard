@@ -91,6 +91,13 @@ def test_quant_fund_separate_page_contains_curves_and_back_link() -> None:
     assert "百分比曲线" not in html
     assert 'class="quant-curve-line"' in html
     assert 'class="quant-curve quant-curve-large"' in html
+    assert '<div class="quant-detail-title"><h3>期货</h3><span class="quant-chart-kicker"><b>Curve</b><em>daily percentage points</em></span></div>' in html
+    assert 'class="quant-chart-title"' not in html
+    assert 'class="quant-chart-subtitle"' not in html
+    assert '<text class="quant-axis-date" ' in html
+    assert '>04-01</text>' in html
+    assert '>04-02</text>' in html
+    assert '>04-03 +1.00%</text>' in html
     assert 'class="quant-peak-line"' in html
     assert 'class="quant-start-line"' in html
     assert "Max DD" in html

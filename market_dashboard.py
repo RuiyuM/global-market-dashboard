@@ -1865,10 +1865,10 @@ def render_quant_curve(points: list[dict[str, Any]], *, large: bool = False) -> 
 
     if large:
         width = 920
-        height = 310
+        height = 342
         pad_x = 58
         chart_top = 34
-        chart_bottom = 270
+        chart_bottom = 268
 
         min_value = min(value for _, value in values)
         max_value = max(value for _, value in values)
@@ -1926,11 +1926,15 @@ def render_quant_curve(points: list[dict[str, Any]], *, large: bool = False) -> 
             "</circle>"
             for (day, value), (x, y) in zip(values, coords)
         )
+        axis_dates = "".join(
+            f'<text class="quant-axis-date" x="{x:.2f}" y="{height - 14}" '
+            f'text-anchor="end" transform="rotate(-55 {x:.2f} {height - 14})">'
+            f'{escape(day[5:] + (f" {value:+.2f}%" if index == len(values) - 1 else ""))}</text>'
+            for index, ((day, value), (x, _)) in enumerate(zip(values, coords))
+        )
         return (
             f'<svg class="quant-curve quant-curve-large" viewBox="0 0 {width} {height}" role="img" aria-label="量化基金曲线">'
             f'<rect class="quant-chart-bg" x="0" y="0" width="{width}" height="{height}" />'
-            f'<text class="quant-chart-title" x="{pad_x}" y="22">Curve</text>'
-            f'<text class="quant-chart-subtitle" x="{pad_x}" y="36">daily percentage points</text>'
             f'{"".join(grid_lines)}'
             f"{top_zero}"
             f'<path class="quant-area-fill" d="{escape(top_area)}" />'
@@ -1940,8 +1944,7 @@ def render_quant_curve(points: list[dict[str, Any]], *, large: bool = False) -> 
             f'<circle class="quant-dd-dot" cx="{max_dd_x:.2f}" cy="{max_dd_y:.2f}" r="4.2" />'
             f'<line class="quant-dd-callout" x1="{max_dd_x:.2f}" y1="{max_dd_y:.2f}" x2="{min(width - pad_x - 80, max_dd_x + 70):.2f}" y2="{min(chart_bottom - 28, max_dd_y + 28):.2f}" />'
             f'<text class="quant-dd-label" x="{min(width - pad_x - 132, max_dd_x + 76):.2f}" y="{min(chart_bottom - 30, max_dd_y + 32):.2f}">Max DD {max_dd_value:.2f}%</text>'
-            f'<text x="{pad_x}" y="{height - 12}">{escape(values[0][0][5:])}</text>'
-            f'<text x="{width - pad_x}" y="{height - 12}" text-anchor="end">{escape(latest_day[5:])} {latest_value:+.2f}%</text>'
+            f'<g class="quant-axis-dates">{axis_dates}</g>'
             "</svg>"
         )
 
@@ -2011,7 +2014,9 @@ def render_quant_detail_panel(key: str, title: str, section: dict[str, Any]) -> 
     point_count = len(points) if isinstance(points, list) else 0
     return (
         f'<section class="panel quant-detail-panel" id="quant-detail-{escape(key)}">'
-        f'<div class="quant-detail-head"><h3>{escape(title)}</h3><span>{escape(status)} · {point_count}个日点</span></div>'
+        f'<div class="quant-detail-head"><div class="quant-detail-title"><h3>{escape(title)}</h3>'
+        '<span class="quant-chart-kicker"><b>Curve</b><em>daily percentage points</em></span></div>'
+        f'<span>{escape(status)} · {point_count}个日点</span></div>'
         f"{render_quant_curve(points, large=True)}"
         "</section>"
     )
@@ -2953,14 +2958,16 @@ h3 { margin: 0 0 10px; font-size: 15px; letter-spacing: 0; }
 .quant-dd-callout { stroke: #a94439; stroke-width: 1.2; }
 .quant-dd-label { fill: #a94439; font-size: 12px; font-weight: 750; }
 .quant-chart-bg { fill: #f8f6ee; }
-.quant-chart-title { fill: #24302d; font-size: 20px; font-weight: 750; }
-.quant-chart-subtitle { fill: #66736d; font-size: 11px; font-weight: 650; }
 .quant-detail-stack { display: grid; gap: 12px; margin-top: 12px; }
 .quant-detail-panel { display: none; scroll-margin-top: 16px; transition: border-color 120ms ease, box-shadow 120ms ease; }
 .quant-detail-panel:target { display: block; border-color: #8fb5f5; box-shadow: 0 0 0 3px rgba(91, 141, 239, 0.14); }
 .quant-detail-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.quant-detail-title { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
 .quant-detail-head h3 { margin: 0; font-size: 16px; }
 .quant-detail-head span { color: var(--muted); font-size: 12px; font-weight: 700; }
+.quant-chart-kicker { display: inline-flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+.quant-chart-kicker b { color: #24302d; font-size: 12px; }
+.quant-chart-kicker em { color: #66736d; font-size: 11px; font-style: normal; font-weight: 650; }
 .quant-empty-large { height: 180px; border: 1px dashed #d6dee9; border-radius: 8px; font-size: 14px; font-weight: 750; }
 .volatility-panel, .status-panel { padding: 0; overflow: hidden; }
 .volatility-panel summary, .status-panel summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; padding: 16px; font-weight: 750; list-style: none; }

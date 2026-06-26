@@ -3,8 +3,10 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timezone
 
+import quant_fund_snapshot as qfs
 from quant_fund_snapshot import (
     aggregate_futures_trade_curve,
     build_options_percent_history,
@@ -84,6 +86,118 @@ def test_default_snapshot_is_public_and_sanitized() -> None:
     assert "BTCUSDT" not in text
     assert "USDT" not in text
     assert "USDC" not in text
+
+
+def test_api_futures_update_writes_only_public_percent_points(monkeypatch, tmp_path) -> None:
+    for name in [
+        "QUANT_FUND_OPTIONS_BASE_USD",
+        "BINANCE_OPTION_API_KEY",
+        "BINANCE_OPTION_API_SECRET",
+        "QUANT_FUND_FUTURES_TRADES_CSV",
+    ]:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("QUANT_FUND_START_DATE", "2026-04-01")
+    monkeypatch.setenv("QUANT_FUND_FUTURES_BASE_USD", "1000")
+    monkeypatch.setenv("QUANT_FUND_SYMBOL", "BTCUSDT")
+    monkeypatch.setenv("BINANCE_FUTURES_API_KEY", "test-key")
+    monkeypatch.setenv("BINANCE_FUTURES_API_SECRET", "test-secret")
+    monkeypatch.setattr(qfs, "load_existing_public_snapshot", lambda: {})
+    monkeypatch.setattr(
+        qfs,
+        "fetch_futures_trades",
+        lambda *_args, **_kwargs: [
+            {
+                "time": utc_ms(2026, 4, 1),
+                "symbol": "BTCUSDT",
+                "orderId": "raw-order",
+                "quoteQty": "1000",
+                "realizedPnl": "30",
+                "commission": "1.5",
+                "commissionAsset": "USDT",
+            },
+            {
+                "time": utc_ms(2026, 4, 2),
+                "symbol": "BTCUSDT",
+                "id": "raw-trade",
+                "quoteQty": "900",
+                "realizedPnl": "-10",
+                "commission": "0.5",
+                "commissionAsset": "USDT",
+            },
+        ],
+    )
+
+    snapshot = qfs.build_snapshot()
+    out = tmp_path / "quant_fund_snapshot.json"
+    qfs.write_public_snapshot(snapshot, out)
+    text = out.read_text(encoding="utf-8")
+
+    assert snapshot["futures"]["status"] == "ok"
+    assert snapshot["futures"]["points"] == [
+        {"date": "2026-04-01", "pct": 2.85},
+        {"date": "2026-04-02", "pct": 1.8},
+    ]
+    assert snapshot["futures"]["latest_pct"] == 1.8
+    for marker in [
+        "BTCUSDT",
+        "USDT",
+        "orderId",
+        "raw-order",
+        "raw-trade",
+        "quoteQty",
+        "commission",
+        "commissionAsset",
+        "realizedPnl",
+        "test-key",
+        "test-secret",
+    ]:
+        assert marker not in text
+
+
+def test_api_options_update_writes_only_public_percent_points(monkeypatch, tmp_path) -> None:
+    for name in ["QUANT_FUND_FUTURES_BASE_USD", "QUANT_FUND_FUTURES_TRADES_CSV", "QUANT_FUND_SYMBOL"]:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("QUANT_FUND_START_DATE", "2026-04-01")
+    monkeypatch.setenv("QUANT_FUND_OPTIONS_BASE_USD", "1000")
+    monkeypatch.setenv("BINANCE_FUTURES_API_KEY", "test-futures-key")
+    monkeypatch.setenv("BINANCE_FUTURES_API_SECRET", "test-futures-secret")
+    monkeypatch.setenv("BINANCE_OPTION_API_KEY", "test-option-key")
+    monkeypatch.setenv("BINANCE_OPTION_API_SECRET", "test-option-secret")
+    monkeypatch.setattr(
+        qfs,
+        "load_existing_public_snapshot",
+        lambda: {"options": {"points": [{"date": "2026-04-01", "pct": -1.0}]}},
+    )
+    monkeypatch.setattr(qfs, "fetch_option_wallet_total", lambda *_args, **_kwargs: 910.0)
+    monkeypatch.setattr(qfs, "fetch_futures_stable_balance", lambda *_args, **_kwargs: 110.0)
+
+    snapshot = qfs.build_snapshot()
+    out = tmp_path / "quant_fund_snapshot.json"
+    qfs.write_public_snapshot(snapshot, out)
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    text = json.dumps(payload, ensure_ascii=False)
+
+    assert payload["options"]["status"] == "ok"
+    assert payload["options"]["points"][0] == {"date": "2026-04-01", "pct": -1.0}
+    assert payload["options"]["points"][-1]["pct"] == 2.0
+    assert payload["options"]["latest_pct"] == 2.0
+    for marker in [
+        "USDT",
+        "USDC",
+        "option_usdt_value",
+        "futures_usdc",
+        "total_usdt_usdc",
+        "option_positions",
+        "futures_positions",
+        "test-futures-key",
+        "test-futures-secret",
+        "test-option-key",
+        "test-option-secret",
+        "910.0",
+        "110.0",
+        "1020.0",
+    ]:
+        assert marker not in text
     assert "option_usdt_value" not in text
     assert "futures_usdc" not in text
     assert "total_usdt_usdc" not in text
