@@ -261,14 +261,23 @@ def merge_percent_points(existing: list[dict[str, Any]], updates: list[dict[str,
     latest_existing = existing_rows[-1]
     latest_existing_date = latest_existing["date"]
     latest_existing_pct = float(latest_existing["pct"])
+    previous_existing_pct = float(existing_rows[-2]["pct"]) if len(existing_rows) >= 2 else latest_existing_pct
     baseline_update = None
-    for row in update_rows:
+    baseline_index = None
+    for index, row in enumerate(update_rows):
         if row["date"] <= latest_existing_date:
             baseline_update = float(row["pct"])
+            baseline_index = index
         else:
             break
     if baseline_update is None:
-        baseline_update = 0.0
+        return existing_rows
+
+    baseline_update_previous = float(update_rows[baseline_index - 1]["pct"]) if baseline_index and baseline_index > 0 else 0.0
+    existing_overlap_move = latest_existing_pct - previous_existing_pct
+    update_overlap_move = baseline_update - baseline_update_previous
+    if abs(existing_overlap_move - update_overlap_move) > 0.5:
+        return existing_rows
 
     merged = list(existing_rows)
     for row in update_rows:

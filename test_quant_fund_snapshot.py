@@ -56,7 +56,7 @@ def test_futures_trades_csv_is_loaded_without_persisting_raw_trade_fields(tmp_pa
     assert curve == [{"date": "2026-04-23", "pct": -4.2508}]
 
 
-def test_futures_api_update_appends_to_existing_public_curve_without_resetting() -> None:
+def test_futures_api_update_rejects_mismatched_overlap_without_resetting() -> None:
     existing = [
         {"date": "2026-04-23", "pct": -0.8529},
         {"date": "2026-06-22", "pct": -0.8969},
@@ -70,11 +70,28 @@ def test_futures_api_update_appends_to_existing_public_curve_without_resetting()
 
     merged = merge_percent_points(existing, api_curve)
 
+    assert merged == existing
+
+
+def test_futures_api_update_appends_when_overlap_matches_existing_curve() -> None:
+    existing = [
+        {"date": "2026-04-23", "pct": -0.8529},
+        {"date": "2026-06-22", "pct": -0.8969},
+        {"date": "2026-06-24", "pct": 2.9086},
+    ]
+    api_curve = [
+        {"date": "2026-06-24", "pct": 3.8055},
+        {"date": "2026-06-25", "pct": 3.6064},
+        {"date": "2026-06-26", "pct": 11.1961},
+    ]
+
+    merged = merge_percent_points(existing, api_curve)
+
     assert merged == [
         {"date": "2026-04-23", "pct": -0.8529},
         {"date": "2026-06-22", "pct": -0.8969},
         {"date": "2026-06-24", "pct": 2.9086},
-        {"date": "2026-06-25", "pct": 2.7096},
+        {"date": "2026-06-25", "pct": 2.7095},
         {"date": "2026-06-26", "pct": 10.2992},
     ]
 
