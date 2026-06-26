@@ -7,6 +7,7 @@ from datetime import date
 
 from market_dashboard import JS
 from market_dashboard import recent_ohlc_rows
+from market_dashboard import render_html
 
 
 def ohlc(day: int, close: float) -> dict[str, object]:
@@ -35,3 +36,39 @@ def test_move_chart_keeps_rotated_date_labels_inside_svg_viewbox() -> None:
     assert "bottom: 84" in JS
     assert 'const dateLabelY = height - 30;' in JS
     assert 'rotate(-48 ${xx} ${dateLabelY})' in JS
+
+
+def test_ohlc_panel_exposes_comparison_selector() -> None:
+    html = render_html(
+        {
+            "countries": [],
+            "volatility_rankings": {"bond": [], "equity": [], "fx": []},
+            "fx_rank_details": {},
+            "second_order_monitor": [
+                {
+                    "key": "US_10Y",
+                    "country": "美国",
+                    "group": "债券",
+                    "label": "美国10年国债",
+                    "unit": "pct",
+                    "metrics": {},
+                    "summary": {},
+                    "ohlc": [],
+                }
+            ],
+            "fx_flows": [],
+            "series_status": [],
+            "notes": [],
+            "generated_at": "2026-06-26T00:00:00",
+        }
+    )
+
+    assert '<label class="ohlc-compare"' in html
+    assert 'id="ohlc-compare-select"' in html
+    assert '<option value="">无比较</option>' in html
+
+
+def test_ohlc_javascript_supports_comparison_normalization() -> None:
+    assert 'const compareSelect = document.getElementById("ohlc-compare-select");' in JS
+    assert "const comparisonFor = (primaryItem) =>" in JS
+    assert "const normalizeOhlcSeries = (bars) =>" in JS

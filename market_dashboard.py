@@ -2011,6 +2011,11 @@ def render_html(snapshot: dict[str, Any]) -> str:
         }
         for row in second_order
     }
+    ohlc_compare_options = [
+        (key, f'{item["country"]} / {item["group"]} / {item["label"]}')
+        for key, item in ohlc_payload.items()
+        if item.get("chartType") != "bond_curve" and item.get("ohlc")
+    ]
     ohlc_json = json.dumps(ohlc_payload, ensure_ascii=False).replace("</", "<\\/")
     generated = escape(snapshot["generated_at"])
     html = [
@@ -2132,6 +2137,16 @@ def render_html(snapshot: dict[str, Any]) -> str:
             '<button type="button" class="ohlc-window" data-window="180">180D</button>',
             '<button type="button" class="ohlc-window" data-window="360">360D</button>',
             "</div>",
+            '<label class="ohlc-compare" for="ohlc-compare-select">',
+            "<span>比较</span>",
+            '<select id="ohlc-compare-select">',
+            '<option value="">无比较</option>',
+            *[
+                f'<option value="{escape(key)}">{escape(label)}</option>'
+                for key, label in ohlc_compare_options
+            ],
+            "</select>",
+            "</label>",
             '<div class="chart-tools">',
             '<button type="button" id="ohlc-zoom-in" title="放大">+</button>',
             '<button type="button" id="ohlc-zoom-out" title="缩小">-</button>',
@@ -2454,6 +2469,9 @@ th:first-child, td:first-child { text-align: left; }
 .segmented, .chart-tools { display: flex; align-items: center; gap: 6px; }
 .ohlc-toolbar button { border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); cursor: pointer; min-width: 34px; height: 30px; padding: 0 10px; font: inherit; font-size: 12px; font-weight: 650; }
 .ohlc-toolbar button.active { background: #eaf2ff; border-color: #aac5ee; color: var(--blue); }
+.ohlc-compare { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 650; }
+.ohlc-compare select { max-width: min(38vw, 280px); height: 30px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); padding: 0 28px 0 8px; font: inherit; font-size: 12px; }
+.ohlc-compare select:disabled { background: #f3f6fa; color: var(--muted); }
 #ohlc-range-label { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .ohlc-head { color: var(--muted); margin: -4px 0 12px; font-size: 13px; }
 .chart-shell { position: relative; border: 1px solid var(--line); border-radius: 8px; background: #fff; overflow: hidden; }
@@ -2659,8 +2677,10 @@ JS = """
   const zoomInButton = document.getElementById("ohlc-zoom-in");
   const zoomOutButton = document.getElementById("ohlc-zoom-out");
   const resetButton = document.getElementById("ohlc-reset");
+  const compareSelect = document.getElementById("ohlc-compare-select");
   const windowSteps = [90, 180, 360];
   let currentKey = null;
+  let compareKey = "";
   let chartMode = "move";
   let visibleWindow = 90;
   const viewEndByKey = {};
@@ -2925,7 +2945,52 @@ JS = """
     return { ...item, ohlc: range.rows, range };
   };
 
+  const comparisonFor = (primaryItem) => {
+    if (!compareKey || compareKey === currentKey || primaryItem?.chartType === "bond_curve") return null;
+    const source = ohlcData[compareKey];
+    if (!source || source.chartType === "bond_curve") return null;
+    const primaryDates = new Set((primaryItem.ohlc || []).map((bar) => bar.date));
+    const rows = (source.ohlc || []).filter((bar) => primaryDates.has(bar.date));
+    if (!rows.length) return null;
+    return { ...source, key: compareKey, ohlc: rows };
+  };
+
+  const normalizeOhlcSeries = (bars) => {
+    const base = (bars || [])
+      .map((bar) => Number(bar.close))
+      .find((value) => Number.isFinite(value) && value !== 0);
+    if (!Number.isFinite(base)) return [];
+    const normalize = (value) => {
+      const number = Number(value);
+      return Number.isFinite(number) ? number / base * 100 : NaN;
+    };
+    return bars.map((bar) => ({
+      ...bar,
+      base_close: base,
+      open_norm: normalize(bar.open),
+      high_norm: normalize(bar.high),
+      low_norm: normalize(bar.low),
+      close_norm: normalize(bar.close)
+    })).filter((bar) => [bar.open_norm, bar.high_norm, bar.low_norm, bar.close_norm].every(Number.isFinite));
+  };
+
+  const updateCompareOptions = (item) => {
+    if (!compareSelect) return;
+    const disabled = item?.chartType === "bond_curve";
+    compareSelect.disabled = disabled;
+    Array.from(compareSelect.options).forEach((option) => {
+      option.disabled = Boolean(option.value) && (option.value === currentKey || disabled);
+    });
+    if (disabled || compareKey === currentKey || !ohlcData[compareKey]) {
+      compareKey = "";
+      compareSelect.value = "";
+    } else {
+      compareSelect.value = compareKey;
+    }
+  };
+
   const updateControls = (item) => {
+    updateCompareOptions(item);
     modeButtons.forEach((button) => {
       button.classList.toggle("active", button.dataset.mode === chartMode);
     });
@@ -2958,7 +3023,7 @@ JS = """
     setVisibleWindow(windowSteps[nextIndex]);
   };
 
-  const renderMoveChart = (item) => {
+  const renderMoveChart = (item, compareItem = null) => {
     const bars = item.ohlc || [];
     const width = 980;
     const height = 360;
@@ -2980,7 +3045,13 @@ JS = """
       return;
     }
 
-    const maxAbs = Math.max(0.1, ...moves.map((move) => Math.abs(move.value))) * 1.16;
+    const dateIndex = new Map(bars.map((bar, index) => [bar.date, index]));
+    const compareMoves = (compareItem?.ohlc || []).map((bar) => ({
+      bar,
+      index: dateIndex.get(bar.date),
+      value: Number(bar.change_pct)
+    })).filter((move) => Number.isFinite(move.index) && Number.isFinite(move.value));
+    const maxAbs = Math.max(0.1, ...moves.map((move) => Math.abs(move.value)), ...compareMoves.map((move) => Math.abs(move.value))) * 1.16;
     const min = -maxAbs;
     const max = maxAbs;
     const xStep = innerW / Math.max(1, bars.length - 1);
@@ -2989,6 +3060,7 @@ JS = """
     const zeroY = y(0);
     const barW = Math.max(2, Math.min(8, xStep * 0.42));
     const linePath = moves.map((move, pathIndex) => `${pathIndex === 0 ? "M" : "L"} ${x(move.index).toFixed(2)} ${y(move.value).toFixed(2)}`).join(" ");
+    const compareLinePath = compareMoves.map((move, pathIndex) => `${pathIndex === 0 ? "M" : "L"} ${x(move.index).toFixed(2)} ${y(move.value).toFixed(2)}`).join(" ");
     const labelCount = Math.min(24, Math.max(8, Math.round(moves.length / 4)));
     const labelThreshold = [...moves]
       .map((move) => Math.abs(move.value))
@@ -3031,6 +3103,14 @@ JS = """
       return `<circle cx="${xx}" cy="${yy}" r="2.4" fill="#f4b43f" stroke="#fff" stroke-width="0.8" />${label}`;
     }).join("");
 
+    const compareDots = compareMoves.map((move) => (
+      `<circle cx="${x(move.index)}" cy="${y(move.value)}" r="2.2" fill="#2563eb" stroke="#fff" stroke-width="0.8" />`
+    )).join("");
+    const legend = compareMoves.length
+      ? `<text x="${margin.left}" y="16" fill="#f4a21e" font-size="12" font-weight="700">主：${esc(item.label)}</text>`
+        + `<text x="${margin.left + 150}" y="16" fill="#2563eb" font-size="12" font-weight="700">比较：${esc(compareItem.label)}</text>`
+      : "";
+
     const hitW = Math.max(8, xStep);
     const hits = bars.map((bar, index) => (
       `<g class="move-hit" data-index="${index}">`
@@ -3047,8 +3127,10 @@ JS = """
       + moveBars
       + `<path d="${linePath}" fill="none" stroke="#f4b43f" stroke-width="1.8" />`
       + dots
+      + (compareLinePath ? `<path d="${compareLinePath}" fill="none" stroke="#2563eb" stroke-width="1.8" stroke-dasharray="4 3" />${compareDots}${legend}` : "")
       + hits;
 
+    const compareByDate = new Map((compareItem?.ohlc || []).map((bar) => [bar.date, bar]));
     Array.from(svg.querySelectorAll(".move-hit")).forEach((node) => {
       const bar = bars[Number(node.dataset.index)];
       const change = Number(bar.change_pct);
@@ -3062,11 +3144,19 @@ JS = """
         tooltip.style.left = `${Math.min(bounds.width - 236, Math.max(8, event.clientX - bounds.left + 14))}px`;
         tooltip.style.top = `${Math.max(8, event.clientY - bounds.top - 96)}px`;
         const moveText = Number.isFinite(change) ? pctLabel(change) : "缺失";
+        const compareBar = compareByDate.get(bar.date);
+        const compareChange = Number(compareBar?.change_pct);
+        const compareText = Number.isFinite(compareChange) ? pctLabel(compareChange) : "缺失";
+        const compareHtml = compareBar
+          ? `<div class="muted">比较 ${esc(compareItem.label)} 涨跌幅：<b>${compareText}</b></div>`
+            + `<div class="muted">Close: ${fmt(compareBar.close)}</div>`
+          : "";
         tooltip.innerHTML = `<strong>${esc(bar.date)}</strong>`
           + `<div>${esc(item.country)} ${esc(item.label)} 涨跌幅：<b>${moveText}</b></div>`
           + `<div class="muted">Prev close: ${fmt(bar.prev_close)}</div>`
           + `<div>Open: ${fmt(bar.open)} · High: ${fmt(bar.high)}</div>`
-          + `<div>Low: ${fmt(bar.low)} · Close: ${fmt(bar.close)}</div>`;
+          + `<div>Low: ${fmt(bar.low)} · Close: ${fmt(bar.close)}</div>`
+          + compareHtml;
       });
       node.addEventListener("mouseleave", () => {
         const crosshair = node.querySelector(".move-crosshair");
@@ -3076,7 +3166,7 @@ JS = """
     });
   };
 
-  const renderChart = (item) => {
+  const renderChart = (item, compareItem = null) => {
     const bars = item.ohlc || [];
     const width = 980;
     const height = 360;
@@ -3088,8 +3178,28 @@ JS = """
       svg.innerHTML = `<text x="490" y="180" text-anchor="middle" fill="#66717d">没有 OHLC 数据</text>`;
       return;
     }
-    const highs = bars.map((bar) => Number(bar.high));
-    const lows = bars.map((bar) => Number(bar.low));
+    const dateIndex = new Map(bars.map((bar, index) => [bar.date, index]));
+    const compareRows = (compareItem?.ohlc || []).filter((bar) => dateIndex.has(bar.date));
+    const normalized = compareRows.length > 0;
+    const highField = normalized ? "high_norm" : "high";
+    const lowField = normalized ? "low_norm" : "low";
+    const openField = normalized ? "open_norm" : "open";
+    const closeField = normalized ? "close_norm" : "close";
+    const primarySeries = (normalized ? normalizeOhlcSeries(bars) : bars)
+      .map((bar) => ({ ...bar, plotIndex: dateIndex.get(bar.date) }))
+      .filter((bar) => Number.isFinite(bar.plotIndex));
+    const compareSeries = normalized
+      ? normalizeOhlcSeries(compareRows)
+        .map((bar) => ({ ...bar, plotIndex: dateIndex.get(bar.date) }))
+        .filter((bar) => Number.isFinite(bar.plotIndex))
+      : [];
+    const plottedValues = [...primarySeries, ...compareSeries];
+    if (!plottedValues.length) {
+      svg.innerHTML = `<text x="490" y="180" text-anchor="middle" fill="#66717d">没有可归一化的 OHLC 数据</text>`;
+      return;
+    }
+    const highs = plottedValues.map((bar) => Number(bar[highField]));
+    const lows = plottedValues.map((bar) => Number(bar[lowField]));
     let min = Math.min(...lows);
     let max = Math.max(...highs);
     if (min === max) {
@@ -3107,7 +3217,7 @@ JS = """
     const grid = yTicks(min, max).map((tick) => {
       const yy = y(tick);
       return `<line x1="${margin.left}" x2="${width - margin.right}" y1="${yy}" y2="${yy}" stroke="#e5e9ef" />`
-        + `<text x="${margin.left - 10}" y="${yy + 4}" text-anchor="end" fill="#66717d" font-size="11">${fmt(tick)}</text>`;
+        + `<text x="${margin.left - 10}" y="${yy + 4}" text-anchor="end" fill="#66717d" font-size="11">${normalized ? tick.toFixed(1) : fmt(tick)}</text>`;
     }).join("");
 
     const dateTicks = [];
@@ -3118,44 +3228,74 @@ JS = """
       dateTicks.push(`<text x="${xx}" y="${height - 13}" text-anchor="middle" fill="#66717d" font-size="11">${esc(bars[index].date.slice(5))}</text>`);
     }
 
-    const candles = bars.map((bar, index) => {
-      const xx = x(index);
-      const open = Number(bar.open);
-      const close = Number(bar.close);
-      const high = Number(bar.high);
-      const low = Number(bar.low);
+    const candleSvg = (bar, colorMode, extraClass = "") => {
+      const xx = x(bar.plotIndex);
+      const open = Number(bar[openField]);
+      const close = Number(bar[closeField]);
+      const high = Number(bar[highField]);
+      const low = Number(bar[lowField]);
       const up = close >= open;
-      const color = up ? "#b42318" : "#087443";
+      const color = colorMode === "compare" ? "#2563eb" : up ? "#b42318" : "#087443";
+      const fill = colorMode === "compare" ? "#ffffff" : up ? color : "#ffffff";
+      const opacity = colorMode === "compare" ? "0.62" : "1";
       const bodyTop = y(Math.max(open, close));
       const bodyBottom = y(Math.min(open, close));
       const bodyH = Math.max(1.2, bodyBottom - bodyTop);
-      const hitW = Math.max(8, xStep);
-      return `<g class="candle" data-index="${index}">`
+      const widthFactor = colorMode === "compare" ? 0.72 : 1;
+      return `<g class="${extraClass}">`
         + `<line x1="${xx}" x2="${xx}" y1="${y(high)}" y2="${y(low)}" stroke="${color}" stroke-width="1.4" />`
-        + `<rect x="${xx - candleW / 2}" y="${bodyTop}" width="${candleW}" height="${bodyH}" fill="${up ? color : "#ffffff"}" stroke="${color}" stroke-width="1.3" />`
-        + `<rect class="hit" x="${xx - hitW / 2}" y="${margin.top}" width="${hitW}" height="${innerH}" fill="transparent" />`
+        + `<rect x="${xx - candleW * widthFactor / 2}" y="${bodyTop}" width="${candleW * widthFactor}" height="${bodyH}" fill="${fill}" stroke="${color}" stroke-width="1.3" opacity="${opacity}" />`
+        + `</g>`;
+    };
+
+    const candles = primarySeries.map((bar) => {
+      const hitW = Math.max(8, xStep);
+      return `<g class="candle" data-date="${esc(bar.date)}">`
+        + candleSvg(bar, "primary")
+        + `<rect class="hit" x="${x(bar.plotIndex) - hitW / 2}" y="${margin.top}" width="${hitW}" height="${innerH}" fill="transparent" />`
         + `</g>`;
     }).join("");
+    const compareCandles = compareSeries.map((bar) => candleSvg(bar, "compare", "compare-candle")).join("");
+    const legend = normalized
+      ? `<text x="${margin.left}" y="16" fill="#344054" font-size="12" font-weight="700">指数=100：${esc(item.label)}</text>`
+        + `<text x="${margin.left + 184}" y="16" fill="#2563eb" font-size="12" font-weight="700">比较：${esc(compareItem.label)}</text>`
+      : "";
 
     svg.innerHTML = `<rect width="${width}" height="${height}" fill="#fff" />`
       + `<line x1="${margin.left}" x2="${margin.left}" y1="${margin.top}" y2="${height - margin.bottom}" stroke="#cbd3dd" />`
       + `<line x1="${margin.left}" x2="${width - margin.right}" y1="${height - margin.bottom}" y2="${height - margin.bottom}" stroke="#cbd3dd" />`
       + grid
       + dateTicks.join("")
+      + compareCandles
       + candles;
+    svg.innerHTML += legend;
 
+    const compareByDate = new Map((compareItem?.ohlc || []).map((bar) => [bar.date, bar]));
+    const normalizedPrimaryByDate = new Map(primarySeries.map((bar) => [bar.date, bar]));
+    const normalizedCompareByDate = new Map(compareSeries.map((bar) => [bar.date, bar]));
     Array.from(svg.querySelectorAll(".candle")).forEach((node) => {
-      const bar = bars[Number(node.dataset.index)];
+      const bar = bars.find((item) => item.date === node.dataset.date);
       node.addEventListener("mousemove", (event) => {
         const bounds = panel.getBoundingClientRect();
         tooltip.style.display = "block";
         tooltip.style.left = `${Math.min(bounds.width - 190, Math.max(8, event.clientX - bounds.left + 14))}px`;
         tooltip.style.top = `${Math.max(8, event.clientY - bounds.top - 70)}px`;
+        const primaryNorm = normalizedPrimaryByDate.get(bar.date);
+        const compareBar = compareByDate.get(bar.date);
+        const compareNorm = normalizedCompareByDate.get(bar.date);
+        const normalizedHtml = normalized && primaryNorm
+          ? `<div class="muted">主 close 指数：${fmt(primaryNorm.close_norm)}</div>`
+          : "";
+        const compareHtml = compareBar
+          ? `<div class="muted">比较 ${esc(compareItem.label)} Close: ${fmt(compareBar.close)}${compareNorm ? ` · 指数: ${fmt(compareNorm.close_norm)}` : ""}</div>`
+          : "";
         tooltip.innerHTML = `<strong>${esc(bar.date)}</strong>`
           + `<div>Open: ${fmt(bar.open)}</div>`
           + `<div>High: ${fmt(bar.high)}</div>`
           + `<div>Low: ${fmt(bar.low)}</div>`
-          + `<div>Close: ${fmt(bar.close)}</div>`;
+          + `<div>Close: ${fmt(bar.close)}</div>`
+          + normalizedHtml
+          + compareHtml;
       });
       node.addEventListener("mouseleave", () => {
         tooltip.style.display = "none";
@@ -3267,6 +3407,7 @@ JS = """
     const { scroll = true } = options;
     currentKey = key;
     const item = visibleItem(key, sourceItem);
+    const compareItem = comparisonFor(item);
     rows.forEach((row) => row.classList.toggle("selected", row.dataset.ohlcKey === key));
     if (item.chartType === "bond_curve") {
       const count = item.curve?.rows?.length || 0;
@@ -3275,12 +3416,13 @@ JS = """
       renderBondCurveChart(item);
     } else {
       const total = item.range?.total || item.ohlc.length;
+      const compareText = compareItem ? `；比较 ${compareItem.country} / ${compareItem.label}，共同日期 ${compareItem.ohlc.length} 条` : "";
       if (chartMode === "move") {
-        head.textContent = `${item.country} / ${item.group} / ${item.label}：涨跌幅模式，显示 ${item.ohlc.length}/${total} 条日线；柱=单日涨跌幅，橙线=同一涨跌幅序列，悬停看 OHLC。`;
-        renderMoveChart(item);
+        head.textContent = `${item.country} / ${item.group} / ${item.label}：涨跌幅模式，显示 ${item.ohlc.length}/${total} 条日线；柱=主标的单日涨跌幅，蓝线=比较标的${compareText}。`;
+        renderMoveChart(item, compareItem);
       } else {
-        head.textContent = `${item.country} / ${item.group} / ${item.label}：K线模式，显示 ${item.ohlc.length}/${total} 条日线，鼠标悬停显示 OHLC；拖动图表可平移。`;
-        renderChart(item);
+        head.textContent = `${item.country} / ${item.group} / ${item.label}：K线模式，显示 ${item.ohlc.length}/${total} 条日线${compareItem ? "，已按各自首个 close 归一到 100" : ""}${compareText}。`;
+        renderChart(item, compareItem);
       }
     }
     updateControls(item);
@@ -3336,12 +3478,12 @@ JS = """
   fxRankToggles.forEach((button) => {
     button.addEventListener("click", () => {
       const code = button.getAttribute("data-fx-rank-toggle");
-      const detail = document.querySelector('[data-fx-rank-detail="' + code + '"]');
+      const detail = document.querySelector(`[data-fx-rank-detail="${code}"]`);
       if (!detail) return;
       const nextExpanded = button.getAttribute("aria-expanded") !== "true";
       fxRankToggles.forEach((otherButton) => {
         const otherCode = otherButton.getAttribute("data-fx-rank-toggle");
-        const otherDetail = document.querySelector('[data-fx-rank-detail="' + otherCode + '"]');
+        const otherDetail = document.querySelector(`[data-fx-rank-detail="${otherCode}"]`);
         otherButton.setAttribute("aria-expanded", "false");
         const otherIcon = otherButton.querySelector(".toggle-icon");
         if (otherIcon) otherIcon.textContent = "▸";
@@ -3359,6 +3501,11 @@ JS = """
       chartMode = button.dataset.mode || "move";
       rerenderCurrent();
     });
+  });
+
+  compareSelect?.addEventListener("change", () => {
+    compareKey = compareSelect.value || "";
+    rerenderCurrent();
   });
 
   windowButtons.forEach((button) => {
