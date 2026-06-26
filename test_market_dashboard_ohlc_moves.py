@@ -87,8 +87,10 @@ def test_ohlc_zoom_buttons_use_requested_direction() -> None:
     assert 'zoomOutButton?.addEventListener("click", () => zoomChart(-1));' in JS
 
 
-def test_ohlc_comparison_legend_stacks_rows_to_avoid_overlap() -> None:
-    assert "const legendPrimaryY = 18;" in JS
-    assert "const legendCompareY = 36;" in JS
-    assert 'y="${legendCompareY}"' in JS
+def test_ohlc_comparison_legend_uses_inline_tspans_to_avoid_overlap() -> None:
+    assert "const legendY = 18;" in JS
+    assert "<tspan" in JS
+    assert 'dx="16"' in JS
+    assert '比较：${esc(compareItem.label)}' in JS
+    assert "legendCompareY" not in JS
     assert 'x="${margin.left + 184}" y="16"' not in JS

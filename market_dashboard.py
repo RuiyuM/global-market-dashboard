@@ -3176,7 +3176,7 @@ JS = """
     const bars = item.ohlc || [];
     const width = 980;
     const height = 360;
-    const margin = { left: 64, right: 22, top: 48, bottom: 38 };
+    const margin = { left: 64, right: 22, top: 34, bottom: 38 };
     const innerW = width - margin.left - margin.right;
     const innerH = height - margin.top - margin.bottom;
     tooltip.classList.remove("dark");
@@ -3264,11 +3264,12 @@ JS = """
         + `</g>`;
     }).join("");
     const compareCandles = compareSeries.map((bar) => candleSvg(bar, "compare", "compare-candle")).join("");
-    const legendPrimaryY = 18;
-    const legendCompareY = 36;
+    const legendY = 18;
     const legend = normalized
-      ? `<text x="${margin.left}" y="${legendPrimaryY}" fill="#344054" font-size="12" font-weight="700">区间归一化 0-100：${esc(item.label)}</text>`
-        + `<text x="${margin.left}" y="${legendCompareY}" fill="#2563eb" font-size="12" font-weight="700">比较：${esc(compareItem.label)}</text>`
+      ? `<text x="${margin.left}" y="${legendY}" font-size="12" font-weight="700">`
+        + `<tspan fill="#344054">区间归一化 0-100：${esc(item.label)}</tspan>`
+        + `<tspan dx="16" fill="#2563eb">比较：${esc(compareItem.label)}</tspan>`
+        + `</text>`
       : "";
 
     svg.innerHTML = `<rect width="${width}" height="${height}" fill="#fff" />`
