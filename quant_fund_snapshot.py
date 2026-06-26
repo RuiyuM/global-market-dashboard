@@ -26,7 +26,7 @@ PRIVATE_ENV = PRIVATE_DIR / "quant_fund.env"
 FAPI_BASE = "https://fapi.binance.com"
 EAPI_BASE = "https://eapi.binance.com"
 
-DEFAULT_SYMBOL = "BTCUSDT"
+DEFAULT_SYMBOL = ""
 
 
 OPTIONS_SEED_POINTS = [
@@ -248,7 +248,7 @@ def build_snapshot() -> dict[str, Any]:
     load_env_file()
     now = datetime.now(timezone.utc)
     start = parse_ymd(os.environ.get("QUANT_FUND_START_DATE", default_start_date(now.date()).isoformat()))
-    symbol = os.environ.get("QUANT_FUND_SYMBOL", DEFAULT_SYMBOL).strip().upper() or DEFAULT_SYMBOL
+    symbol = os.environ.get("QUANT_FUND_SYMBOL", DEFAULT_SYMBOL).strip().upper()
     futures_base = env_float("QUANT_FUND_FUTURES_BASE_USD")
     options_base = env_float("QUANT_FUND_OPTIONS_BASE_USD")
     futures_key = os.environ.get("BINANCE_FUTURES_API_KEY", "")
@@ -271,7 +271,7 @@ def build_snapshot() -> dict[str, Any]:
             "points": existing_futures_points,
             "trade_count": 0,
         }
-    elif futures_key and futures_secret:
+    elif futures_key and futures_secret and symbol:
         try:
             trades = fetch_futures_trades(futures_key, futures_secret, symbol, start, now.date())
             futures_points = aggregate_futures_trade_curve(trades, base_usd=futures_base, start=start)
@@ -293,9 +293,10 @@ def build_snapshot() -> dict[str, Any]:
                 "error": exc.__class__.__name__,
             }
     else:
+        status = "missing_symbol" if futures_key and futures_secret else "missing_credentials"
         snapshot["futures"] = {
             "label": "期货",
-            "status": "missing_credentials",
+            "status": status,
             "base_configured": True,
             "points": existing_futures_points,
             "trade_count": 0,

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Tests for the quiet quant-fund widget."""
+"""Tests for the quiet quant-fund section."""
 
 from __future__ import annotations
 
 from market_dashboard import render_html
 
 
-def test_quant_fund_entry_is_bottom_dock_and_opens_dedicated_view_with_smooth_percent_curves() -> None:
+def test_quant_fund_is_bottom_page_section_with_smooth_percent_curves() -> None:
     html = render_html(
         {
             "countries": [],
@@ -44,14 +44,17 @@ def test_quant_fund_entry_is_bottom_dock_and_opens_dedicated_view_with_smooth_pe
         }
     )
 
-    assert '<a class="quant-fund-dock" href="#quant-fund">' in html
-    assert '<section class="quant-fund-page" id="quant-fund">' in html
-    assert '<a class="quant-back" href="#">← 返回</a>' in html
+    assert '<section class="panel quant-fund-bottom" id="quant-fund">' in html
+    assert '<div class="quant-fund-head">' in html
+    assert html.index('<section class="notes">') < html.index('<section class="panel quant-fund-bottom" id="quant-fund">')
+    assert '<a class="quant-fund-dock" href="#quant-fund">' not in html
+    assert '<section class="quant-fund-page" id="quant-fund">' not in html
+    assert '<a class="quant-back" href="#">← 返回</a>' not in html
     assert '<details class="quant-fund-widget">' not in html
-    assert ".quant-fund-dock {" in html
-    assert "position: fixed;" in html
-    assert ".quant-fund-page { display: none;" in html
-    assert ".quant-fund-page:target" in html
+    assert ".quant-fund-bottom {" in html
+    assert ".quant-fund-dock {" not in html
+    assert ".quant-fund-page { display: none;" not in html
+    assert ".quant-fund-page:target" not in html
     assert "期货" in html
     assert "期权" in html
     assert "股指" in html
