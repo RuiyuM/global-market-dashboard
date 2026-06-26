@@ -2277,7 +2277,14 @@ def render_html(snapshot: dict[str, Any]) -> str:
     html.append('<p class="hedge-footnote">前两种偏缩，后两种偏扩；第一次加息常见长短债交叉。</p>')
     html.append("</section>")
 
-    html.extend(['<section class="panel">', "<h2>数据状态</h2>", '<div class="table-wrap">', '<table class="status-table">'])
+    html.extend(
+        [
+            '<details class="panel status-panel">',
+            '<summary><span>数据状态</span><small>默认折叠，点击查看各数据源最新日期</small></summary>',
+            '<div class="table-wrap">',
+            '<table class="status-table">',
+        ]
+    )
     html.append("<thead><tr><th>Key</th><th>名称</th><th>来源</th><th>符号</th><th>最新日期</th><th>最新值</th><th>状态</th></tr></thead><tbody>")
     for item in snapshot["series_status"]:
         status = '<span class="tag warn">旧/缺</span>' if item["stale"] else '<span class="tag ok">OK</span>'
@@ -2287,7 +2294,7 @@ def render_html(snapshot: dict[str, Any]) -> str:
             f'<td>{escape(item["symbol"])}</td><td>{escape(item["latest_date"])}</td>'
             f'<td>{escape(fmt_value(item["latest"], 5))}</td><td>{status}</td></tr>'
         )
-    html.extend(["</tbody></table></div></section>"])
+    html.extend(["</tbody></table></div></details>"])
 
     html.extend(['<section class="notes">'])
     for note in snapshot["notes"]:
@@ -2391,12 +2398,13 @@ h3 { margin: 0 0 10px; font-size: 15px; letter-spacing: 0; }
 }
 .policy-actions-toggle:hover { background: #f8fafc; border-color: #b7c2cf; }
 .policy-actions-expanded { margin-top: 7px; }
-.volatility-panel { padding: 0; overflow: hidden; }
-.volatility-panel summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; padding: 16px; font-weight: 750; list-style: none; }
-.volatility-panel summary::-webkit-details-marker { display: none; }
-.volatility-panel summary:hover { background: #f8fafc; }
-.volatility-panel summary small { color: var(--muted); font-size: 12px; font-weight: 600; }
+.volatility-panel, .status-panel { padding: 0; overflow: hidden; }
+.volatility-panel summary, .status-panel summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; padding: 16px; font-weight: 750; list-style: none; }
+.volatility-panel summary::-webkit-details-marker, .status-panel summary::-webkit-details-marker { display: none; }
+.volatility-panel summary:hover, .status-panel summary:hover { background: #f8fafc; }
+.volatility-panel summary small, .status-panel summary small { color: var(--muted); font-size: 12px; font-weight: 600; }
 .volatility-panel .ranking-grid { padding: 0 16px 16px; }
+.status-panel .table-wrap { padding: 0 16px 16px; }
 .ranking-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
 .ranking-block + .ranking-block { border-left: 1px solid var(--line); padding-left: 18px; }
 .rank-row { display: grid; grid-template-columns: 28px minmax(58px, 1fr) minmax(76px, auto) minmax(76px, auto); gap: 8px; align-items: baseline; padding: 5px 0; font-variant-numeric: tabular-nums; }

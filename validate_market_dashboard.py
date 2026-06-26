@@ -338,7 +338,12 @@ def main() -> int:
     if hedge_case_count != 8:
         errors.append(f"hedge case count mismatch: {hedge_case_count}")
     hedge_index = html.find('class="panel hedge-cycle-panel"')
-    status_index = html.find("<h2>数据状态</h2>")
+    status_panel = '<details class="panel status-panel">'
+    if status_panel not in html:
+        errors.append("data status panel should be a collapsed details block")
+    if '<details class="panel status-panel" open' in html:
+        errors.append("data status panel should default collapsed")
+    status_index = html.find(status_panel)
     if hedge_index < 0 or status_index < 0 or hedge_index > status_index:
         errors.append("hedge cycle panel should render before data status")
     hike_example_markers = [

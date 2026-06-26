@@ -94,3 +94,34 @@ def test_ohlc_comparison_legend_uses_inline_tspans_to_avoid_overlap() -> None:
     assert '比较：${esc(compareItem.label)}' in JS
     assert "legendCompareY" not in JS
     assert 'x="${margin.left + 184}" y="16"' not in JS
+
+
+def test_data_status_panel_defaults_collapsed() -> None:
+    html = render_html(
+        {
+            "countries": [],
+            "volatility_rankings": {"bond": [], "equity": [], "fx": []},
+            "fx_rank_details": {},
+            "second_order_monitor": [],
+            "fx_flows": [],
+            "series_status": [
+                {
+                    "key": "US_10Y",
+                    "label": "美国10年国债",
+                    "source": "WSCN",
+                    "symbol": "US10YR.OTC",
+                    "latest_date": "2026-06-26",
+                    "latest": 4.25,
+                    "stale": False,
+                }
+            ],
+            "notes": [],
+            "generated_at": "2026-06-26T00:00:00",
+        }
+    )
+
+    opening = '<details class="panel status-panel">'
+    assert opening in html
+    assert "open" not in opening
+    assert "<summary><span>数据状态</span>" in html
+    assert '<table class="status-table">' in html
