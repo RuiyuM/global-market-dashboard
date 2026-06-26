@@ -14,6 +14,7 @@ HTML = Path(__file__).resolve().parent / "dashboard" / "index.html"
 DEFAULT_FX_FLOW_CODE = Path(__file__).resolve().parent / "fx_flow_logic.py"
 USER_FX_FLOW_CODE = str(Path(os.environ.get("FX_FLOW_CODE_PATH", str(DEFAULT_FX_FLOW_CODE))))
 COUNTRIES = {"美国", "中国", "日本", "德国", "俄罗斯", "韩国"}
+POLICY_REGIONS = {"US": "美国", "EU": "欧元区", "JP": "日本", "CN": "中国", "KR": "韩国", "RU": "俄罗斯"}
 FIELDS = ["bond_2y", "bond_10y", "equity", "fx"]
 CHANGES = ["chg_1d", "chg_7d", "chg_14d", "chg_30d"]
 FLOWS = {"中日美", "中德美", "中俄美"}
@@ -107,6 +108,64 @@ def main() -> int:
         errors.append("top general volatility grid should not be rendered")
     if "波动率排名" not in html:
         errors.append("missing volatility ranking panel")
+    if '<details class="panel volatility-panel">' not in html:
+        errors.append("volatility ranking panel should be a collapsed details block")
+    volatility_index = html.find("波动率排名")
+    policy_index = html.find("政策新闻雷达")
+    if policy_index < 0:
+        errors.append("missing policy news panel")
+    elif volatility_index >= 0 and policy_index > volatility_index:
+        errors.append("policy news panel should render before volatility ranking")
+    if "sk-" in html or "OPENAI_API_KEY" in html:
+        errors.append("HTML should not expose API keys or API key env names")
+    if "sk-" in json.dumps(snapshot, ensure_ascii=False):
+        errors.append("snapshot should not expose API keys")
+    policy_news = snapshot.get("policy_news", {})
+    if set(policy_news.get("regions", {})) != set(POLICY_REGIONS):
+        errors.append(f"policy news regions mismatch: {sorted(policy_news.get('regions', {}))}")
+    if policy_news.get("model") != "gpt-5.4-mini":
+        errors.append(f"policy news model mismatch: {policy_news.get('model')}")
+    for code, label in POLICY_REGIONS.items():
+        region = policy_news.get("regions", {}).get(code, {})
+        if region.get("name") != label:
+            errors.append(f"policy news bad region label: {code} {region.get('name')}")
+        if not region.get("items"):
+            errors.append(f"policy news missing items: {code}")
+        if not region.get("policy_tool"):
+            errors.append(f"policy news missing policy tool: {code}")
+        if "action_update_source" not in region:
+            errors.append(f"policy news missing action update source: {code}")
+        if "action_cache_status" not in region:
+            errors.append(f"policy news missing action cache status: {code}")
+        actions = region.get("actions", [])
+        if not actions:
+            errors.append(f"policy news missing rate actions: {code}")
+        recent_year_actions = region.get("recent_year_actions", [])
+        if not isinstance(recent_year_actions, list):
+            errors.append(f"policy news recent-year actions should be a list: {code}")
+        for action in actions:
+            if action.get("type") not in {"加息", "降息"}:
+                errors.append(f"policy news bad action type: {code} {action.get('type')}")
+            if not action.get("date") or not action.get("rate_after") or "change_bp" not in action:
+                errors.append(f"policy news incomplete action: {code} {action}")
+        if label not in html:
+            errors.append(f"policy news region label missing from HTML: {label}")
+    for marker in [
+        'class="policy-actions"',
+        "实际操作",
+        "政策工具",
+        "查看近一年实际操作",
+        "policy-actions-expanded",
+        "每周更新 / OpenAI 5.4 mini",
+        "新闻态度每周自动更新",
+        "action_cache_status",
+        "2025-12-11",
+        "2026-06-17",
+    ]:
+        if marker not in html:
+            snapshot_text = json.dumps(snapshot, ensure_ascii=False)
+            if marker not in snapshot_text:
+                errors.append(f"missing policy action marker: {marker}")
     inline_vol_count = html.count('class="asset-vol"')
     if inline_vol_count != DERIVATIVE_VOL_COUNT:
         errors.append(f"inline asset volatility count mismatch: {inline_vol_count}")

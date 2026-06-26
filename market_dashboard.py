@@ -27,6 +27,7 @@ from fetch_investing_bond_ohlc import (
     fetch_html as fetch_investing_html,
     rows_from_html as rows_from_investing_html,
 )
+from policy_news import build_policy_news_snapshot
 
 
 ROOT = Path(__file__).resolve().parent
@@ -137,6 +138,26 @@ COUNTRIES = [
     {"code": "RU", "name": "俄罗斯", "ccy": "RUB", "bond_2y": "RU_2Y", "bond_10y": "RU_10Y", "equity": "RU_EQUITY", "fx": "RUBCNY"},
     {"code": "KR", "name": "韩国", "ccy": "KRW", "bond_2y": "KR_2Y", "bond_10y": "KR_10Y", "equity": "KR_EQUITY", "fx": "KRWCNY"},
 ]
+
+CURRENCY_NAMES = {
+    "CNY": "人民币",
+    "USD": "美元",
+    "JPY": "日元",
+    "EUR": "欧元",
+    "RUB": "俄罗斯卢布",
+    "KRW": "韩元",
+}
+
+FX_CNY_SERIES = {
+    "CNY": "CNY_BASE",
+    "USD": "USDCNY",
+    "JPY": "JPYCNY",
+    "EUR": "EURCNY",
+    "RUB": "RUBCNY",
+    "KRW": "KRWCNY",
+}
+
+FX_DETAIL_BASES = ("CNY", "USD", "JPY")
 
 
 def parse_args() -> argparse.Namespace:
@@ -847,6 +868,7 @@ def volatility_rankings(country_rows: list[dict[str, Any]]) -> dict[str, list[di
                 continue
             rows.append(
                 {
+                    "code": country["code"],
                     "country": country["country"],
                     "ccy": country["ccy"],
                     "label": spec["label"],
@@ -861,6 +883,63 @@ def volatility_rankings(country_rows: list[dict[str, Any]]) -> dict[str, list[di
             row["rank"] = rank
         rankings[key] = rows
     return rankings
+
+
+def fx_range(rows: list[dict[str, Any]], days: int) -> dict[str, Any] | None:
+    latest = latest_row(rows)
+    if not latest:
+        return None
+    cutoff = latest["date"] - timedelta(days=days)
+    window = [row for row in rows if cutoff <= row["date"] <= latest["date"]]
+    if not window:
+        return None
+    values = [row["close"] for row in window]
+    return {
+        "low": min(values),
+        "high": max(values),
+        "start_date": window[0]["date"].isoformat(),
+        "end_date": latest["date"].isoformat(),
+    }
+
+
+def build_fx_cross_details(series: dict[str, list[dict[str, Any]]]) -> dict[str, dict[str, Any]]:
+    details: dict[str, dict[str, Any]] = {}
+    for country in COUNTRIES:
+        target_ccy = country["ccy"]
+        target_key = FX_CNY_SERIES.get(target_ccy, "")
+        target_rows = series.get(target_key, [])
+        rows = []
+        for base_ccy in FX_DETAIL_BASES:
+            if base_ccy == target_ccy:
+                continue
+            base_key = FX_CNY_SERIES.get(base_ccy, "")
+            base_rows = series.get(base_key, [])
+            cross_rows = derived_ratio(f"{base_ccy}{target_ccy}", base_rows, target_rows, f"{base_key} / {target_key}")
+            latest = latest_row(cross_rows)
+            if not latest:
+                continue
+            previous = prior_row_before(cross_rows, latest["date"])
+            move = change(cross_rows, None, unit="pct")
+            rows.append(
+                {
+                    "pair": f"{base_ccy}/{target_ccy}",
+                    "name": f"{CURRENCY_NAMES.get(base_ccy, base_ccy)}/{CURRENCY_NAMES.get(target_ccy, target_ccy)}",
+                    "latest": latest["close"],
+                    "latest_date": latest["date"].isoformat(),
+                    "change": latest["close"] - previous["close"] if previous else None,
+                    "pct_change": move["value"] if move else None,
+                    "base_date": move["base_date"] if move else "",
+                    "range_7d": fx_range(cross_rows, 7),
+                    "range_30d": fx_range(cross_rows, 30),
+                    "source": f"{base_key}/{target_key}",
+                }
+            )
+        details[country["code"]] = {
+            "country": country["name"],
+            "target_ccy": target_ccy,
+            "rows": rows,
+        }
+    return details
 
 
 def load_user_fx_flow_logic() -> Any:
@@ -997,14 +1076,16 @@ def build_flow_sections(series: dict[str, list[dict[str, Any]]]) -> list[dict[st
     return sections
 
 
-def build_snapshot(fetch_records: list[dict[str, str]]) -> dict[str, Any]:
+def build_snapshot(fetch_records: list[dict[str, str]], *, fetch_policy_news: bool = True) -> dict[str, Any]:
     series, specs = load_all_series()
     countries = build_country_rows(series, specs)
     snapshot = {
         "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "policy_news": build_policy_news_snapshot(fetch_news=fetch_policy_news),
         "countries": countries,
         "asset_class_vol": asset_class_vol(countries),
         "volatility_rankings": volatility_rankings(countries),
+        "fx_rank_details": build_fx_cross_details(series),
         "second_order_monitor": build_second_order_monitor(series, specs),
         "fx_flows": build_flow_sections(series),
         "hike_cycle_example": build_hike_cycle_example(series),
@@ -1018,6 +1099,7 @@ def build_snapshot(fetch_records: list[dict[str, str]]) -> dict[str, Any]:
             f"三币种资金流向直接调用用户提供代码：{USER_FX_FLOW_CODE}",
             "derived = 本地公式而非外部供应商：CNY_BASE=1；债券曲线=10Y-2Y；CNYJPY=1/JPYCNY；RUB 交叉汇率优先使用具备历史深度的 Yahoo 直接报价，历史不足才用 USDCNY/USDRUB 或 USDJPY/USDRUB 派生并在 source_audit 里比对最新直接报价。",
             "WSCN 缺口优先用 Yahoo；日本/德国/俄罗斯/韩国债券因 WSCN 对应符号缺失或陈旧，使用 Investing 历史日线。",
+            "政策新闻雷达只做加息、降息、维持利率相关文本筛选；抓取或 AI 分类不可用时退回本地规则解析。",
         ],
     }
     return snapshot
@@ -1391,6 +1473,67 @@ def fmt_volatility_value(value: float | None, unit: str) -> str:
     return f"{value:.2f}{suffix}"
 
 
+def fmt_fx_price(value: float | None) -> str:
+    if value is None or not math.isfinite(value):
+        return "缺失"
+    digits = 6 if abs(value) < 0.01 else 4
+    return f"{value:,.{digits}f}"
+
+
+def fmt_signed_fx_price(value: float | None) -> str:
+    if value is None or not math.isfinite(value):
+        return "缺失"
+    digits = 6 if abs(value) < 0.01 else 4
+    return f"{value:+,.{digits}f}"
+
+
+def fmt_signed_pct(value: float | None) -> str:
+    if value is None or not math.isfinite(value):
+        return "缺失"
+    return f"{value:+.2f}%"
+
+
+def fmt_fx_range(value: dict[str, Any] | None) -> str:
+    if not value:
+        return "缺失"
+    return f"{fmt_fx_price(value.get('low'))} - {fmt_fx_price(value.get('high'))}"
+
+
+def render_fx_rank_detail(code: str, fx_details: dict[str, Any]) -> str:
+    detail = fx_details.get(code, {})
+    rows = detail.get("rows") or []
+    if not rows:
+        return (
+            f'<div class="fx-rank-detail" data-fx-rank-detail="{escape(code)}" hidden>'
+            '<p class="muted">暂无可用交叉汇率明细。</p>'
+            "</div>"
+        )
+    body = []
+    for row in rows:
+        pct_change = row.get("pct_change")
+        change = row.get("change")
+        cls = "pos" if pct_change and pct_change > 0 else "neg" if pct_change and pct_change < 0 else "flat"
+        body.append(
+            '<div class="fx-rank-card">'
+            f'<div class="fx-pair-cell"><strong>{escape(row["pair"])}</strong><span>{escape(row["name"])}</span></div>'
+            '<div class="fx-rank-metrics">'
+            f'<span><em>最新</em>{escape(fmt_fx_price(row.get("latest")))}</span>'
+            f'<span class="{cls}"><em>变化</em>{escape(fmt_signed_fx_price(change))}</span>'
+            f'<span class="{cls}"><em>涨跌幅</em>{escape(fmt_signed_pct(pct_change))}</span>'
+            "</div>"
+            '<div class="fx-rank-ranges">'
+            f'<span><em>7D</em>{escape(fmt_fx_range(row.get("range_7d")))}</span>'
+            f'<span><em>30D</em>{escape(fmt_fx_range(row.get("range_30d")))}</span>'
+            "</div>"
+            "</div>"
+        )
+    return (
+        f'<div class="fx-rank-detail" data-fx-rank-detail="{escape(code)}" hidden>'
+        f"{''.join(body)}"
+        "</div>"
+    )
+
+
 def fmt_asset_volatility(summary: dict[str, Any], unit: str) -> str:
     windows = summary.get("avg_abs_vol") or {}
     return (
@@ -1399,6 +1542,140 @@ def fmt_asset_volatility(summary: dict[str, Any], unit: str) -> str:
         f'<span>30D 波动 {escape(fmt_volatility_value(windows.get("30D"), unit))}</span>'
         "</div>"
     )
+
+
+def policy_direction_class(value: str) -> str:
+    if "加息" in value or "偏鹰" in value:
+        return "pos"
+    if "降息" in value or "偏鸽" in value:
+        return "neg"
+    return "flat"
+
+
+def policy_action_class(action_type: str) -> str:
+    if action_type == "加息":
+        return "pos"
+    if action_type == "降息":
+        return "neg"
+    return "flat"
+
+
+def fmt_action_bp(value: Any) -> str:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return ""
+    return f"{number:+d}bp"
+
+
+def render_policy_action_rows(actions: list[dict[str, Any]], *, empty_text: str) -> str:
+    if not actions:
+        return f'<p class="muted">{escape(empty_text)}</p>'
+    html = ['<div class="policy-action-list">']
+    for action in actions:
+        action_type = escape(action.get("type", ""))
+        action_cls = policy_action_class(action.get("type", ""))
+        source_url = action.get("source_url", "")
+        source = escape(action.get("source", ""))
+        source_html = f'<a href="{escape(source_url)}" target="_blank" rel="noreferrer">{source}</a>' if source_url else f"<span>{source}</span>"
+        html.append(
+            '<div class="policy-action-row">'
+            f'<time>{escape(action.get("date", ""))}</time>'
+            f'<b class="{action_cls}">{action_type} {escape(fmt_action_bp(action.get("change_bp")))}</b>'
+            f'<span>{escape(action.get("rate_before", ""))} -> {escape(action.get("rate_after", ""))}</span>'
+            f"<small>{source_html}</small>"
+            "</div>"
+        )
+    html.append("</div>")
+    return "".join(html)
+
+
+def render_policy_news(policy_news: dict[str, Any]) -> str:
+    regions = policy_news.get("regions", {})
+    if not regions:
+        return ""
+    model = escape(policy_news.get("model", ""))
+    analysis_source = escape(policy_news.get("analysis_source", "规则解析"))
+    news_source = escape(policy_news.get("news_source", ""))
+    cache_status = escape(policy_news.get("cache_status", ""))
+    html = [
+        '<section class="panel policy-news-panel">',
+        '<div class="policy-news-head">',
+        "<div>",
+        "<h2>政策新闻雷达</h2>",
+        "<p>新闻态度每周自动更新；实际操作每天检查官方利率源，有变化才更新。</p>",
+        f'<p class="muted">范围：美 / 欧 / 日 / 中 / 韩 / 俄；新闻源：{news_source}；分析：{analysis_source}；缓存：{cache_status}',
+    ]
+    if analysis_source == "OpenAI":
+        html.append(f"（{model}）")
+    html.extend(["</p>", "</div>", '<span class="policy-news-badge">每周更新 / OpenAI 5.4 mini</span>', "</div>"])
+    html.append('<div class="policy-news-grid">')
+    for code in ["US", "EU", "JP", "CN", "KR", "RU"]:
+        region = regions.get(code) or {}
+        items = region.get("items") or []
+        top = items[0] if items else {}
+        direction = str(top.get("policy_direction", "缺失"))
+        stance = str(top.get("stance", ""))
+        cls = policy_direction_class(f"{direction} {stance}")
+        html.append('<article class="policy-card">')
+        html.append(
+            '<div class="policy-card-top">'
+            f'<div><strong>{escape(region.get("name", code))}</strong><span>{escape(region.get("central_bank", ""))}</span></div>'
+            f'<b class="{cls}">{escape(direction)}</b>'
+            "</div>"
+        )
+        for item in items[:2]:
+            item_cls = policy_direction_class(f'{item.get("policy_direction", "")} {item.get("stance", "")}')
+            source = escape(item.get("source", ""))
+            published = escape(item.get("published_at", ""))
+            headline = escape(item.get("headline", ""))
+            summary = escape(item.get("summary_cn", ""))
+            url = item.get("url", "")
+            html.append('<div class="policy-news-item">')
+            if url:
+                html.append(f'<a href="{escape(url)}" target="_blank" rel="noreferrer">{headline}</a>')
+            else:
+                html.append(f"<span>{headline}</span>")
+            html.append(
+                '<div class="policy-news-meta">'
+                f'<em class="{item_cls}">{escape(item.get("stance", ""))}</em>'
+                f'<small>{source}</small>'
+                f'<small>{published}</small>'
+                "</div>"
+            )
+            if summary:
+                html.append(f'<p class="muted">{summary}</p>')
+            html.append("</div>")
+        actions = region.get("actions") or []
+        recent_year_actions = region.get("recent_year_actions") or []
+        action_cache_status = escape(region.get("action_cache_status", ""))
+        action_last_changed_at = escape(region.get("action_last_changed_at", ""))
+        html.append('<div class="policy-actions">')
+        html.append(
+            '<div class="policy-actions-head">'
+            "<strong>实际操作</strong>"
+            f'<span>政策工具：{escape(region.get("policy_tool", ""))}</span>'
+            "</div>"
+        )
+        html.append(render_policy_action_rows(actions[:3], empty_text="暂无可显示的加息/降息记录。"))
+        html.append(
+            '<div class="policy-action-meta">'
+            f"<span>检查状态：{action_cache_status or 'fallback'}</span>"
+            f"<span>上次变化：{action_last_changed_at or '缺失'}</span>"
+            "</div>"
+        )
+        html.append(
+            f'<button type="button" class="policy-actions-toggle" data-policy-actions-toggle="{escape(code)}">'
+            "查看近一年实际操作"
+            "</button>"
+        )
+        html.append(f'<div class="policy-actions-expanded" data-policy-actions-expanded="{escape(code)}" hidden>')
+        html.append(render_policy_action_rows(recent_year_actions, empty_text="近一年无加息/降息操作。"))
+        html.append("</div>")
+        html.append("</div>")
+        html.append("</article>")
+    html.extend(["</div>", "</section>"])
+    return "".join(html)
 
 
 def fmt_derivative(metric: dict[str, Any] | None, unit: str) -> str:
@@ -1678,6 +1955,7 @@ def render_hike_cycle_example(example: dict[str, Any]) -> str:
 def render_html(snapshot: dict[str, Any]) -> str:
     countries = snapshot["countries"]
     rankings = snapshot["volatility_rankings"]
+    fx_rank_details = snapshot.get("fx_rank_details", {})
     second_order = snapshot["second_order_monitor"]
     flow_json = json.dumps(snapshot["fx_flows"], ensure_ascii=False).replace("</", "<\\/")
     ohlc_payload = {
@@ -1716,7 +1994,15 @@ def render_html(snapshot: dict[str, Any]) -> str:
         "</section>",
     ]
 
-    html.extend(['<section class="panel volatility-panel">', "<h2>波动率排名</h2>", '<div class="ranking-grid">'])
+    html.append(render_policy_news(snapshot.get("policy_news", {})))
+
+    html.extend(
+        [
+            '<details class="panel volatility-panel">',
+            '<summary><span>波动率排名</span><small>点击展开各国家 7D / 30D 排名</small></summary>',
+            '<div class="ranking-grid">',
+        ]
+    )
     ranking_titles = {"bond": "债市波动率排名", "equity": "股指波动率排名", "fx": "汇率波动率排名"}
     for key in ["bond", "equity", "fx"]:
         rows = rankings.get(key, [])
@@ -1726,16 +2012,29 @@ def render_html(snapshot: dict[str, Any]) -> str:
         for row in rows:
             unit = row["unit"]
             windows = row["windows"]
-            html.append(
-                '<div class="rank-row">'
-                f'<span>{row["rank"]}</span>'
-                f'<strong>{escape(row["country"])}</strong>'
-                f'<span>{escape(fmt_volatility_value(windows.get("7D"), unit))}</span>'
-                f'<span>{escape(fmt_volatility_value(windows.get("30D"), unit))}</span>'
-                "</div>"
-            )
+            if key == "fx":
+                code = row.get("code", "")
+                html.append(
+                    '<button type="button" class="rank-row rank-trigger" '
+                    f'data-fx-rank-toggle="{escape(code)}" aria-expanded="false">'
+                    f'<span>{row["rank"]}</span>'
+                    f'<strong><span class="toggle-icon">▸</span>{escape(row["country"])}</strong>'
+                    f'<span>{escape(fmt_volatility_value(windows.get("7D"), unit))}</span>'
+                    f'<span>{escape(fmt_volatility_value(windows.get("30D"), unit))}</span>'
+                    "</button>"
+                )
+                html.append(render_fx_rank_detail(str(code), fx_rank_details))
+            else:
+                html.append(
+                    '<div class="rank-row">'
+                    f'<span>{row["rank"]}</span>'
+                    f'<strong>{escape(row["country"])}</strong>'
+                    f'<span>{escape(fmt_volatility_value(windows.get("7D"), unit))}</span>'
+                    f'<span>{escape(fmt_volatility_value(windows.get("30D"), unit))}</span>'
+                    "</div>"
+                )
         html.append("</div>")
-    html.extend(["</div></section>"])
+    html.extend(["</div></details>"])
 
     html.extend(['<section class="panel">', "<h2>一阶/二阶监控</h2>", '<div class="math-note">'])
     html.append("D1 是窗口速度；D2 是速度变化率。债券曲线使用 10Y-2Y，便于观察长短端价差变化速度。")
@@ -1980,11 +2279,83 @@ h3 { margin: 0 0 10px; font-size: 15px; letter-spacing: 0; }
 .button { border: 1px solid var(--line); color: var(--ink); text-decoration: none; padding: 8px 12px; border-radius: 6px; background: #fff; }
 .panel, .flow-block { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
 .panel { padding: 16px; margin-top: 14px; }
+.policy-news-panel { margin-top: 0; }
+.policy-news-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 12px; }
+.policy-news-head h2 { margin-bottom: 4px; }
+.policy-news-badge { border: 1px solid #c8d4e2; border-radius: 999px; padding: 4px 9px; color: var(--blue); background: #f8fafc; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.policy-news-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.policy-card { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 10px; min-width: 0; }
+.policy-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding-bottom: 8px; border-bottom: 1px solid #eef2f7; }
+.policy-card-top strong { display: block; font-size: 14px; }
+.policy-card-top span { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+.policy-card-top b { font-size: 12px; white-space: nowrap; }
+.policy-news-item { display: grid; gap: 5px; padding-top: 8px; min-width: 0; }
+.policy-news-item a, .policy-news-item > span { color: var(--ink); text-decoration: none; font-weight: 650; line-height: 1.35; overflow-wrap: anywhere; }
+.policy-news-item a:hover { color: var(--blue); text-decoration: underline; }
+.policy-news-item p { margin: 0; font-size: 12px; line-height: 1.35; }
+.policy-news-meta { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 11px; min-width: 0; flex-wrap: wrap; }
+.policy-news-meta em { font-style: normal; font-weight: 700; }
+.policy-actions { margin-top: 10px; padding-top: 9px; border-top: 1px solid #eef2f7; }
+.policy-actions-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 7px; }
+.policy-actions-head strong { font-size: 12px; }
+.policy-actions-head span { color: var(--muted); font-size: 11px; text-align: right; overflow-wrap: anywhere; }
+.policy-action-list { display: grid; gap: 5px; }
+.policy-action-row {
+  display: grid;
+  grid-template-columns: 78px 78px minmax(92px, 1fr) auto;
+  gap: 6px;
+  align-items: baseline;
+  border: 1px solid #eef2f7;
+  border-radius: 6px;
+  padding: 5px 6px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.policy-action-row time { color: var(--muted); }
+.policy-action-row b { white-space: nowrap; }
+.policy-action-row span { color: var(--ink); overflow-wrap: anywhere; }
+.policy-action-row small { color: var(--muted); text-align: right; }
+.policy-action-row a { color: var(--muted); text-decoration: none; }
+.policy-action-row a:hover { color: var(--blue); text-decoration: underline; }
+.policy-action-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; color: var(--muted); font-size: 11px; }
+.policy-actions-toggle {
+  margin-top: 7px;
+  border: 1px solid #d5dde8;
+  border-radius: 6px;
+  background: #fff;
+  color: var(--blue);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 750;
+  padding: 6px 8px;
+}
+.policy-actions-toggle:hover { background: #f8fafc; border-color: #b7c2cf; }
+.policy-actions-expanded { margin-top: 7px; }
+.volatility-panel { padding: 0; overflow: hidden; }
+.volatility-panel summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; padding: 16px; font-weight: 750; list-style: none; }
+.volatility-panel summary::-webkit-details-marker { display: none; }
+.volatility-panel summary:hover { background: #f8fafc; }
+.volatility-panel summary small { color: var(--muted); font-size: 12px; font-weight: 600; }
+.volatility-panel .ranking-grid { padding: 0 16px 16px; }
 .ranking-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
 .ranking-block + .ranking-block { border-left: 1px solid var(--line); padding-left: 18px; }
 .rank-row { display: grid; grid-template-columns: 28px minmax(58px, 1fr) minmax(76px, auto) minmax(76px, auto); gap: 8px; align-items: baseline; padding: 5px 0; font-variant-numeric: tabular-nums; }
 .rank-row span:nth-child(n+3) { text-align: right; }
 .rank-head { color: var(--muted); font-size: 12px; font-weight: 650; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+.rank-trigger { width: 100%; border: 0; background: transparent; color: inherit; cursor: pointer; font: inherit; text-align: left; }
+.rank-trigger:hover { background: #f8fafc; border-radius: 6px; }
+.rank-trigger strong { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
+.rank-trigger .toggle-icon { color: var(--blue); font-size: 11px; line-height: 1; text-align: left; }
+.fx-rank-detail { margin: 4px 0 8px 28px; border: 1px solid var(--line); border-radius: 8px; background: #fff; overflow: hidden; }
+.fx-rank-detail p { margin: 10px; }
+.fx-rank-card { display: grid; gap: 7px; padding: 10px; border-bottom: 1px solid #eef2f7; font-size: 12px; }
+.fx-rank-card:last-child { border-bottom: 0; }
+.fx-pair-cell strong { display: block; color: var(--ink); font-size: 13px; }
+.fx-pair-cell span { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
+.fx-rank-metrics, .fx-rank-ranges { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; font-variant-numeric: tabular-nums; }
+.fx-rank-ranges { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.fx-rank-metrics span, .fx-rank-ranges span { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.fx-rank-metrics em, .fx-rank-ranges em { display: block; color: var(--muted); font-style: normal; font-size: 10px; line-height: 1.2; }
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; }
 th, td { border-bottom: 1px solid var(--line); padding: 9px 8px; text-align: right; vertical-align: top; white-space: nowrap; }
@@ -2195,7 +2566,12 @@ th:first-child, td:first-child { text-align: left; }
 @media (max-width: 900px) {
   main { padding: 14px; }
   .topbar { align-items: flex-start; flex-direction: column; }
-  .ranking-grid, .flow-grid { grid-template-columns: 1fr; }
+  .policy-news-head { align-items: flex-start; flex-direction: column; }
+  .policy-news-grid, .ranking-grid, .flow-grid { grid-template-columns: 1fr; }
+  .policy-actions-head { align-items: flex-start; flex-direction: column; }
+  .policy-actions-head span { text-align: left; }
+  .policy-action-row { grid-template-columns: 78px 78px minmax(0, 1fr); }
+  .policy-action-row small { grid-column: 1 / 4; text-align: left; }
   .flow-detail-grid { grid-template-columns: 1fr; }
   .hedge-case-grid { grid-template-columns: 1fr; }
   .hike-example-head { align-items: flex-start; flex-direction: column; }
@@ -2215,6 +2591,8 @@ JS = """
   const countryToggles = Array.from(document.querySelectorAll(".country-toggle"));
   const flowExpandButtons = Array.from(document.querySelectorAll(".flow-expand"));
   const flowRoutes = Array.from(document.querySelectorAll(".flow-route"));
+  const policyActionToggles = Array.from(document.querySelectorAll("[data-policy-actions-toggle]"));
+  const fxRankToggles = Array.from(document.querySelectorAll("[data-fx-rank-toggle]"));
   let activeFlowDetail = null;
   let activeFlowRouteKey = null;
   const defaultOhlcKey = "US_10Y";
@@ -2754,6 +3132,38 @@ JS = """
     button.addEventListener("click", () => toggleCountryRows(button));
   });
 
+  policyActionToggles.forEach((button) => {
+    button.addEventListener("click", () => {
+      const code = button.getAttribute("data-policy-actions-toggle");
+      const panel = document.querySelector(`[data-policy-actions-expanded="${code}"]`);
+      if (!panel) return;
+      const nextHidden = !panel.hidden;
+      panel.hidden = nextHidden;
+      button.textContent = nextHidden ? "查看近一年实际操作" : "收起近一年实际操作";
+    });
+  });
+
+  fxRankToggles.forEach((button) => {
+    button.addEventListener("click", () => {
+      const code = button.getAttribute("data-fx-rank-toggle");
+      const detail = document.querySelector('[data-fx-rank-detail="' + code + '"]');
+      if (!detail) return;
+      const nextExpanded = button.getAttribute("aria-expanded") !== "true";
+      fxRankToggles.forEach((otherButton) => {
+        const otherCode = otherButton.getAttribute("data-fx-rank-toggle");
+        const otherDetail = document.querySelector('[data-fx-rank-detail="' + otherCode + '"]');
+        otherButton.setAttribute("aria-expanded", "false");
+        const otherIcon = otherButton.querySelector(".toggle-icon");
+        if (otherIcon) otherIcon.textContent = "▸";
+        if (otherDetail) otherDetail.hidden = true;
+      });
+      button.setAttribute("aria-expanded", String(nextExpanded));
+      detail.hidden = !nextExpanded;
+      const icon = button.querySelector(".toggle-icon");
+      if (icon) icon.textContent = nextExpanded ? "▾" : "▸";
+    });
+  });
+
   windowButtons.forEach((button) => {
     button.addEventListener("click", () => setVisibleWindow(Number(button.dataset.window)));
   });
@@ -2802,7 +3212,7 @@ JS = """
 def main() -> int:
     args = parse_args()
     fetch_records = fetch_all(args) if args.fetch else []
-    snapshot = build_snapshot(fetch_records)
+    snapshot = build_snapshot(fetch_records, fetch_policy_news=args.fetch)
     DASHBOARD.mkdir(parents=True, exist_ok=True)
     SNAPSHOT_JSON.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     HTML_OUT.write_text(render_html(snapshot), encoding="utf-8")
