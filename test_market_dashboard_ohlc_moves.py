@@ -149,6 +149,10 @@ def test_ohlc_supports_custom_range_and_exact_date_controls() -> None:
     assert 'id="ohlc-start-date"' in html
     assert 'id="ohlc-align-spread"' in html
     assert 'class="segmented ohlc-mode-group"' in html
+    assert html.index('data-mode="ohlc"') < html.index('data-mode="move"')
+    assert '<button type="button" class="ohlc-mode active" data-mode="ohlc">K线</button>' in html
+    assert '<button type="button" class="ohlc-mode" data-mode="move">涨跌幅</button>' in html
+    assert 'let chartMode = "ohlc";' in JS
     assert 'class="segmented ohlc-window-group"' in html
     assert 'class="chart-tools ohlc-chart-tools"' in html
     assert 'class="date-tools ohlc-date-tools"' in html

@@ -327,10 +327,10 @@ def main() -> int:
             errors.append(f"missing default OHLC marker: {marker}")
     for marker in [
         'class="ohlc-toolbar"',
-        'class="ohlc-mode active"',
-        'data-mode="move"',
+        '<button type="button" class="ohlc-mode active" data-mode="ohlc">K线</button>',
+        '<button type="button" class="ohlc-mode" data-mode="move">涨跌幅</button>',
         "renderMoveChart",
-        "涨跌幅模式",
+        "K线模式",
         'data-window="90"',
         'data-window="180"',
         'data-window="360"',

@@ -3051,8 +3051,8 @@ def render_html(snapshot: dict[str, Any]) -> str:
             "<h2>日线 OHLC 可视化</h2>",
             '<div class="ohlc-toolbar">',
             '<div class="segmented ohlc-mode-group" aria-label="OHLC 图表模式">',
-            '<button type="button" class="ohlc-mode active" data-mode="move">涨跌幅</button>',
-            '<button type="button" class="ohlc-mode" data-mode="ohlc">K线</button>',
+            '<button type="button" class="ohlc-mode active" data-mode="ohlc">K线</button>',
+            '<button type="button" class="ohlc-mode" data-mode="move">涨跌幅</button>',
             "</div>",
             '<div class="segmented ohlc-window-group" aria-label="OHLC 时间窗口">',
             '<button type="button" class="ohlc-window active" data-window="90">90D</button>',
@@ -3882,7 +3882,7 @@ JS = """
   }, []);
   let currentKey = null;
   let compareKey = "";
-  let chartMode = "move";
+  let chartMode = "ohlc";
   let visibleWindow = 90;
   const viewEndByKey = {};
   const customRangeByKey = {};
