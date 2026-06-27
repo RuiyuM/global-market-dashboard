@@ -2,6 +2,8 @@
 
 This note records the deployment logic for the dashboard so the server state is not lost between turns.
 
+For sources that the server cannot fetch directly, read [Weekly Local Data Update](weekly_local_data_update.md) before running a manual weekly backfill.
+
 ## Server And Repo
 
 - Public site: `http://43.133.168.211/`
