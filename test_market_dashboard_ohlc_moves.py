@@ -6,6 +6,9 @@ from __future__ import annotations
 from datetime import date
 
 from market_dashboard import JS
+from market_dashboard import WSCN_SPECS
+from market_dashboard import SeriesSpec
+from market_dashboard import build_second_order_monitor
 from market_dashboard import recent_ohlc_rows
 from market_dashboard import render_html
 
@@ -154,6 +157,78 @@ def test_spread_calculator_is_separate_interactive_block() -> None:
     assert "spread-negative-band" in JS
     assert "spread-long-line" in JS
     assert "spread-short-line" in JS
+
+
+def test_expanded_wscn_bond_tenors_feed_second_order_and_spreads() -> None:
+    spec_keys = {spec.key for spec in WSCN_SPECS}
+    assert {
+        "US_1M",
+        "US_3M",
+        "US_6M",
+        "US_3Y",
+        "US_5Y",
+        "US_7Y",
+        "US_30Y",
+        "CN_3Y",
+        "CN_5Y",
+        "CN_7Y",
+    } <= spec_keys
+    assert {"US_20Y", "CN_30Y", "JP_30Y", "DE_30Y"}.isdisjoint(spec_keys)
+
+    wanted_specs = {spec.key: spec for spec in WSCN_SPECS}
+    for key, label in [
+        ("US_EQUITY", "标普500"),
+        ("USDCNY", "美元/人民币"),
+        ("CN_EQUITY", "上证综指"),
+        ("CNY_BASE", "人民币基准"),
+    ]:
+        wanted_specs.setdefault(key, SeriesSpec(key, label, "test", "test", key, f"{key}.csv"))
+    series = {
+        key: [ohlc(1, 3.0), ohlc(10, 3.1), ohlc(20, 3.2)]
+        for key in [
+            "US_1M",
+            "US_3M",
+            "US_6M",
+            "US_1Y",
+            "US_2Y",
+            "US_3Y",
+            "US_5Y",
+            "US_7Y",
+            "US_10Y",
+            "US_30Y",
+            "CN_1Y",
+            "CN_2Y",
+            "CN_3Y",
+            "CN_5Y",
+            "CN_7Y",
+            "CN_10Y",
+        ]
+    }
+    rows = build_second_order_monitor(series, wanted_specs)
+
+    us_bonds = [row["key"] for row in rows if row["country"] == "美国" and row["group"] == "债券"]
+    cn_bonds = [row["key"] for row in rows if row["country"] == "中国" and row["group"] == "债券"]
+    assert us_bonds == ["US_1M", "US_3M", "US_6M", "US_1Y", "US_2Y", "US_3Y", "US_5Y", "US_7Y", "US_10Y", "US_30Y"]
+    assert cn_bonds == ["CN_1Y", "CN_2Y", "CN_3Y", "CN_5Y", "CN_7Y", "CN_10Y"]
+    assert all(row["key"] not in {"JP_30Y", "DE_30Y", "CN_30Y", "US_20Y"} for row in rows)
+
+    html = render_html(
+        {
+            "countries": [],
+            "volatility_rankings": {"bond": [], "equity": [], "fx": []},
+            "fx_rank_details": {},
+            "second_order_monitor": rows,
+            "fx_flows": [],
+            "series_status": [],
+            "notes": [],
+            "generated_at": "2026-06-26T00:00:00",
+        }
+    )
+    assert 'data-extra-bond-toggle="美国"' in html
+    assert 'data-extra-bond-row="true"' in html
+    assert '"tenor": "1M", "key": "US_1M", "label": "美国1个月国债"' in html
+    assert '"tenor": "30Y", "key": "US_30Y", "label": "美国30年国债"' in html
+    assert '"tenor": "7Y", "key": "CN_7Y", "label": "中国7年国债"' in html
 
 
 def test_ohlc_comparison_legend_uses_inline_tspans_to_avoid_overlap() -> None:

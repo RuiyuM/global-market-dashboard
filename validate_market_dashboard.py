@@ -26,9 +26,21 @@ VOL_WINDOWS = {"7D", "30D"}
 VOL_RANKING_ROWS = 6
 INLINE_VOL_COUNT = len(COUNTRIES) * len(FIELDS)
 ONE_YEAR_BOND_KEYS = {"US_1Y": "美国", "CN_1Y": "中国", "JP_1Y": "日本"}
-DERIVATIVE_VOL_COUNT = INLINE_VOL_COUNT + len(ONE_YEAR_BOND_KEYS)
+EXTENDED_BOND_KEYS = {
+    "US_1M": "美国",
+    "US_3M": "美国",
+    "US_6M": "美国",
+    "US_3Y": "美国",
+    "US_5Y": "美国",
+    "US_7Y": "美国",
+    "US_30Y": "美国",
+    "CN_3Y": "中国",
+    "CN_5Y": "中国",
+    "CN_7Y": "中国",
+}
+DERIVATIVE_VOL_COUNT = INLINE_VOL_COUNT + len(ONE_YEAR_BOND_KEYS) + len(EXTENDED_BOND_KEYS)
 SECOND_ORDER_WINDOWS = {"1D", "7D", "30D"}
-SECOND_ORDER_ROWS = len(COUNTRIES) * 5 + len(ONE_YEAR_BOND_KEYS)
+SECOND_ORDER_ROWS = len(COUNTRIES) * 5 + len(ONE_YEAR_BOND_KEYS) + len(EXTENDED_BOND_KEYS)
 BOND_CURVE_ROWS = len(COUNTRIES)
 OHLC_MAX_WINDOW = 360
 
@@ -329,6 +341,9 @@ def main() -> int:
         'class="country-toggle collapsed"',
         'data-country="美国"',
         'data-country="日本"',
+        'data-extra-bond-toggle="美国"',
+        'data-extra-bond-row="true"',
+        "extraBondToggles",
         "toggleCountryRows",
     ]:
         if marker not in html:
@@ -347,6 +362,17 @@ def main() -> int:
             errors.append(f"bad 1Y bond row placement: {key} {row.get('country')} {row.get('group')}")
         if f'data-ohlc-key="{key}"' not in html:
             errors.append(f"missing 1Y bond OHLC row marker: {key}")
+    for key, country in EXTENDED_BOND_KEYS.items():
+        row = row_by_key.get(key)
+        if not row:
+            errors.append(f"missing extended bond second-order row: {key}")
+            continue
+        if row.get("country") != country or row.get("group") != "债券":
+            errors.append(f"bad extended bond row placement: {key} {row.get('country')} {row.get('group')}")
+        if not row.get("extra_bond"):
+            errors.append(f"extended bond row should be marked extra: {key}")
+        if f'data-ohlc-key="{key}"' not in html:
+            errors.append(f"missing extended bond OHLC row marker: {key}")
     curve_rows = [row for row in second_order if row.get("group") == "债券曲线"]
     if len(curve_rows) != BOND_CURVE_ROWS:
         errors.append(f"bond curve row count mismatch: {len(curve_rows)}")

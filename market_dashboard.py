@@ -58,11 +58,21 @@ class SeriesSpec:
 
 
 WSCN_SPECS = [
+    SeriesSpec("US_1M", "美国1个月国债", "bond", "wscn", "US1MR.OTC", "US_1M.csv", "US1MR_OTC_1D_ohlc.csv"),
+    SeriesSpec("US_3M", "美国3个月国债", "bond", "wscn", "US3MR.OTC", "US_3M.csv", "US3MR_OTC_1D_ohlc.csv"),
+    SeriesSpec("US_6M", "美国6个月国债", "bond", "wscn", "US6MR.OTC", "US_6M.csv", "US6MR_OTC_1D_ohlc.csv"),
     SeriesSpec("US_1Y", "美国1年国债", "bond", "wscn", "US1YR.OTC", "US_1Y.csv", "US1YR_OTC_1D_ohlc.csv"),
     SeriesSpec("US_2Y", "美国2年国债", "bond", "wscn", "US2YR.OTC", "US_2Y.csv", "US2YR_OTC_1D_ohlc.csv"),
+    SeriesSpec("US_3Y", "美国3年国债", "bond", "wscn", "US3YR.OTC", "US_3Y.csv", "US3YR_OTC_1D_ohlc.csv"),
+    SeriesSpec("US_5Y", "美国5年国债", "bond", "wscn", "US5YR.OTC", "US_5Y.csv", "US5YR_OTC_1D_ohlc.csv"),
+    SeriesSpec("US_7Y", "美国7年国债", "bond", "wscn", "US7YR.OTC", "US_7Y.csv", "US7YR_OTC_1D_ohlc.csv"),
     SeriesSpec("US_10Y", "美国10年国债", "bond", "wscn", "US10YR.OTC", "US_10Y.csv", "US10YR_OTC_1D_ohlc.csv"),
+    SeriesSpec("US_30Y", "美国30年国债", "bond", "wscn", "US30YR.OTC", "US_30Y.csv", "US30YR_OTC_1D_ohlc.csv"),
     SeriesSpec("CN_1Y", "中国1年国债", "bond", "wscn", "CN1YR.OTC", "CN_1Y.csv", "CN1YR_OTC_1D_ohlc.csv"),
     SeriesSpec("CN_2Y", "中国2年国债", "bond", "wscn", "CN2YR.OTC", "CN_2Y.csv", "CN2YR_OTC_1D_ohlc.csv"),
+    SeriesSpec("CN_3Y", "中国3年国债", "bond", "wscn", "CN3YR.OTC", "CN_3Y.csv", "CN3YR_OTC_1D_ohlc.csv"),
+    SeriesSpec("CN_5Y", "中国5年国债", "bond", "wscn", "CN5YR.OTC", "CN_5Y.csv", "CN5YR_OTC_1D_ohlc.csv"),
+    SeriesSpec("CN_7Y", "中国7年国债", "bond", "wscn", "CN7YR.OTC", "CN_7Y.csv", "CN7YR_OTC_1D_ohlc.csv"),
     SeriesSpec("CN_10Y", "中国10年国债", "bond", "wscn", "CN10YR.OTC", "CN_10Y.csv", "CN10YR_OTC_1D_ohlc.csv"),
     SeriesSpec("USDCNY", "美元/人民币", "fx", "wscn", "USDCNY.OTC", "USDCNY.csv", "USDCNY_OTC_1D_ohlc.csv"),
     SeriesSpec("JPYCNY", "日元/人民币", "fx", "wscn", "JPYCNY.OTC", "JPYCNY.csv", "JPYCNY_OTC_1D_ohlc.csv"),
@@ -143,6 +153,35 @@ COUNTRIES = [
     {"code": "RU", "name": "俄罗斯", "ccy": "RUB", "bond_2y": "RU_2Y", "bond_10y": "RU_10Y", "equity": "RU_EQUITY", "fx": "RUBCNY"},
     {"code": "KR", "name": "韩国", "ccy": "KRW", "bond_2y": "KR_2Y", "bond_10y": "KR_10Y", "equity": "KR_EQUITY", "fx": "KRWCNY"},
 ]
+
+CORE_BOND_TENORS = {"1Y", "2Y", "10Y"}
+
+COUNTRY_BOND_TENORS: dict[str, list[tuple[str, str]]] = {
+    "US": [
+        ("1M", "US_1M"),
+        ("3M", "US_3M"),
+        ("6M", "US_6M"),
+        ("1Y", "US_1Y"),
+        ("2Y", "US_2Y"),
+        ("3Y", "US_3Y"),
+        ("5Y", "US_5Y"),
+        ("7Y", "US_7Y"),
+        ("10Y", "US_10Y"),
+        ("30Y", "US_30Y"),
+    ],
+    "CN": [
+        ("1Y", "CN_1Y"),
+        ("2Y", "CN_2Y"),
+        ("3Y", "CN_3Y"),
+        ("5Y", "CN_5Y"),
+        ("7Y", "CN_7Y"),
+        ("10Y", "CN_10Y"),
+    ],
+    "JP": [("1Y", "JP_1Y"), ("2Y", "JP_2Y"), ("10Y", "JP_10Y")],
+    "DE": [("2Y", "DE_2Y"), ("10Y", "DE_10Y")],
+    "RU": [("2Y", "RU_2Y"), ("10Y", "RU_10Y")],
+    "KR": [("2Y", "KR_2Y"), ("10Y", "KR_10Y")],
+}
 
 CURRENCY_NAMES = {
     "CNY": "人民币",
@@ -545,6 +584,18 @@ def latest_row(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
     return rows[-1] if rows else None
 
 
+def country_bond_tenors(country: dict[str, Any]) -> list[tuple[str, str]]:
+    configured = COUNTRY_BOND_TENORS.get(country["code"], [])
+    if configured:
+        return configured
+    fallback = []
+    for tenor, field in [("1Y", "bond_1y"), ("2Y", "bond_2y"), ("10Y", "bond_10y")]:
+        key = country.get(field)
+        if key:
+            fallback.append((tenor, key))
+    return fallback
+
+
 def change(rows: list[dict[str, Any]], days: int | None, *, unit: str) -> dict[str, Any] | None:
     latest = latest_row(rows)
     if not latest:
@@ -665,14 +716,15 @@ def build_second_order_monitor(
     windows = [1, 7, 30]
     for country in COUNTRIES:
         instruments = [
-            ("股指", country["equity"], "pct"),
-            ("外汇", country["fx"], "pct"),
-            *([("债券", country["bond_1y"], "bp")] if country.get("bond_1y") else []),
-            ("债券", country["bond_2y"], "bp"),
-            ("债券", country["bond_10y"], "bp"),
-            ("债券曲线", f"{country['code']}_10Y2Y", "bp"),
+            ("股指", country["equity"], "pct", "", False),
+            ("外汇", country["fx"], "pct", "", False),
+            *[
+                ("债券", key, "bp", tenor, tenor not in CORE_BOND_TENORS)
+                for tenor, key in country_bond_tenors(country)
+            ],
+            ("债券曲线", f"{country['code']}_10Y2Y", "bp", "10Y-2Y", False),
         ]
-        for group, key, unit in instruments:
+        for group, key, unit, tenor, extra_bond in instruments:
             spec = specs.get(key)
             data_rows = series.get(key, [])
             metrics = {f"{days}D": derivative_metrics(data_rows, days, unit=unit) for days in windows}
@@ -683,6 +735,8 @@ def build_second_order_monitor(
                 "key": key,
                 "label": spec.label if spec else key,
                 "unit": unit,
+                "tenor": tenor,
+                "extra_bond": extra_bond,
                 "metrics": metrics,
                 "ohlc": recent_ohlc_rows(data_rows, limit=CHART_HISTORY_LIMIT),
                 "chart_type": "ohlc",
@@ -962,9 +1016,7 @@ def build_daily_move_alert(
     candidates = []
     for country in COUNTRIES:
         instruments = [
-            *([("债券", country["bond_1y"], "bp")] if country.get("bond_1y") else []),
-            ("债券", country["bond_2y"], "bp"),
-            ("债券", country["bond_10y"], "bp"),
+            *[("债券", key, "bp") for _, key in country_bond_tenors(country)],
             ("股指", country["equity"], "pct"),
             ("汇率", country["fx"], "pct"),
         ]
@@ -1262,7 +1314,7 @@ def build_snapshot(fetch_records: list[dict[str, str]], *, fetch_policy_news: bo
             "7D/30D 波动率 = 对应窗口相邻交易观测的平均绝对日变化；债券单位 bp/日，股指和汇率单位 %/日。",
             f"三币种资金流向直接调用用户提供代码：{USER_FX_FLOW_CODE}",
             "derived = 本地公式而非外部供应商：CNY_BASE=1；债券曲线=10Y-2Y；CNYJPY=1/JPYCNY；RUB 交叉汇率优先使用具备历史深度的 Yahoo 直接报价，历史不足才用 USDCNY/USDRUB 或 USDJPY/USDRUB 派生并在 source_audit 里比对最新直接报价。",
-            "WSCN 缺口优先用 Yahoo；日本/德国/俄罗斯/韩国债券因 WSCN 对应符号缺失或陈旧，使用 Investing 历史日线。",
+            "美债/中债扩展期限优先使用 WSCN 日线；WSCN 停更或陈旧的日本/德国长端不进入主监控，仍使用 Investing 的可更新期限。",
             "政策新闻雷达只做加息、降息、维持利率相关文本筛选；抓取或 AI 分类不可用时退回本地规则解析。",
         ],
     }
@@ -2523,8 +2575,7 @@ def render_html(snapshot: dict[str, Any]) -> str:
     spread_payload = []
     for country in COUNTRIES:
         bonds = []
-        for tenor, field in [("1Y", "bond_1y"), ("2Y", "bond_2y"), ("10Y", "bond_10y")]:
-            key = country.get(field)
+        for tenor, key in country_bond_tenors(country):
             item = ohlc_payload.get(key) if key else None
             if item and item.get("ohlc"):
                 bonds.append({"tenor": tenor, "key": key, "label": item["label"]})
@@ -2605,38 +2656,66 @@ def render_html(snapshot: dict[str, Any]) -> str:
     second_order_by_country: dict[str, list[dict[str, Any]]] = {}
     for row in second_order:
         second_order_by_country.setdefault(row["country"], []).append(row)
+
+    def append_derivative_row(row: dict[str, Any], hidden_attr: str, *, extra_bond: bool = False) -> None:
+        volatility = ""
+        if row.get("summary"):
+            volatility = fmt_asset_volatility(row["summary"], row["unit"])
+        extra_class = " derivative-extra-row" if extra_bond else ""
+        extra_attrs = ' data-extra-bond-row="true"' if extra_bond else ""
+        html.append(
+            f'<tr class="derivative-row{extra_class}" data-country="{escape(row["country"])}" '
+            f'data-ohlc-key="{escape(row["key"])}"{extra_attrs} title="点击查看日线 OHLC"{hidden_attr}>'
+            f'<th>{escape(row["country"])}</th>'
+            f'<td>{escape(row["group"])}</td>'
+            f'<td><div>{escape(row["label"])}</div>{volatility}</td>'
+            f'<td>{fmt_derivative(row["metrics"].get("1D"), row["unit"])}</td>'
+            f'<td>{fmt_derivative(row["metrics"].get("7D"), row["unit"])}</td>'
+            f'<td>{fmt_derivative(row["metrics"].get("30D"), row["unit"])}</td>'
+            "</tr>"
+        )
+
     for country in [item["name"] for item in COUNTRIES]:
         country_rows = second_order_by_country.get(country, [])
         if not country_rows:
             continue
+        core_rows = [row for row in country_rows if not row.get("extra_bond")]
+        extra_rows = [row for row in country_rows if row.get("extra_bond")]
         expanded = country == "美国"
         toggle_class = "country-toggle expanded" if expanded else "country-toggle collapsed"
         toggle_icon = "▾" if expanded else "▸"
+        count_text = f"{len(core_rows)} 核心"
+        if extra_rows:
+            count_text += f" + {len(extra_rows)} 更多债券"
         html.append(
             f'<tr class="country-group-row" data-country="{escape(country)}">'
             '<th colspan="6">'
             f'<button type="button" class="{toggle_class}" data-country="{escape(country)}" aria-expanded="{str(expanded).lower()}">'
             f'<span class="toggle-icon">{toggle_icon}</span>'
             f'<strong>{escape(country)}</strong>'
-            f'<span>{len(country_rows)} 项监控</span>'
+            f'<span>{escape(count_text)}</span>'
             "</button>"
             "</th></tr>"
         )
         hidden_attr = "" if expanded else " hidden"
-        for row in country_rows:
-            volatility = ""
-            if row.get("summary"):
-                volatility = fmt_asset_volatility(row["summary"], row["unit"])
+        for row in core_rows:
+            append_derivative_row(row, hidden_attr)
+        if extra_rows:
+            toggle_hidden = "" if expanded else " hidden"
+            tenors = " / ".join(escape(row.get("tenor") or row["label"]) for row in extra_rows)
             html.append(
-                f'<tr class="derivative-row" data-country="{escape(country)}" data-ohlc-key="{escape(row["key"])}" title="点击查看日线 OHLC"{hidden_attr}>'
-                f'<th>{escape(row["country"])}</th>'
-                f'<td>{escape(row["group"])}</td>'
-                f'<td><div>{escape(row["label"])}</div>{volatility}</td>'
-                f'<td>{fmt_derivative(row["metrics"].get("1D"), row["unit"])}</td>'
-                f'<td>{fmt_derivative(row["metrics"].get("7D"), row["unit"])}</td>'
-                f'<td>{fmt_derivative(row["metrics"].get("30D"), row["unit"])}</td>'
-                "</tr>"
+                f'<tr class="extra-bond-toggle-row" data-country="{escape(country)}" '
+                f'data-extra-bond-toggle-row="{escape(country)}"{toggle_hidden}>'
+                '<td colspan="6">'
+                f'<button type="button" class="extra-bond-toggle" data-extra-bond-toggle="{escape(country)}" aria-expanded="false">'
+                '<span class="toggle-icon">▸</span>'
+                "<strong>更多债券期限</strong>"
+                f"<span>{tenors}</span>"
+                "</button>"
+                "</td></tr>"
             )
+            for row in extra_rows:
+                append_derivative_row(row, " hidden", extra_bond=True)
     html.extend(["</tbody></table></div></section>"])
 
     html.extend(
@@ -3098,6 +3177,28 @@ th:first-child, td:first-child { text-align: left; }
 .country-toggle.expanded { background: #edf4ff; color: var(--blue); }
 .country-toggle.collapsed:hover { background: #f3f6fa; }
 .toggle-icon { color: var(--blue); font-size: 13px; text-align: center; }
+.extra-bond-toggle-row[hidden] { display: none; }
+.extra-bond-toggle-row td { background: #fbfcfe; padding: 7px 10px; }
+.extra-bond-toggle {
+  width: 100%;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  text-align: left;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+}
+.extra-bond-toggle:hover { border-color: #b7c2cf; background: #f8fafc; }
+.extra-bond-toggle strong { color: var(--ink); }
+.extra-bond-toggle span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.derivative-extra-row th, .derivative-extra-row td { background: #fbfcfe; }
 .derivative-row { cursor: pointer; }
 .derivative-row[hidden] { display: none; }
 .derivative-row:hover { background: #f3f6fa; }
@@ -3338,6 +3439,8 @@ JS = """
   const flowData = JSON.parse(flowRaw);
   const rows = Array.from(document.querySelectorAll(".derivative-row"));
   const countryToggles = Array.from(document.querySelectorAll(".country-toggle"));
+  const extraBondToggles = Array.from(document.querySelectorAll("[data-extra-bond-toggle]"));
+  const extraBondToggleRows = Array.from(document.querySelectorAll("[data-extra-bond-toggle-row]"));
   const flowPanelToggle = document.querySelector("[data-flow-panel-toggle]");
   const flowPanelBody = document.querySelector("[data-flow-panel-body]");
   const flowExpandButtons = Array.from(document.querySelectorAll(".flow-expand"));
@@ -4398,15 +4501,38 @@ JS = """
     button.classList.toggle("collapsed", !nextExpanded);
     const icon = button.querySelector(".toggle-icon");
     if (icon) icon.textContent = nextExpanded ? "▾" : "▸";
+    const extraExpanded = extraBondToggles
+      .find((extraButton) => extraButton.dataset.extraBondToggle === country)
+      ?.getAttribute("aria-expanded") === "true";
+    extraBondToggleRows.forEach((row) => {
+      if (row.dataset.extraBondToggleRow === country) {
+        row.hidden = !nextExpanded;
+      }
+    });
     rows.forEach((row) => {
       if (row.dataset.country === country) {
-        row.hidden = !nextExpanded;
+        row.hidden = !nextExpanded || (row.dataset.extraBondRow === "true" && !extraExpanded);
       }
     });
   };
 
   countryToggles.forEach((button) => {
     button.addEventListener("click", () => toggleCountryRows(button));
+  });
+
+  extraBondToggles.forEach((button) => {
+    button.addEventListener("click", () => {
+      const country = button.dataset.extraBondToggle;
+      const nextExpanded = button.getAttribute("aria-expanded") !== "true";
+      button.setAttribute("aria-expanded", String(nextExpanded));
+      const icon = button.querySelector(".toggle-icon");
+      if (icon) icon.textContent = nextExpanded ? "▾" : "▸";
+      rows.forEach((row) => {
+        if (row.dataset.country === country && row.dataset.extraBondRow === "true") {
+          row.hidden = !nextExpanded;
+        }
+      });
+    });
   });
 
   policyActionToggles.forEach((button) => {
