@@ -1816,9 +1816,18 @@ def render_daily_move_alert(alert: dict[str, Any]) -> str:
         surprise = item.get("surprise_ratio")
         surprise_text = f"{surprise:.1f}x" if surprise is not None and math.isfinite(surprise) else "缺失"
         policy = item.get("display_policy") or ("触发显示" if item.get("warning") else "固定显示")
+        ohlc_key = item.get("key", "")
+        card_attrs = ""
+        if ohlc_key:
+            card_attrs = (
+                f' data-ohlc-key="{escape(str(ohlc_key))}"'
+                ' role="button"'
+                ' tabindex="0"'
+                ' title="点击查看日线 OHLC"'
+            )
         html.extend(
             [
-                f'<div class="daily-alert-card {card_cls}">',
+                f'<div class="daily-alert-card {card_cls}"{card_attrs}>',
                 '<div class="daily-alert-main">',
                 f'<strong>{escape(item.get("group", ""))}｜{escape(item.get("country", ""))}｜{escape(item.get("label", ""))}</strong>',
                 f'<p>{escape(item.get("direction", ""))} <span class="{cls}">{escape(fmt_daily_move_value(move, unit))}</span></p>',
@@ -3051,8 +3060,15 @@ h3 { margin: 0 0 10px; font-size: 15px; letter-spacing: 0; }
 .daily-alert-head span { color: var(--muted); font-size: 12px; font-weight: 650; }
 .daily-alert-list { display: grid; gap: 8px; }
 .daily-alert-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: center; border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 12px 14px; }
+.daily-alert-card[data-ohlc-key] { cursor: pointer; transition: border-color .16s ease, box-shadow .16s ease, background .16s ease; }
+.daily-alert-card[data-ohlc-key]:hover,
+.daily-alert-card[data-ohlc-key]:focus-visible { border-color: #9bb7df; box-shadow: 0 0 0 3px rgba(43, 101, 191, .10); outline: none; }
 .daily-alert-card.warning { border-color: #f3c987; background: #fffaf1; }
 .daily-alert-card.watch { border-color: #dbe3ee; background: #fff; }
+.daily-alert-card.warning[data-ohlc-key]:hover,
+.daily-alert-card.warning[data-ohlc-key]:focus-visible { background: #fff6e4; }
+.daily-alert-card.watch[data-ohlc-key]:hover,
+.daily-alert-card.watch[data-ohlc-key]:focus-visible { background: #f8fbff; }
 .daily-alert-card.quiet { display: block; color: var(--muted); font-size: 13px; }
 .daily-alert-main strong { display: block; color: var(--ink); font-size: 15px; }
 .daily-alert-main p { margin: 5px 0 0; color: var(--muted); font-weight: 700; }
@@ -3446,6 +3462,7 @@ JS = """
   const flowRoutes = Array.from(document.querySelectorAll(".flow-route"));
   const policyActionToggles = Array.from(document.querySelectorAll("[data-policy-actions-toggle]"));
   const fxRankToggles = Array.from(document.querySelectorAll("[data-fx-rank-toggle]"));
+  const dailyAlertCards = Array.from(document.querySelectorAll(".daily-alert-card[data-ohlc-key]"));
   let activeFlowDetail = null;
   let activeFlowRouteKey = null;
   const defaultOhlcKey = "US_10Y";
@@ -4512,6 +4529,22 @@ JS = """
 
   rows.forEach((row) => {
     row.addEventListener("click", () => render(row.dataset.ohlcKey));
+  });
+
+  const openDailyAlertOhlc = (card) => {
+    const key = card.dataset.ohlcKey;
+    if (!key || !ohlcData[key]) return;
+    chartMode = "move";
+    render(key);
+  };
+
+  dailyAlertCards.forEach((card) => {
+    card.addEventListener("click", () => openDailyAlertOhlc(card));
+    card.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      openDailyAlertOhlc(card);
+    });
   });
 
   flowExpandButtons.forEach((button) => {

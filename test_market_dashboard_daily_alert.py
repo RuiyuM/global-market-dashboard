@@ -93,6 +93,7 @@ def test_daily_alert_renders_before_volatility_ranking_with_fixed_and_conditiona
                 "shown_count": 3,
                 "items": [
                     {
+                        "key": "US_10Y",
                         "country": "美国",
                         "group": "债券",
                         "label": "美国10年国债",
@@ -108,6 +109,7 @@ def test_daily_alert_renders_before_volatility_ranking_with_fixed_and_conditiona
                         "latest_date": "2026-06-26",
                     },
                     {
+                        "key": "JPYCNY",
                         "country": "日本",
                         "group": "汇率",
                         "label": "日元/人民币",
@@ -123,6 +125,7 @@ def test_daily_alert_renders_before_volatility_ranking_with_fixed_and_conditiona
                         "latest_date": "2026-06-26",
                     },
                     {
+                        "key": "US_EQUITY",
                         "country": "美国",
                         "group": "股指",
                         "label": "标普500",
@@ -155,3 +158,9 @@ def test_daily_alert_renders_before_volatility_ranking_with_fixed_and_conditiona
     assert "30D 日变化排名" in html
     assert "债券和汇率固定显示" in html
     assert "前 3.3%" in html
+    assert 'class="daily-alert-card warning"' in html
+    assert 'data-ohlc-key="US_10Y"' in html
+    assert 'role="button"' in html
+    assert 'tabindex="0"' in html
+    assert '点击查看日线 OHLC' in html
+    assert 'document.querySelectorAll(".daily-alert-card[data-ohlc-key]")' in html
