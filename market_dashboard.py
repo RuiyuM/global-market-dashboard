@@ -3943,6 +3943,12 @@ JS = """
     return `${number >= 0 ? "+" : ""}${number.toFixed(digits)}`;
   };
 
+  const dateMs = (date) => {
+    if (!date) return null;
+    const time = Date.parse(`${date}T00:00:00Z`);
+    return Number.isFinite(time) ? time : null;
+  };
+
   const pctLabel = (value, digits = 2) => {
     const number = Number(value);
     if (!Number.isFinite(number)) return "缺失";
@@ -4802,12 +4808,19 @@ JS = """
   };
 
   const spreadChartRowsForMode = (rows) => {
-    if (!rows.length) return { rows: [], start: null, end: null, label: "缺少数据" };
+    if (!rows.length) return { rows: [], start: null, end: null, label: "缺少数据", domainStart: "", domainEnd: "" };
     if (spreadMode === "custom") {
       const start = spreadStartInput?.value || "";
       const end = spreadEndInput?.value || "";
       const selected = rows.filter((row) => (!start || row.date >= start) && (!end || row.date <= end));
-      return { rows: selected, start: selected[0] || null, end: selected[selected.length - 1] || null, label: `${start || "最早"} 到 ${end || "最新"}` };
+      return {
+        rows: selected,
+        start: selected[0] || null,
+        end: selected[selected.length - 1] || null,
+        label: `${start || "最早"} 到 ${end || "最新"}`,
+        domainStart: start || selected[0]?.date || "",
+        domainEnd: end || selected[selected.length - 1]?.date || ""
+      };
     }
     if (spreadMode === "exact") {
       const target = spreadExactDateInput?.value || "";
@@ -4815,11 +4828,25 @@ JS = """
       if (index < 0) index = rows.length - 1;
       const exact = rows[index];
       const chartRows = rows.slice(Math.max(0, index - 15), Math.min(rows.length, index + 16));
-      return { rows: chartRows, start: exact, end: exact, label: exact ? `精确日期 ${exact.date}` : "缺少日期" };
+      return {
+        rows: chartRows,
+        start: exact,
+        end: exact,
+        label: exact ? `精确日期 ${exact.date}` : "缺少日期",
+        domainStart: chartRows[0]?.date || exact?.date || "",
+        domainEnd: chartRows[chartRows.length - 1]?.date || exact?.date || ""
+      };
     }
     const windowSize = Number(spreadMode || 30);
     const selected = rows.slice(-Math.min(rows.length, windowSize + 1));
-    return { rows: selected, start: selected[0] || null, end: selected[selected.length - 1] || null, label: `${windowSize}D` };
+    return {
+      rows: selected,
+      start: selected[0] || null,
+      end: selected[selected.length - 1] || null,
+      label: `${windowSize}D`,
+      domainStart: selected[0]?.date || "",
+      domainEnd: selected[selected.length - 1]?.date || ""
+    };
   };
 
   const currentSpreadVisibleRange = () => {
@@ -4827,8 +4854,8 @@ JS = """
     const selection = spreadChartRowsForMode(rows);
     if (!selection.rows.length) return null;
     return {
-      start: selection.rows[0].date,
-      end: selection.rows[selection.rows.length - 1].date
+      start: selection.domainStart || selection.rows[0].date,
+      end: selection.domainEnd || selection.rows[selection.rows.length - 1].date
     };
   };
 
@@ -4853,7 +4880,7 @@ JS = """
     renderSpread();
   };
 
-  const renderSpreadChart = (rows) => {
+  const renderSpreadChart = (rows, domain = {}) => {
     if (!spreadChart) return;
     const width = 980;
     const height = 260;
@@ -4875,8 +4902,22 @@ JS = """
     const pad = Math.max((max - min) * 0.12, 0.03);
     min -= pad;
     max += pad;
+    const domainStart = domain.domainStart || rows[0]?.date || "";
+    const domainEnd = domain.domainEnd || rows[rows.length - 1]?.date || "";
+    const domainStartMs = dateMs(domainStart);
+    const domainEndMs = dateMs(domainEnd);
+    const useDateDomain = Number.isFinite(domainStartMs) && Number.isFinite(domainEndMs) && domainEndMs > domainStartMs;
     const xStep = innerW / Math.max(1, rows.length - 1);
-    const x = (index) => rows.length === 1 ? margin.left + innerW / 2 : margin.left + index * xStep;
+    const xByIndex = (index) => rows.length === 1 ? margin.left + innerW / 2 : margin.left + index * xStep;
+    const x = (index) => {
+      if (useDateDomain) {
+        const rowMs = dateMs(rows[index]?.date);
+        if (Number.isFinite(rowMs)) {
+          return margin.left + clamp((rowMs - domainStartMs) / (domainEndMs - domainStartMs), 0, 1) * innerW;
+        }
+      }
+      return xByIndex(index);
+    };
     const y = (value) => margin.top + (max - value) / (max - min) * innerH;
     const grid = yTicks(min, max, 5).map((tick) => {
       const yy = y(tick);
@@ -4899,11 +4940,20 @@ JS = """
       const fill = positive ? "rgba(8, 116, 67, 0.16)" : "rgba(180, 35, 24, 0.16)";
       return `<polygon class="${klass}" points="${points}" fill="${fill}" />`;
     }).join("");
-    const tickCount = Math.min(7, rows.length);
+    const tickCount = Math.min(7, useDateDomain ? 7 : rows.length);
     const dateTicks = [];
-    for (let i = 0; i < tickCount; i += 1) {
-      const index = Math.round(i * (rows.length - 1) / Math.max(1, tickCount - 1));
-      dateTicks.push(`<text x="${x(index)}" y="${height - 13}" text-anchor="middle" fill="#66717d" font-size="11">${esc(rows[index].date.slice(5))}</text>`);
+    if (useDateDomain) {
+      for (let i = 0; i < tickCount; i += 1) {
+        const position = tickCount === 1 ? 0.5 : i / (tickCount - 1);
+        const tickMs = domainStartMs + (domainEndMs - domainStartMs) * position;
+        const tickDate = new Date(tickMs).toISOString().slice(5, 10);
+        dateTicks.push(`<text x="${margin.left + position * innerW}" y="${height - 13}" text-anchor="middle" fill="#66717d" font-size="11">${esc(tickDate)}</text>`);
+      }
+    } else {
+      for (let i = 0; i < tickCount; i += 1) {
+        const index = Math.round(i * (rows.length - 1) / Math.max(1, tickCount - 1));
+        dateTicks.push(`<text x="${x(index)}" y="${height - 13}" text-anchor="middle" fill="#66717d" font-size="11">${esc(rows[index].date.slice(5))}</text>`);
+      }
     }
     const longDots = rows.map((row, index) => (
       `<circle cx="${x(index).toFixed(2)}" cy="${y(row.longClose).toFixed(2)}" r="2.2" fill="#2457a6"><title>${esc(row.date)} 长端 ${fmt(row.longClose)}%</title></circle>`
@@ -4911,7 +4961,7 @@ JS = """
     const shortDots = rows.map((row, index) => (
       `<circle cx="${x(index).toFixed(2)}" cy="${y(row.shortClose).toFixed(2)}" r="2.2" fill="#9a5b00"><title>${esc(row.date)} 短端 ${fmt(row.shortClose)}%</title></circle>`
     )).join("");
-    const hitW = Math.max(12, xStep);
+    const hitW = useDateDomain ? Math.max(10, Math.min(36, innerW / Math.max(1, rows.length))) : Math.max(12, xStep);
     const hits = rows.map((row, index) => (
       `<g class="spread-hit" data-index="${index}">`
       + `<line class="spread-crosshair" data-hover-date="${esc(row.date)}" x1="${x(index).toFixed(2)}" x2="${x(index).toFixed(2)}" y1="${margin.top}" y2="${height - margin.bottom}" stroke="#98a2b3" stroke-width="1" opacity="0" />`
@@ -4981,7 +5031,7 @@ JS = """
     if (spreadResult) {
       spreadResult.textContent = `${country?.name || ""} ${longLabel} - ${shortLabel}｜${selection.label}｜${start.date} ${signed(start.spreadBp, 1)}bp -> ${end.date} ${signed(end.spreadBp, 1)}bp，变化 ${signed(delta, 1)}bp（${direction}）`;
     }
-    renderSpreadChart(selection.rows);
+    renderSpreadChart(selection.rows, { domainStart: selection.domainStart, domainEnd: selection.domainEnd });
   };
 
   const initSpreadCalculator = () => {

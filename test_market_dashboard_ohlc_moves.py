@@ -242,6 +242,9 @@ def test_ohlc_and_spread_ranges_can_be_aligned_bidirectionally() -> None:
     assert "customRangeByKey[key] = { start: range.start, end: range.end };" in JS
     assert "spreadStartInput.value = range.start;" in JS
     assert "spreadEndInput.value = range.end;" in JS
+    assert "domainStart: start || selected[0]?.date || \"\"" in JS
+    assert "renderSpreadChart(selection.rows, { domainStart: selection.domainStart, domainEnd: selection.domainEnd });" in JS
+    assert "const domainStartMs = dateMs(domainStart);" in JS
 
 
 def test_ohlc_and_spread_share_hover_date_crosshair() -> None:
