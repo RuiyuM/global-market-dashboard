@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
-from market_dashboard import render_html, render_quant_fund_page
+import re
+
+from market_dashboard import render_html, render_quant_curve, render_quant_fund_page
 
 
 def quant_snapshot() -> dict:
@@ -119,3 +121,18 @@ def test_quant_fund_separate_page_contains_curves_and_back_link() -> None:
     assert "SECRET" not in html
     assert "USDT" not in html
     assert "USDC" not in html
+
+
+def test_quant_fund_large_curve_leaves_room_for_rotated_date_labels() -> None:
+    points = [
+        {"date": f"2026-04-{day:02d}", "pct": (day % 7) - 3}
+        for day in range(1, 29)
+    ]
+    html = render_quant_curve(points, large=True)
+
+    viewbox = re.search(r'viewBox="0 0 920 ([0-9.]+)"', html)
+    assert viewbox
+    height = float(viewbox.group(1))
+    y_values = [float(value) for value in re.findall(r'class="quant-axis-date" x="[^"]+" y="([0-9.]+)"', html)]
+    assert y_values
+    assert height - max(y_values) >= 76

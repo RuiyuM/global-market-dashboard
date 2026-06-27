@@ -1927,10 +1927,11 @@ def render_quant_curve(points: list[dict[str, Any]], *, large: bool = False) -> 
 
     if large:
         width = 920
-        height = 342
+        height = 390
         pad_x = 58
         chart_top = 34
         chart_bottom = 268
+        date_label_y = chart_bottom + 34
 
         min_value = min(value for _, value in values)
         max_value = max(value for _, value in values)
@@ -1989,8 +1990,8 @@ def render_quant_curve(points: list[dict[str, Any]], *, large: bool = False) -> 
             for (day, value), (x, y) in zip(values, coords)
         )
         axis_dates = "".join(
-            f'<text class="quant-axis-date" x="{x:.2f}" y="{height - 14}" '
-            f'text-anchor="end" transform="rotate(-55 {x:.2f} {height - 14})">'
+            f'<text class="quant-axis-date" x="{x:.2f}" y="{date_label_y:.2f}" '
+            f'text-anchor="end" transform="rotate(-55 {x:.2f} {date_label_y:.2f})">'
             f'{escape(day[5:] + (f" {value:+.2f}%" if index == len(values) - 1 else ""))}</text>'
             for index, ((day, value), (x, _)) in enumerate(zip(values, coords))
         )
