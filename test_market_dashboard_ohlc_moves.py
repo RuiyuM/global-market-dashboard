@@ -338,6 +338,7 @@ def test_japan_short_bills_merge_investing_history_with_tradingeconomics_latest(
         monkeypatch.setattr(market_dashboard, name, [])
     monkeypatch.setattr(market_dashboard, "JAPAN_BOND_SPECS", [(series_spec, "investing+tradingeconomics", "1M")])
     monkeypatch.setattr(market_dashboard, "DASHBOARD_DATA", tmp_path)
+    monkeypatch.setattr(market_dashboard, "LOCAL_DATA", tmp_path / "empty-seed")
     monkeypatch.setattr(market_dashboard, "fetch_investing_html", lambda spec, start, end: "<html></html>")
     monkeypatch.setattr(
         market_dashboard,
@@ -397,6 +398,7 @@ def test_japan_short_bills_keep_investing_ohlc_when_te_has_same_date(monkeypatch
         monkeypatch.setattr(market_dashboard, name, [])
     monkeypatch.setattr(market_dashboard, "JAPAN_BOND_SPECS", [(series_spec, "investing+tradingeconomics", "3M")])
     monkeypatch.setattr(market_dashboard, "DASHBOARD_DATA", tmp_path)
+    monkeypatch.setattr(market_dashboard, "LOCAL_DATA", tmp_path / "empty-seed")
     monkeypatch.setattr(market_dashboard, "fetch_investing_html", lambda spec, start, end: "<html></html>")
     monkeypatch.setattr(
         market_dashboard,
@@ -418,6 +420,57 @@ def test_japan_short_bills_keep_investing_ohlc_when_te_has_same_date(monkeypatch
     assert rows[0]["high"] == 0.95
     assert rows[0]["low"] == 0.90
     assert rows[0]["close"] == 0.942
+
+
+def test_japan_short_bills_fall_back_to_seed_when_investing_is_blocked(monkeypatch, tmp_path) -> None:
+    series_spec = SeriesSpec(
+        "JP_1M",
+        "日本1个月国债",
+        "bond",
+        "investing+tradingeconomics",
+        "JP1MT=XX / GJGB1M",
+        "JP_1M.csv",
+        "JP1M_INVESTING_1D_ohlc.csv",
+    )
+    dashboard_dir = tmp_path / "dashboard-data"
+    seed_dir = tmp_path / "seed-data"
+    seed_dir.mkdir()
+    market_dashboard.write_ohlc(
+        seed_dir / "JP1M_INVESTING_1D_ohlc.csv",
+        [
+            {"date": "2026-06-25", "timestamp": 1782345600, "open": 0.52, "high": 0.56, "low": 0.50, "close": 0.54},
+        ],
+    )
+    for name in [
+        "WSCN_SPECS",
+        "YAHOO_SPECS",
+        "NIKKEI_SPECS",
+        "CHINA_BOND_SPECS",
+        "GERMANY_BOND_SPECS",
+        "KOREA_BOND_SPECS",
+        "INVESTING_SPECS",
+    ]:
+        monkeypatch.setattr(market_dashboard, name, [])
+    monkeypatch.setattr(market_dashboard, "JAPAN_BOND_SPECS", [(series_spec, "investing+tradingeconomics", "1M")])
+    monkeypatch.setattr(market_dashboard, "DASHBOARD_DATA", dashboard_dir)
+    monkeypatch.setattr(market_dashboard, "LOCAL_DATA", seed_dir)
+    monkeypatch.setattr(market_dashboard, "fetch_investing_html", lambda spec, start, end: (_ for _ in ()).throw(RuntimeError("HTTP Error 403: Forbidden")))
+    monkeypatch.setattr(
+        market_dashboard,
+        "fetch_tradingeconomics_latest_row",
+        lambda slug: {"date": "2026-06-26", "timestamp": 1782432000, "open": 0.55, "high": 0.57, "low": 0.54, "close": 0.56},
+    )
+
+    records = market_dashboard.fetch_all(SimpleNamespace(wscn_count=500, lookback_days=90, sleep_sec=0))
+
+    assert records[0]["status"] == "ok"
+    assert records[0]["rows"] == "2"
+    assert records[0]["latest"] == "2026-06-26"
+    assert "Investing.com history failed: HTTP Error 403: Forbidden" in records[0]["error"]
+    assert [row["date"].isoformat() for row in market_dashboard.read_ohlc(dashboard_dir / "JP_1M.csv")] == [
+        "2026-06-25",
+        "2026-06-26",
+    ]
 
 
 def test_cross_checked_china_germany_korea_bond_tenors_are_configured() -> None:

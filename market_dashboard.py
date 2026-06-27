@@ -554,15 +554,23 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
                     latest_error = f"Trading Economics latest failed: {exc}"
             elif source_kind == "investing+tradingeconomics":
                 investing_spec = INVESTING_BOND_SPECS[f"JP{source_key}"]
-                rows = rows_from_investing_html(fetch_investing_html(investing_spec, start, end))
                 if path.exists():
-                    rows = merge_ohlc_rows(read_ohlc(path), rows)
+                    rows = read_ohlc(path)
+                elif series_spec.local_file and (LOCAL_DATA / series_spec.local_file).exists():
+                    rows = read_ohlc(LOCAL_DATA / series_spec.local_file)
+                else:
+                    rows = []
+                try:
+                    investing_rows = rows_from_investing_html(fetch_investing_html(investing_spec, start, end))
+                    rows = merge_ohlc_rows(rows, investing_rows)
+                except Exception as exc:
+                    latest_error = f"Investing.com history failed: {exc}"
                 try:
                     latest_row = fetch_tradingeconomics_latest_row(TRADINGECONOMICS_SLUGS[source_key])
                     if latest_row and (not rows or row_date_key(latest_row) > row_date_key(rows[-1])):
                         rows = merge_ohlc_rows(rows, [latest_row])
                 except Exception as exc:
-                    latest_error = f"Trading Economics latest failed: {exc}"
+                    latest_error = f"{latest_error}; Trading Economics latest failed: {exc}" if latest_error else f"Trading Economics latest failed: {exc}"
             else:
                 rows = read_ohlc(path) if path.exists() else []
                 try:
