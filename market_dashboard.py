@@ -2782,7 +2782,7 @@ def render_html(snapshot: dict[str, Any]) -> str:
             '<div class="date-tools spread-date-tools">',
             '<label>区间 <input type="date" id="spread-start-date"></label>',
             '<label>到 <input type="date" id="spread-end-date"></label>',
-            '<label>日期 <input type="date" id="spread-exact-date"></label>',
+            '<label>快速查看 <input type="date" id="spread-exact-date"></label>',
             "</div>",
             "</div>",
             '<div class="spread-result" id="spread-result">选择国家、长短端和日期后自动显示利差。</div>',

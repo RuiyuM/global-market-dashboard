@@ -150,6 +150,8 @@ def test_spread_calculator_is_separate_interactive_block() -> None:
     assert 'data-spread-window="30"' in html
     assert 'id="spread-start-date"' in html
     assert 'id="spread-exact-date"' in html
+    assert '<label>快速查看 <input type="date" id="spread-exact-date"></label>' in html
+    assert '<label>日期 <input type="date" id="spread-exact-date"></label>' not in html
     assert 'id="spread-apply-range"' not in html
     assert 'id="spread-exact-button"' not in html
     assert ">查看日期</button>" not in html
