@@ -4241,21 +4241,21 @@ JS = """
     if (!spreadChart) return;
     const width = 980;
     const height = 260;
-    const margin = { left: 64, right: 22, top: 22, bottom: 42 };
+    const margin = { left: 64, right: 22, top: 30, bottom: 42 };
     const innerW = width - margin.left - margin.right;
     const innerH = height - margin.top - margin.bottom;
     if (!rows.length) {
       spreadChart.innerHTML = `<text x="490" y="130" text-anchor="middle" fill="#66717d">没有可计算的利差数据</text>`;
       return;
     }
-    const values = rows.map((row) => Number(row.spreadBp)).filter(Number.isFinite);
+    const values = rows.flatMap((row) => [Number(row.longClose), Number(row.shortClose)]).filter(Number.isFinite);
     let min = Math.min(...values);
     let max = Math.max(...values);
     if (min === max) {
-      min -= 1;
-      max += 1;
+      min -= 0.05;
+      max += 0.05;
     }
-    const pad = Math.max((max - min) * 0.12, 1);
+    const pad = Math.max((max - min) * 0.12, 0.03);
     min -= pad;
     max += pad;
     const xStep = innerW / Math.max(1, rows.length - 1);
@@ -4264,23 +4264,46 @@ JS = """
     const grid = yTicks(min, max, 5).map((tick) => {
       const yy = y(tick);
       return `<line x1="${margin.left}" x2="${width - margin.right}" y1="${yy}" y2="${yy}" stroke="#e5e9ef" />`
-        + `<text x="${margin.left - 10}" y="${yy + 4}" text-anchor="end" fill="#66717d" font-size="11">${signed(tick, 1)}bp</text>`;
+        + `<text x="${margin.left - 10}" y="${yy + 4}" text-anchor="end" fill="#66717d" font-size="11">${tick.toFixed(2)}%</text>`;
     }).join("");
-    const path = rows.map((row, index) => `${index === 0 ? "M" : "L"} ${x(index).toFixed(2)} ${y(row.spreadBp).toFixed(2)}`).join(" ");
+    const longPath = rows.map((row, index) => `${index === 0 ? "M" : "L"} ${x(index).toFixed(2)} ${y(row.longClose).toFixed(2)}`).join(" ");
+    const shortPath = rows.map((row, index) => `${index === 0 ? "M" : "L"} ${x(index).toFixed(2)} ${y(row.shortClose).toFixed(2)}`).join(" ");
+    const bands = rows.slice(0, -1).map((row, index) => {
+      const next = rows[index + 1];
+      const avgSpread = ((row.longClose - row.shortClose) + (next.longClose - next.shortClose)) / 2;
+      const positive = avgSpread >= 0;
+      const points = [
+        [x(index), y(row.longClose)],
+        [x(index + 1), y(next.longClose)],
+        [x(index + 1), y(next.shortClose)],
+        [x(index), y(row.shortClose)]
+      ].map(([px, py]) => `${px.toFixed(2)},${py.toFixed(2)}`).join(" ");
+      const klass = positive ? "spread-positive-band" : "spread-negative-band";
+      const fill = positive ? "rgba(8, 116, 67, 0.16)" : "rgba(180, 35, 24, 0.16)";
+      return `<polygon class="${klass}" points="${points}" fill="${fill}" />`;
+    }).join("");
     const tickCount = Math.min(7, rows.length);
     const dateTicks = [];
     for (let i = 0; i < tickCount; i += 1) {
       const index = Math.round(i * (rows.length - 1) / Math.max(1, tickCount - 1));
       dateTicks.push(`<text x="${x(index)}" y="${height - 13}" text-anchor="middle" fill="#66717d" font-size="11">${esc(rows[index].date.slice(5))}</text>`);
     }
-    const dots = rows.map((row, index) => (
-      `<circle cx="${x(index).toFixed(2)}" cy="${y(row.spreadBp).toFixed(2)}" r="2.4" fill="#2563eb"><title>${esc(row.date)} ${signed(row.spreadBp, 1)}bp</title></circle>`
+    const longDots = rows.map((row, index) => (
+      `<circle cx="${x(index).toFixed(2)}" cy="${y(row.longClose).toFixed(2)}" r="2.2" fill="#2457a6"><title>${esc(row.date)} 长端 ${fmt(row.longClose)}%</title></circle>`
+    )).join("");
+    const shortDots = rows.map((row, index) => (
+      `<circle cx="${x(index).toFixed(2)}" cy="${y(row.shortClose).toFixed(2)}" r="2.2" fill="#9a5b00"><title>${esc(row.date)} 短端 ${fmt(row.shortClose)}%</title></circle>`
     )).join("");
     spreadChart.innerHTML = `<rect width="${width}" height="${height}" fill="#fff" />`
       + grid
-      + `<line x1="${margin.left}" x2="${width - margin.right}" y1="${y(0)}" y2="${y(0)}" stroke="#b8c1cc" stroke-dasharray="4 4" />`
-      + `<path d="${path}" fill="none" stroke="#2563eb" stroke-width="2.2" />`
-      + dots
+      + bands
+      + `<path class="spread-long-line" d="${longPath}" fill="none" stroke="#2457a6" stroke-width="2.3" />`
+      + `<path class="spread-short-line" d="${shortPath}" fill="none" stroke="#9a5b00" stroke-width="2.3" stroke-dasharray="5 4" />`
+      + longDots
+      + shortDots
+      + `<text x="${margin.left}" y="17" fill="#2457a6" font-size="12" font-weight="700">长端</text>`
+      + `<text x="${margin.left + 46}" y="17" fill="#9a5b00" font-size="12" font-weight="700">短端</text>`
+      + `<text x="${margin.left + 98}" y="17" fill="#66717d" font-size="12">绿色=长端高，红色=短端高</text>`
       + dateTicks.join("");
   };
 

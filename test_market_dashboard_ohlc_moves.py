@@ -150,6 +150,10 @@ def test_spread_calculator_is_separate_interactive_block() -> None:
     assert 'id="spread-data"' in html
     assert "const buildSpreadRows = () =>" in JS
     assert "const renderSpread = () =>" in JS
+    assert "spread-positive-band" in JS
+    assert "spread-negative-band" in JS
+    assert "spread-long-line" in JS
+    assert "spread-short-line" in JS
 
 
 def test_ohlc_comparison_legend_uses_inline_tspans_to_avoid_overlap() -> None:
