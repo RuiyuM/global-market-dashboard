@@ -493,8 +493,19 @@ def main() -> int:
     flow_expand_count = html.count('class="flow-expand"')
     if flow_expand_count != FLOW_PERIOD_COUNT:
         errors.append(f"flow route expand button count mismatch: {flow_expand_count}")
-    if 'class="flow-grid" data-flow-panel-body hidden' not in html:
-        errors.append("FX flow panel should be collapsed by default")
+    if 'class="flow-grid" data-flow-panel-body hidden' in html:
+        errors.append("FX flow panel should default expanded")
+    if '<button type="button" class="flow-panel-toggle" data-flow-panel-toggle aria-expanded="true">' not in html:
+        errors.append("FX flow panel toggle should default expanded")
+    country_panel = '<details class="panel country-panel">'
+    if country_panel not in html:
+        errors.append("country panel should be a collapsed details block")
+    if '<details class="panel country-panel" open' in html:
+        errors.append("country panel should default collapsed")
+    flow_index = html.find("<h2>三币种资金流向</h2>")
+    country_index = html.find("<summary><span>国家面板</span>")
+    if flow_index < 0 or country_index < 0 or flow_index > country_index:
+        errors.append("FX flow panel should render before country panel")
     for marker in [
         'id="fx-flow-data"',
         'data-flow-panel-toggle',

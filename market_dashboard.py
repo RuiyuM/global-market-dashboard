@@ -3131,45 +3131,16 @@ def render_html(snapshot: dict[str, Any]) -> str:
         ]
     )
 
-    html.extend(['<section class="panel">', "<h2>国家面板</h2>", '<div class="table-wrap">', '<table class="market-table">'])
-    html.append(
-        "<thead><tr><th>国家</th><th>2Y</th><th>2Y 1D/7D/14D/30D</th><th>10Y</th><th>10Y 1D/7D/14D/30D</th>"
-        "<th>股指</th><th>股指 1D/7D/14D/30D</th><th>汇率</th><th>汇率 1D/7D/14D/30D</th></tr></thead><tbody>"
-    )
-    for row in countries:
-        html.append("<tr>")
-        html.append(f'<th class="country">{escape(row["country"])}<span>{escape(row["ccy"])}</span></th>')
-        for field, unit, digits in [("bond_2y", "bp", 3), ("bond_10y", "bp", 3), ("equity", "pct", 2), ("fx", "pct", 5)]:
-            cell = row[field]
-            summary = cell["summary"]
-            latest = summary.get("latest")
-            stale = '<span class="tag warn">旧</span>' if summary.get("stale") else ""
-            html.append(
-                f'<td><div class="cell-label">{escape(cell["label"])}</div>'
-                f'<div>{escape(fmt_value(latest, digits))} {stale}</div>'
-                f'<div class="date">{escape(summary.get("date") or "")}</div></td>'
-            )
-            html.append(
-                "<td class=\"change-stack\">"
-                f'{fmt_change(summary, "chg_1d", unit)}'
-                f'{fmt_change(summary, "chg_7d", unit)}'
-                f'{fmt_change(summary, "chg_14d", unit)}'
-                f'{fmt_change(summary, "chg_30d", unit)}'
-                "</td>"
-            )
-        html.append("</tr>")
-    html.extend(["</tbody></table></div></section>"])
-
     html.extend(
         [
             '<section class="panel flow-panel">',
             '<div class="flow-panel-head">',
             "<h2>三币种资金流向</h2>",
-            '<button type="button" class="flow-panel-toggle" data-flow-panel-toggle aria-expanded="false">'
-            '<span class="toggle-icon">▸</span><span>展开</span>'
+            '<button type="button" class="flow-panel-toggle" data-flow-panel-toggle aria-expanded="true">'
+            '<span class="toggle-icon">▾</span><span>收起</span>'
             "</button>",
             "</div>",
-            '<div class="flow-grid" data-flow-panel-body hidden>',
+            '<div class="flow-grid" data-flow-panel-body>',
         ]
     )
     for section_index, section in enumerate(snapshot["fx_flows"]):
@@ -3215,6 +3186,42 @@ def render_html(snapshot: dict[str, Any]) -> str:
             "</section>",
         ]
     )
+
+    html.extend(
+        [
+            '<details class="panel country-panel">',
+            "<summary><span>国家面板</span><small>点击展开各国家债券、股指、汇率数据</small></summary>",
+            '<div class="table-wrap">',
+            '<table class="market-table">',
+        ]
+    )
+    html.append(
+        "<thead><tr><th>国家</th><th>2Y</th><th>2Y 1D/7D/14D/30D</th><th>10Y</th><th>10Y 1D/7D/14D/30D</th>"
+        "<th>股指</th><th>股指 1D/7D/14D/30D</th><th>汇率</th><th>汇率 1D/7D/14D/30D</th></tr></thead><tbody>"
+    )
+    for row in countries:
+        html.append("<tr>")
+        html.append(f'<th class="country">{escape(row["country"])}<span>{escape(row["ccy"])}</span></th>')
+        for field, unit, digits in [("bond_2y", "bp", 3), ("bond_10y", "bp", 3), ("equity", "pct", 2), ("fx", "pct", 5)]:
+            cell = row[field]
+            summary = cell["summary"]
+            latest = summary.get("latest")
+            stale = '<span class="tag warn">旧</span>' if summary.get("stale") else ""
+            html.append(
+                f'<td><div class="cell-label">{escape(cell["label"])}</div>'
+                f'<div>{escape(fmt_value(latest, digits))} {stale}</div>'
+                f'<div class="date">{escape(summary.get("date") or "")}</div></td>'
+            )
+            html.append(
+                "<td class=\"change-stack\">"
+                f'{fmt_change(summary, "chg_1d", unit)}'
+                f'{fmt_change(summary, "chg_7d", unit)}'
+                f'{fmt_change(summary, "chg_14d", unit)}'
+                f'{fmt_change(summary, "chg_30d", unit)}'
+                "</td>"
+            )
+        html.append("</tr>")
+    html.extend(["</tbody></table></div></details>"])
 
     hedge_cycles = [
         (
@@ -3460,12 +3467,13 @@ h3 { margin: 0 0 10px; font-size: 15px; letter-spacing: 0; }
 .quant-chart-kicker b { color: #24302d; font-size: 12px; }
 .quant-chart-kicker em { color: #66736d; font-size: 11px; font-style: normal; font-weight: 650; }
 .quant-empty-large { height: 180px; border: 1px dashed #d6dee9; border-radius: 8px; font-size: 14px; font-weight: 750; }
-.volatility-panel, .status-panel { padding: 0; overflow: hidden; }
-.volatility-panel summary, .status-panel summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; padding: 16px; font-weight: 750; list-style: none; }
-.volatility-panel summary::-webkit-details-marker, .status-panel summary::-webkit-details-marker { display: none; }
-.volatility-panel summary:hover, .status-panel summary:hover { background: #f8fafc; }
-.volatility-panel summary small, .status-panel summary small { color: var(--muted); font-size: 12px; font-weight: 600; }
+.volatility-panel, .country-panel, .status-panel { padding: 0; overflow: hidden; }
+.volatility-panel summary, .country-panel summary, .status-panel summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; padding: 16px; font-weight: 750; list-style: none; }
+.volatility-panel summary::-webkit-details-marker, .country-panel summary::-webkit-details-marker, .status-panel summary::-webkit-details-marker { display: none; }
+.volatility-panel summary:hover, .country-panel summary:hover, .status-panel summary:hover { background: #f8fafc; }
+.volatility-panel summary small, .country-panel summary small, .status-panel summary small { color: var(--muted); font-size: 12px; font-weight: 600; }
 .volatility-panel .ranking-grid { padding: 0 16px 16px; }
+.country-panel .table-wrap { padding: 0 16px 16px; }
 .status-panel .table-wrap { padding: 0 16px 16px; }
 .ranking-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
 .ranking-block + .ranking-block { border-left: 1px solid var(--line); padding-left: 18px; }
