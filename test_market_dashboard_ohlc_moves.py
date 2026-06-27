@@ -155,9 +155,13 @@ def test_spread_calculator_is_separate_interactive_block() -> None:
     assert 'id="spread-apply-range"' not in html
     assert 'id="spread-exact-button"' not in html
     assert ">查看日期</button>" not in html
+    assert 'id="spread-tooltip"' in html
     assert 'id="spread-data"' in html
     assert "const buildSpreadRows = () =>" in JS
     assert "const renderSpread = () =>" in JS
+    assert 'const spreadTooltip = document.getElementById("spread-tooltip");' in JS
+    assert 'class="spread-hit"' in JS
+    assert "spread-crosshair" in JS
     assert 'spreadStartInput?.addEventListener("change", setSpreadCustomMode);' in JS
     assert 'spreadExactDateInput?.addEventListener("change", setSpreadExactMode);' in JS
     assert "spread-positive-band" in JS

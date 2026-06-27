@@ -2788,6 +2788,7 @@ def render_html(snapshot: dict[str, Any]) -> str:
             '<div class="spread-result" id="spread-result">选择国家、长短端和日期后自动显示利差。</div>',
             '<div class="chart-shell spread-chart-shell">',
             '<svg id="spread-chart" viewBox="0 0 980 260" role="img" aria-label="利差曲线"></svg>',
+            '<div class="chart-tooltip" id="spread-tooltip"></div>',
             "</div>",
             "</section>",
         ]
@@ -3474,6 +3475,7 @@ JS = """
   const spreadExactDateInput = document.getElementById("spread-exact-date");
   const spreadResult = document.getElementById("spread-result");
   const spreadChart = document.getElementById("spread-chart");
+  const spreadTooltip = document.getElementById("spread-tooltip");
   const windowSteps = [90, 180, 360];
   let currentKey = null;
   let compareKey = "";
@@ -4345,6 +4347,7 @@ JS = """
     const innerH = height - margin.top - margin.bottom;
     if (!rows.length) {
       spreadChart.innerHTML = `<text x="490" y="130" text-anchor="middle" fill="#66717d">没有可计算的利差数据</text>`;
+      if (spreadTooltip) spreadTooltip.style.display = "none";
       return;
     }
     const values = rows.flatMap((row) => [Number(row.longClose), Number(row.shortClose)]).filter(Number.isFinite);
@@ -4393,6 +4396,13 @@ JS = """
     const shortDots = rows.map((row, index) => (
       `<circle cx="${x(index).toFixed(2)}" cy="${y(row.shortClose).toFixed(2)}" r="2.2" fill="#9a5b00"><title>${esc(row.date)} 短端 ${fmt(row.shortClose)}%</title></circle>`
     )).join("");
+    const hitW = Math.max(12, xStep);
+    const hits = rows.map((row, index) => (
+      `<g class="spread-hit" data-index="${index}">`
+      + `<line class="spread-crosshair" x1="${x(index).toFixed(2)}" x2="${x(index).toFixed(2)}" y1="${margin.top}" y2="${height - margin.bottom}" stroke="#98a2b3" stroke-width="1" opacity="0" />`
+      + `<rect x="${(x(index) - hitW / 2).toFixed(2)}" y="${margin.top}" width="${hitW.toFixed(2)}" height="${innerH}" fill="transparent" />`
+      + `</g>`
+    )).join("");
     spreadChart.innerHTML = `<rect width="${width}" height="${height}" fill="#fff" />`
       + grid
       + bands
@@ -4403,7 +4413,34 @@ JS = """
       + `<text x="${margin.left}" y="17" fill="#2457a6" font-size="12" font-weight="700">长端</text>`
       + `<text x="${margin.left + 46}" y="17" fill="#9a5b00" font-size="12" font-weight="700">短端</text>`
       + `<text x="${margin.left + 98}" y="17" fill="#66717d" font-size="12">绿色=长端高，红色=短端高</text>`
-      + dateTicks.join("");
+      + dateTicks.join("")
+      + hits;
+    Array.from(spreadChart.querySelectorAll(".spread-hit")).forEach((node) => {
+      const row = rows[Number(node.dataset.index)];
+      const previous = rows[Number(node.dataset.index) - 1] || null;
+      node.addEventListener("mousemove", (event) => {
+        Array.from(spreadChart.querySelectorAll(".spread-crosshair")).forEach((line) => { line.setAttribute("opacity", "0"); });
+        const crosshair = node.querySelector(".spread-crosshair");
+        if (crosshair) crosshair.setAttribute("opacity", "1");
+        if (!spreadTooltip) return;
+        const bounds = spreadChart.parentElement.getBoundingClientRect();
+        const delta = previous ? row.spreadBp - previous.spreadBp : null;
+        spreadTooltip.classList.remove("dark");
+        spreadTooltip.style.display = "block";
+        spreadTooltip.style.left = `${Math.min(bounds.width - 236, Math.max(8, event.clientX - bounds.left + 14))}px`;
+        spreadTooltip.style.top = `${Math.max(8, event.clientY - bounds.top - 96)}px`;
+        spreadTooltip.innerHTML = `<strong>${esc(row.date)}</strong>`
+          + `<div>长端：<b>${fmt(row.longClose)}%</b></div>`
+          + `<div>短端：<b>${fmt(row.shortClose)}%</b></div>`
+          + `<div>利差：<b>${signed(row.spreadBp, 1)}bp</b></div>`
+          + `<div class="muted">较前日：${delta === null ? "缺失" : `${signed(delta, 1)}bp`}</div>`;
+      });
+      node.addEventListener("mouseleave", () => {
+        const crosshair = node.querySelector(".spread-crosshair");
+        if (crosshair) crosshair.setAttribute("opacity", "0");
+        if (spreadTooltip) spreadTooltip.style.display = "none";
+      });
+    });
   };
 
   const renderSpread = () => {
