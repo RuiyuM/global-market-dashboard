@@ -3081,7 +3081,7 @@ def render_html(snapshot: dict[str, Any]) -> str:
             '<button type="button" id="ohlc-zoom-in" title="放大">+</button>',
             '<button type="button" id="ohlc-zoom-out" title="缩小">-</button>',
             '<button type="button" id="ohlc-reset">Reset</button>',
-            '<button type="button" id="ohlc-align-spread" title="把日线图区间对齐到利差计算">对齐</button>',
+            '<button type="button" id="ohlc-align-spread" title="把利差区间对齐到日线 OHLC">对齐</button>',
             '<span id="ohlc-range-label"></span>',
             "</div>",
             '<div class="date-tools ohlc-date-tools">',
@@ -3119,7 +3119,7 @@ def render_html(snapshot: dict[str, Any]) -> str:
             '<label>区间 <input type="date" id="spread-start-date"></label>',
             '<label>到 <input type="date" id="spread-end-date"></label>',
             '<label>快速查看 <input type="date" id="spread-exact-date"></label>',
-            '<button type="button" id="spread-align-ohlc" title="把利差区间对齐到日线 OHLC">对齐</button>',
+            '<button type="button" id="spread-align-ohlc" title="把日线图区间对齐到利差计算">对齐</button>',
             "</div>",
             "</div>",
             '<div class="spread-result" id="spread-result">选择国家、长短端和日期后自动显示利差。</div>',
@@ -5142,7 +5142,7 @@ JS = """
   rangeApplyButton?.addEventListener("click", applyOhlcRange);
   rangeClearButton?.addEventListener("click", clearOhlcRange);
   jumpDateButton?.addEventListener("click", jumpToOhlcDate);
-  alignOhlcToSpreadButton?.addEventListener("click", alignOhlcToSpread);
+  alignOhlcToSpreadButton?.addEventListener("click", alignSpreadToOhlc);
   resetButton?.addEventListener("click", () => {
     if (!currentKey) return;
     delete customRangeByKey[currentKey];
@@ -5177,7 +5177,7 @@ JS = """
   spreadStartInput?.addEventListener("change", setSpreadCustomMode);
   spreadEndInput?.addEventListener("change", setSpreadCustomMode);
   spreadExactDateInput?.addEventListener("change", setSpreadExactMode);
-  alignSpreadToOhlcButton?.addEventListener("click", alignSpreadToOhlc);
+  alignSpreadToOhlcButton?.addEventListener("click", alignOhlcToSpread);
 
   svg.addEventListener("mousedown", (event) => {
     if (!currentKey) return;

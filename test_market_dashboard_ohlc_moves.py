@@ -237,8 +237,8 @@ def test_ohlc_and_spread_ranges_can_be_aligned_bidirectionally() -> None:
     assert "const currentSpreadVisibleRange = () =>" in JS
     assert "const alignOhlcToSpread = () =>" in JS
     assert "const alignSpreadToOhlc = () =>" in JS
-    assert 'alignOhlcToSpreadButton?.addEventListener("click", alignOhlcToSpread);' in JS
-    assert 'alignSpreadToOhlcButton?.addEventListener("click", alignSpreadToOhlc);' in JS
+    assert 'alignOhlcToSpreadButton?.addEventListener("click", alignSpreadToOhlc);' in JS
+    assert 'alignSpreadToOhlcButton?.addEventListener("click", alignOhlcToSpread);' in JS
     assert "customRangeByKey[key] = { start: range.start, end: range.end };" in JS
     assert "spreadStartInput.value = range.start;" in JS
     assert "spreadEndInput.value = range.end;" in JS
