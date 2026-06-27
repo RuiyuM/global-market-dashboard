@@ -554,12 +554,11 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
                     latest_error = f"Trading Economics latest failed: {exc}"
             elif source_kind == "investing+tradingeconomics":
                 investing_spec = INVESTING_BOND_SPECS[f"JP{source_key}"]
-                if path.exists():
-                    rows = read_ohlc(path)
-                elif series_spec.local_file and (LOCAL_DATA / series_spec.local_file).exists():
+                rows = []
+                if series_spec.local_file and (LOCAL_DATA / series_spec.local_file).exists():
                     rows = read_ohlc(LOCAL_DATA / series_spec.local_file)
-                else:
-                    rows = []
+                if path.exists():
+                    rows = merge_ohlc_rows(rows, read_ohlc(path))
                 try:
                     investing_rows = rows_from_investing_html(fetch_investing_html(investing_spec, start, end))
                     rows = merge_ohlc_rows(rows, investing_rows)

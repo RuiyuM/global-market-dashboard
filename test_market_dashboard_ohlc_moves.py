@@ -434,7 +434,14 @@ def test_japan_short_bills_fall_back_to_seed_when_investing_is_blocked(monkeypat
     )
     dashboard_dir = tmp_path / "dashboard-data"
     seed_dir = tmp_path / "seed-data"
+    dashboard_dir.mkdir()
     seed_dir.mkdir()
+    market_dashboard.write_ohlc(
+        dashboard_dir / "JP_1M.csv",
+        [
+            {"date": "2026-06-26", "timestamp": 1782432000, "open": 0.55, "high": 0.57, "low": 0.54, "close": 0.56},
+        ],
+    )
     market_dashboard.write_ohlc(
         seed_dir / "JP1M_INVESTING_1D_ohlc.csv",
         [
