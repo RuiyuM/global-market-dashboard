@@ -678,6 +678,56 @@ def test_korea_government_bonds_merge_investing_history_with_te_latest(monkeypat
     assert "Investing.com historical table + Trading Economics latest yield page" in (tmp_path / "KR_1Y.csv").read_text()
 
 
+def test_investing_only_russia_bonds_use_cache_and_te_when_investing_is_blocked(monkeypatch, tmp_path) -> None:
+    series_spec = SeriesSpec("RU_10Y", "俄罗斯10年国债", "bond", "investing", "RU10YT=RR", "RU_10Y.csv")
+    investing_spec = market_dashboard.InvestingSpec(
+        "RU10Y",
+        "23974",
+        "RU10YT=RR",
+        "russia-10-year-bond-yield-historical-data",
+        "Russia 10-Year Bond Yield Historical Data",
+        "RU10YR_INVESTING_1D_ohlc.csv",
+    )
+    for name in [
+        "WSCN_SPECS",
+        "YAHOO_SPECS",
+        "NIKKEI_SPECS",
+        "CHINA_BOND_SPECS",
+        "GERMANY_BOND_SPECS",
+        "JAPAN_BOND_SPECS",
+        "KOREA_BOND_SPECS",
+    ]:
+        monkeypatch.setattr(market_dashboard, name, [])
+    monkeypatch.setattr(market_dashboard, "INVESTING_SPECS", [(series_spec, investing_spec)])
+    monkeypatch.setattr(market_dashboard, "DASHBOARD_DATA", tmp_path)
+    market_dashboard.write_ohlc(
+        tmp_path / "RU_10Y.csv",
+        [
+            {"date": "2026-06-23", "timestamp": 1782172800, "open": 15.70, "high": 15.70, "low": 15.70, "close": 15.70},
+        ],
+    )
+    monkeypatch.setattr(
+        market_dashboard,
+        "fetch_investing_html",
+        lambda spec, start, end: (_ for _ in ()).throw(RuntimeError("HTTP Error 403: Forbidden")),
+    )
+    monkeypatch.setattr(
+        market_dashboard,
+        "fetch_tradingeconomics_country_latest_row",
+        lambda country_slug, slug: {"date": "2026-06-26", "timestamp": 1782432000, "open": 16.28, "high": 16.28, "low": 16.28, "close": 16.28},
+    )
+
+    records = market_dashboard.fetch_all(SimpleNamespace(wscn_count=500, lookback_days=90, sleep_sec=0))
+
+    assert records[0]["status"] == "ok"
+    assert records[0]["rows"] == "2"
+    assert records[0]["latest"] == "2026-06-26"
+    assert "Investing.com history failed: HTTP Error 403: Forbidden" in records[0]["error"]
+    rows = market_dashboard.read_ohlc(tmp_path / "RU_10Y.csv")
+    assert [row["date"].isoformat() for row in rows] == ["2026-06-23", "2026-06-26"]
+    assert rows[-1]["close"] == 16.28
+
+
 def test_cross_checked_china_germany_korea_bond_tenors_are_configured() -> None:
     china_sources = {series_spec.key: series_spec.source for series_spec, _, _ in CHINA_BOND_SPECS}
     germany_sources = {series_spec.key: series_spec.source for series_spec, _, _ in GERMANY_BOND_SPECS}

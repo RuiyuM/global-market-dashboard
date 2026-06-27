@@ -171,6 +171,11 @@ INVESTING_SPECS: list[tuple[SeriesSpec, InvestingSpec]] = [
     ),
 ]
 
+INVESTING_TE_FALLBACKS = {
+    "RU_2Y": ("russia", "2-year-note-yield"),
+    "RU_10Y": ("russia", "government-bond-yield"),
+}
+
 
 MACRO_SPECS = [
     SeriesSpec("DXY", "美元指数", "macro", "yahoo", "DX-Y.NYB", "DXY.csv", None),
@@ -683,11 +688,34 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
             "error": "",
         }
         try:
-            rows = rows_from_investing_html(fetch_investing_html(investing_spec, start, end))
-            if investing_spec.fetch_mode == "page" and path.exists():
-                rows = merge_ohlc_rows(read_ohlc(path), rows)
-            write_ohlc(path, rows)
-            record.update({"status": "ok" if rows else "empty", "rows": str(len(rows)), "latest": rows[-1]["date"] if rows else ""})
+            rows = read_ohlc(path) if path.exists() else []
+            latest_error = ""
+            try:
+                investing_rows = rows_from_investing_html(fetch_investing_html(investing_spec, start, end))
+                rows = merge_ohlc_rows(rows, investing_rows)
+            except Exception as exc:
+                latest_error = f"Investing.com history failed: {exc}"
+            fallback = INVESTING_TE_FALLBACKS.get(series_spec.key)
+            if fallback:
+                try:
+                    latest_row = fetch_tradingeconomics_country_latest_row(*fallback)
+                    if latest_row and (not rows or row_date_key(latest_row) > row_date_key(rows[-1])):
+                        rows = merge_ohlc_rows(rows, [latest_row])
+                except Exception as exc:
+                    latest_error = f"{latest_error}; Trading Economics latest failed: {exc}" if latest_error else f"Trading Economics latest failed: {exc}"
+            for row in rows:
+                row["source_symbol"] = series_spec.symbol
+                row["source"] = (
+                    "Investing.com historical table + Trading Economics latest yield page"
+                    if fallback
+                    else "Investing.com historical table"
+                )
+            if rows:
+                write_ohlc(path, rows)
+            status = "ok" if rows else "error" if latest_error else "empty"
+            record.update({"status": status, "rows": str(len(rows)), "latest": rows[-1]["date"] if rows else ""})
+            if latest_error:
+                record["error"] = latest_error
         except Exception as exc:
             record.update({"status": "error", "error": str(exc)})
         records.append(record)
@@ -1651,7 +1679,7 @@ def build_snapshot(fetch_records: list[dict[str, str]], *, fetch_policy_news: bo
             "7D/30D 波动率 = 对应窗口相邻交易观测的平均绝对日变化；债券单位 bp/日，股指和汇率单位 %/日。",
             f"三币种资金流向直接调用用户提供代码：{USER_FX_FLOW_CODE}",
             "derived = 本地公式而非外部供应商：CNY_BASE=1；债券曲线=10Y-2Y；CNYJPY=1/JPYCNY；RUB 交叉汇率优先使用具备历史深度的 Yahoo 直接报价，历史不足才用 USDCNY/USDRUB 或 USDJPY/USDRUB 派生并在 source_audit 里比对最新直接报价。",
-            "美债扩展期限优先使用 WSCN 日线；中国国债使用 ChinaMoney/CFETS 官方收盘收益率曲线并按缺口回填历史；德国2Y/5Y/7Y/10Y/30Y使用 Bundesbank 当前联邦证券官方日频 CSV，德国1Y/3Y使用 Bundesbank 官方 Svensson 期限结构日频 CSV，德国3M/6M暂无稳定官方日频二级市场源，暂用 Trading Economics 最新页；日本1M/3M/6M 使用 Investing.com 历史表并在有更新日期时合并 Trading Economics 最新页；日本1Y/2Y/3Y/5Y/7Y/10Y/30Y 使用日本财务省 MOF 官方收益率曲线作为历史底座并合并 Trading Economics 最新页；韩国1M/3M/6M 使用 SMBS KORIBOR 作为短端资金代理而非政府债，韩国3M/6M可由 BOK ECOS 交叉验证，韩国1Y/2Y/3Y/5Y/10Y/30Y 使用 Investing.com 历史表并在有更新日期时合并 Trading Economics 最新页。",
+            "美债扩展期限优先使用 WSCN 日线；中国国债使用 ChinaMoney/CFETS 官方收盘收益率曲线并按缺口回填历史；德国2Y/5Y/7Y/10Y/30Y使用 Bundesbank 当前联邦证券官方日频 CSV，德国1Y/3Y使用 Bundesbank 官方 Svensson 期限结构日频 CSV，德国3M/6M暂无稳定官方日频二级市场源，暂用 Trading Economics 最新页；日本1M/3M/6M 使用 Investing.com 历史表并在有更新日期时合并 Trading Economics 最新页；日本1Y/2Y/3Y/5Y/7Y/10Y/30Y 使用日本财务省 MOF 官方收益率曲线作为历史底座并合并 Trading Economics 最新页；韩国1M/3M/6M 使用 SMBS KORIBOR 作为短端资金代理而非政府债，韩国3M/6M可由 BOK ECOS 交叉验证，韩国1Y/2Y/3Y/5Y/10Y/30Y 使用 Investing.com 历史表并在有更新日期时合并 Trading Economics 最新页；俄罗斯2Y/10Y 在 Investing.com 被云服务器拦截时保留历史缓存并合并 Trading Economics 最新页。",
             "宏观指标使用 Yahoo Finance 日线：美元指数 DX-Y.NYB、VIX ^VIX、黄金 GC=F、WTI 原油 CL=F。",
             "政策新闻雷达只做加息、降息、维持利率相关文本筛选；抓取或 AI 分类不可用时退回本地规则解析。",
         ],
