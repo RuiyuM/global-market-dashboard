@@ -27,6 +27,11 @@ from fetch_investing_bond_ohlc import (
     fetch_html as fetch_investing_html,
     rows_from_html as rows_from_investing_html,
 )
+from fetch_japan_bond_ohlc import (
+    TRADINGECONOMICS_SLUGS,
+    fetch_mof_jgb_rows_by_tenor,
+    fetch_tradingeconomics_latest_row,
+)
 from policy_news import build_policy_news_snapshot
 
 
@@ -85,55 +90,21 @@ WSCN_SPECS = [
 ]
 
 
+JAPAN_BOND_SPECS: list[tuple[SeriesSpec, str, str]] = [
+    (SeriesSpec("JP_1M", "日本1个月国债", "bond", "tradingeconomics", "GJGB1M", "JP_1M.csv", "JP1M_TE_1D_ohlc.csv"), "tradingeconomics", TRADINGECONOMICS_SLUGS["1M"]),
+    (SeriesSpec("JP_3M", "日本3个月国债", "bond", "tradingeconomics", "GJGB3M", "JP_3M.csv", "JP3M_TE_1D_ohlc.csv"), "tradingeconomics", TRADINGECONOMICS_SLUGS["3M"]),
+    (SeriesSpec("JP_6M", "日本6个月国债", "bond", "tradingeconomics", "GJGB6M", "JP_6M.csv", "JP6M_TE_1D_ohlc.csv"), "tradingeconomics", TRADINGECONOMICS_SLUGS["6M"]),
+    (SeriesSpec("JP_1Y", "日本1年国债", "bond", "mof+tradingeconomics", "MOF:JGB:1Y / GJGB1Y", "JP_1Y.csv", "JP1YR_MOF_1D_ohlc.csv"), "mof+tradingeconomics", "1Y"),
+    (SeriesSpec("JP_2Y", "日本2年国债", "bond", "mof+tradingeconomics", "MOF:JGB:2Y / GJGB2Y", "JP_2Y.csv", "JP2YR_MOF_1D_ohlc.csv"), "mof+tradingeconomics", "2Y"),
+    (SeriesSpec("JP_3Y", "日本3年国债", "bond", "mof+tradingeconomics", "MOF:JGB:3Y / GJGB3Y", "JP_3Y.csv", "JP3YR_MOF_1D_ohlc.csv"), "mof+tradingeconomics", "3Y"),
+    (SeriesSpec("JP_5Y", "日本5年国债", "bond", "mof+tradingeconomics", "MOF:JGB:5Y / GJGB5Y", "JP_5Y.csv", "JP5YR_MOF_1D_ohlc.csv"), "mof+tradingeconomics", "5Y"),
+    (SeriesSpec("JP_7Y", "日本7年国债", "bond", "mof+tradingeconomics", "MOF:JGB:7Y / GJGB7Y", "JP_7Y.csv", "JP7YR_MOF_1D_ohlc.csv"), "mof+tradingeconomics", "7Y"),
+    (SeriesSpec("JP_10Y", "日本10年国债", "bond", "mof+tradingeconomics", "MOF:JGB:10Y / GJGB10Y", "JP_10Y.csv", "JP10YR_MOF_1D_ohlc.csv"), "mof+tradingeconomics", "10Y"),
+    (SeriesSpec("JP_30Y", "日本30年国债", "bond", "mof+tradingeconomics", "MOF:JGB:30Y / GJGB30Y", "JP_30Y.csv", "JP30YR_MOF_1D_ohlc.csv"), "mof+tradingeconomics", "30Y"),
+]
+
+
 INVESTING_SPECS: list[tuple[SeriesSpec, InvestingSpec]] = [
-    (
-        SeriesSpec("JP_1M", "日本1个月国债", "bond", "investing", "JP1MT=XX", "JP_1M.csv", "JP1M_INVESTING_1D_ohlc.csv"),
-        InvestingSpec(
-            "JP1M",
-            "208090",
-            "JP1MT=XX",
-            "japan-1-month-historical-data",
-            "Japan 1-Month Bond Yield Historical Data",
-            "JP1M_INVESTING_1D_ohlc.csv",
-            fetch_mode="page",
-        ),
-    ),
-    (
-        SeriesSpec("JP_3M", "日本3个月国债", "bond", "investing", "JP3MT=XX", "JP_3M.csv", "JP3M_INVESTING_1D_ohlc.csv"),
-        InvestingSpec("JP3M", "23890", "JP3MT=XX", "japan-3-month-bond-yield-historical-data", "Japan 3-Month Bond Yield Historical Data", "JP3M_INVESTING_1D_ohlc.csv"),
-    ),
-    (
-        SeriesSpec("JP_6M", "日本6个月国债", "bond", "investing", "JP6MT=XX", "JP_6M.csv", "JP6M_INVESTING_1D_ohlc.csv"),
-        InvestingSpec("JP6M", "23891", "JP6MT=XX", "japan-6-month-bond-yield-historical-data", "Japan 6-Month Bond Yield Historical Data", "JP6M_INVESTING_1D_ohlc.csv"),
-    ),
-    (
-        SeriesSpec("JP_1Y", "日本1年国债", "bond", "investing", "JP1YT=XX", "JP_1Y.csv", "JP1YR_INVESTING_1D_ohlc.csv"),
-        InvestingSpec("JP1Y", "23892", "JP1YT=XX", "japan-1-year-bond-yield-historical-data", "Japan 1-Year Bond Yield Historical Data", "JP1YR_INVESTING_1D_ohlc.csv"),
-    ),
-    (
-        SeriesSpec("JP_2Y", "日本2年国债", "bond", "investing", "JP2YT=XX", "JP_2Y.csv", "JP2YR_INVESTING_1D_ohlc.csv"),
-        InvestingSpec("JP2Y", "23893", "JP2YT=XX", "japan-2-year-bond-yield-historical-data", "Japan 2-Year Bond Yield Historical Data", "JP2YR_INVESTING_1D_ohlc.csv"),
-    ),
-    (
-        SeriesSpec("JP_3Y", "日本3年国债", "bond", "investing", "JP3YT=XX", "JP_3Y.csv", "JP3YR_INVESTING_1D_ohlc.csv"),
-        InvestingSpec("JP3Y", "23894", "JP3YT=XX", "japan-3-year-bond-yield-historical-data", "Japan 3-Year Bond Yield Historical Data", "JP3YR_INVESTING_1D_ohlc.csv"),
-    ),
-    (
-        SeriesSpec("JP_5Y", "日本5年国债", "bond", "investing", "JP5YT=XX", "JP_5Y.csv", "JP5YR_INVESTING_1D_ohlc.csv"),
-        InvestingSpec("JP5Y", "23896", "JP5YT=XX", "japan-5-year-bond-yield-historical-data", "Japan 5-Year Bond Yield Historical Data", "JP5YR_INVESTING_1D_ohlc.csv"),
-    ),
-    (
-        SeriesSpec("JP_7Y", "日本7年国债", "bond", "investing", "JP7YT=XX", "JP_7Y.csv", "JP7YR_INVESTING_1D_ohlc.csv"),
-        InvestingSpec("JP7Y", "23898", "JP7YT=XX", "japan-7-year-bond-yield-historical-data", "Japan 7-Year Bond Yield Historical Data", "JP7YR_INVESTING_1D_ohlc.csv"),
-    ),
-    (
-        SeriesSpec("JP_10Y", "日本10年国债", "bond", "investing", "JP10YT=RR", "JP_10Y.csv", "JP10YR_OTC_1D_ohlc.csv"),
-        InvestingSpec("JP10Y", "23901", "JP10YT=RR", "japan-10-year-bond-yield-historical-data", "Japan 10-Year Bond Yield Historical Data", "JP10YR_INVESTING_1D_ohlc.csv"),
-    ),
-    (
-        SeriesSpec("JP_30Y", "日本30年国债", "bond", "investing", "JP30YT=XX", "JP_30Y.csv", "JP30YR_INVESTING_1D_ohlc.csv"),
-        InvestingSpec("JP30Y", "23903", "JP30YT=XX", "japan-30-year-bond-yield-historical-data", "Japan 30-Year Bond Yield Historical Data", "JP30YR_INVESTING_1D_ohlc.csv"),
-    ),
     (
         SeriesSpec("DE_2Y", "德国2年国债", "bond", "investing", "DE2YT=RR", "DE_2Y.csv"),
         InvestingSpec("DE2Y", "23685", "DE2YT=RR", "germany-2-year-bond-yield-historical-data", "Germany 2-Year Bond Yield Historical Data", "DE2YR_INVESTING_1D_ohlc.csv"),
@@ -433,6 +404,61 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
         if args.sleep_sec:
             time.sleep(args.sleep_sec)
 
+    japan_mof_rows: dict[str, list[dict[str, Any]]] | None = None
+    for series_spec, source_kind, source_key in JAPAN_BOND_SPECS:
+        path = DASHBOARD_DATA / series_spec.cache_file
+        record = {
+            "key": series_spec.key,
+            "source": series_spec.source,
+            "symbol": series_spec.symbol,
+            "status": "pending",
+            "file": str(path),
+            "error": "",
+        }
+        try:
+            latest_error = ""
+            if source_kind == "mof":
+                if japan_mof_rows is None:
+                    japan_mof_rows = fetch_mof_jgb_rows_by_tenor()
+                rows = japan_mof_rows.get(source_key, [])
+            elif source_kind == "mof+tradingeconomics":
+                if japan_mof_rows is None:
+                    japan_mof_rows = fetch_mof_jgb_rows_by_tenor()
+                rows = list(japan_mof_rows.get(source_key, []))
+                if path.exists():
+                    rows = merge_ohlc_rows(rows, read_ohlc(path))
+                try:
+                    latest_row = fetch_tradingeconomics_latest_row(TRADINGECONOMICS_SLUGS[source_key])
+                    if latest_row:
+                        rows = merge_ohlc_rows(rows, [latest_row])
+                except Exception as exc:
+                    latest_error = f"Trading Economics latest failed: {exc}"
+            else:
+                rows = read_ohlc(path) if path.exists() else []
+                try:
+                    latest_row = fetch_tradingeconomics_latest_row(source_key)
+                    if latest_row:
+                        rows = merge_ohlc_rows(rows, [latest_row])
+                except Exception as exc:
+                    latest_error = f"Trading Economics latest failed: {exc}"
+            for row in rows:
+                row["source_symbol"] = series_spec.symbol
+                if source_kind == "mof":
+                    row["source"] = "Japan MOF official JGB yield curve"
+                elif source_kind == "mof+tradingeconomics":
+                    row["source"] = "Japan MOF official JGB yield curve + Trading Economics latest yield page"
+                else:
+                    row["source"] = "Trading Economics latest yield page"
+            write_ohlc(path, rows)
+            record.update({"status": "ok" if rows else "empty", "rows": str(len(rows)), "latest": rows[-1]["date"] if rows else ""})
+            if latest_error:
+                record["error"] = latest_error
+        except Exception as exc:
+            record.update({"status": "error", "error": str(exc)})
+        records.append(record)
+        if args.sleep_sec:
+            time.sleep(args.sleep_sec)
+
     for series_spec, investing_spec in INVESTING_SPECS:
         path = DASHBOARD_DATA / series_spec.cache_file
         record = {
@@ -552,7 +578,8 @@ def derived_difference(key: str, left: list[dict[str, Any]], right: list[dict[st
 
 def load_all_series() -> tuple[dict[str, list[dict[str, Any]]], dict[str, SeriesSpec]]:
     investing_series_specs = [series_spec for series_spec, _ in INVESTING_SPECS]
-    specs = {spec.key: spec for spec in [*WSCN_SPECS, *YAHOO_SPECS, *NIKKEI_SPECS, *investing_series_specs]}
+    japan_bond_series_specs = [series_spec for series_spec, _, _ in JAPAN_BOND_SPECS]
+    specs = {spec.key: spec for spec in [*WSCN_SPECS, *YAHOO_SPECS, *NIKKEI_SPECS, *japan_bond_series_specs, *investing_series_specs]}
     series = {key: read_series(spec) for key, spec in specs.items()}
 
     # Base currency and derived crosses.
@@ -1378,7 +1405,7 @@ def build_snapshot(fetch_records: list[dict[str, str]], *, fetch_policy_news: bo
             "7D/30D 波动率 = 对应窗口相邻交易观测的平均绝对日变化；债券单位 bp/日，股指和汇率单位 %/日。",
             f"三币种资金流向直接调用用户提供代码：{USER_FX_FLOW_CODE}",
             "derived = 本地公式而非外部供应商：CNY_BASE=1；债券曲线=10Y-2Y；CNYJPY=1/JPYCNY；RUB 交叉汇率优先使用具备历史深度的 Yahoo 直接报价，历史不足才用 USDCNY/USDRUB 或 USDJPY/USDRUB 派生并在 source_audit 里比对最新直接报价。",
-            "美债/中债扩展期限优先使用 WSCN 日线；日本扩展期限使用 Investing 市场日线，1Y+ 可用日本财务省 MOF 官方收益率曲线做口径校验，1M/3M/6M 不在 MOF 曲线内。",
+            "美债/中债扩展期限优先使用 WSCN 日线；日本1Y/2Y/3Y/5Y/7Y/10Y/30Y 使用日本财务省 MOF 官方收益率曲线作为历史底座并合并 Trading Economics 最新页；日本1M/3M/6M 使用 Trading Economics 最新页并按日合并本地缓存，WSCN/Investing 在服务器上不可作为日本主源。",
             "政策新闻雷达只做加息、降息、维持利率相关文本筛选；抓取或 AI 分类不可用时退回本地规则解析。",
         ],
     }

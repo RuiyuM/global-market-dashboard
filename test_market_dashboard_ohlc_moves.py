@@ -6,7 +6,7 @@ from __future__ import annotations
 from datetime import date
 
 from market_dashboard import COUNTRY_BOND_TENORS
-from market_dashboard import INVESTING_SPECS
+from market_dashboard import JAPAN_BOND_SPECS
 from market_dashboard import JS
 from market_dashboard import WSCN_SPECS
 from market_dashboard import SeriesSpec
@@ -244,9 +244,9 @@ def test_expanded_wscn_bond_tenors_feed_second_order_and_spreads() -> None:
     assert '"tenor": "7Y", "key": "CN_7Y", "label": "中国7年国债"' in html
 
 
-def test_japan_extra_bond_tenors_use_investing_not_stale_wscn() -> None:
+def test_japan_extra_bond_tenors_use_server_safe_sources_not_stale_wscn() -> None:
     wscn_keys = {spec.key for spec in WSCN_SPECS}
-    investing_keys = {series_spec.key for series_spec, _ in INVESTING_SPECS}
+    spec_by_key = {series_spec.key: series_spec for series_spec, _, _ in JAPAN_BOND_SPECS}
 
     assert {
         "JP_1M",
@@ -256,7 +256,18 @@ def test_japan_extra_bond_tenors_use_investing_not_stale_wscn() -> None:
         "JP_5Y",
         "JP_7Y",
         "JP_30Y",
-    } <= investing_keys
+    } <= set(spec_by_key)
+    assert {key: spec_by_key[key].source for key in ["JP_1M", "JP_3M", "JP_6M"]} == {
+        "JP_1M": "tradingeconomics",
+        "JP_3M": "tradingeconomics",
+        "JP_6M": "tradingeconomics",
+    }
+    assert {key: spec_by_key[key].source for key in ["JP_3Y", "JP_5Y", "JP_7Y", "JP_30Y"]} == {
+        "JP_3Y": "mof+tradingeconomics",
+        "JP_5Y": "mof+tradingeconomics",
+        "JP_7Y": "mof+tradingeconomics",
+        "JP_30Y": "mof+tradingeconomics",
+    }
     assert {
         "JP_1M",
         "JP_3M",
