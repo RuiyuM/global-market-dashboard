@@ -45,6 +45,9 @@ def test_snapshot_has_six_regions_and_no_secret_material() -> None:
     assert snapshot["model"] == DEFAULT_MODEL
     assert set(snapshot["regions"]) == {region["code"] for region in POLICY_REGIONS}
     assert all(region["items"] for region in snapshot["regions"].values())
+    for region in snapshot["regions"].values():
+        for item in region["items"]:
+            assert item["url"].startswith("https://")
     serialized = json.dumps(snapshot, ensure_ascii=False)
     assert "sk-" not in serialized
     assert "OPENAI_API_KEY" not in serialized
