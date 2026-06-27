@@ -2782,12 +2782,10 @@ def render_html(snapshot: dict[str, Any]) -> str:
             '<div class="date-tools spread-date-tools">',
             '<label>区间 <input type="date" id="spread-start-date"></label>',
             '<label>到 <input type="date" id="spread-end-date"></label>',
-            '<button type="button" id="spread-apply-range">计算</button>',
             '<label>日期 <input type="date" id="spread-exact-date"></label>',
-            '<button type="button" id="spread-exact-button">查看日期</button>',
             "</div>",
             "</div>",
-            '<div class="spread-result" id="spread-result">选择国家、长短端和日期后计算利差。</div>',
+            '<div class="spread-result" id="spread-result">选择国家、长短端和日期后自动显示利差。</div>',
             '<div class="chart-shell spread-chart-shell">',
             '<svg id="spread-chart" viewBox="0 0 980 260" role="img" aria-label="利差曲线"></svg>',
             "</div>",
@@ -3473,9 +3471,7 @@ JS = """
   const spreadWindowButtons = Array.from(document.querySelectorAll(".spread-window"));
   const spreadStartInput = document.getElementById("spread-start-date");
   const spreadEndInput = document.getElementById("spread-end-date");
-  const spreadApplyRangeButton = document.getElementById("spread-apply-range");
   const spreadExactDateInput = document.getElementById("spread-exact-date");
-  const spreadExactButton = document.getElementById("spread-exact-button");
   const spreadResult = document.getElementById("spread-result");
   const spreadChart = document.getElementById("spread-chart");
   const windowSteps = [90, 180, 360];
@@ -4608,16 +4604,19 @@ JS = """
       renderSpread();
     });
   });
-  spreadApplyRangeButton?.addEventListener("click", () => {
+  const setSpreadCustomMode = () => {
     spreadMode = "custom";
     spreadWindowButtons.forEach((button) => button.classList.remove("active"));
     renderSpread();
-  });
-  spreadExactButton?.addEventListener("click", () => {
+  };
+  const setSpreadExactMode = () => {
     spreadMode = "exact";
     spreadWindowButtons.forEach((button) => button.classList.remove("active"));
     renderSpread();
-  });
+  };
+  spreadStartInput?.addEventListener("change", setSpreadCustomMode);
+  spreadEndInput?.addEventListener("change", setSpreadCustomMode);
+  spreadExactDateInput?.addEventListener("change", setSpreadExactMode);
 
   svg.addEventListener("mousedown", (event) => {
     if (!currentKey) return;
