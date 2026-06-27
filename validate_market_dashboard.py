@@ -27,6 +27,8 @@ VOL_RANKING_ROWS = 6
 INLINE_VOL_COUNT = len(COUNTRIES) * len(FIELDS)
 MACRO_KEYS = {"DXY", "VIX", "GOLD", "USOIL"}
 ONE_YEAR_BOND_KEYS = {"US_1Y": "美国", "CN_1Y": "中国", "JP_1Y": "日本", "DE_1Y": "德国", "KR_1Y": "韩国"}
+KOREA_GOVERNMENT_HISTORY_KEYS = {"KR_1Y", "KR_2Y", "KR_3Y", "KR_5Y", "KR_10Y", "KR_30Y"}
+KOREA_GOVERNMENT_MIN_ROWS = 250
 EXTENDED_BOND_KEYS = {
     "US_1M": "美国",
     "US_3M": "美国",
@@ -414,6 +416,14 @@ def main() -> int:
             errors.append(f"bad macro row placement: {key} {row.get('country')} {row.get('group')}")
         if f'data-ohlc-key="{key}"' not in html:
             errors.append(f"missing macro OHLC row marker: {key}")
+    for key in KOREA_GOVERNMENT_HISTORY_KEYS:
+        row = row_by_key.get(key)
+        if not row:
+            errors.append(f"missing Korea government bond row: {key}")
+            continue
+        ohlc = row.get("ohlc") or []
+        if len(ohlc) < KOREA_GOVERNMENT_MIN_ROWS:
+            errors.append(f"{key} has too few history rows: {len(ohlc)}")
     curve_rows = [row for row in second_order if row.get("group") == "债券曲线"]
     if len(curve_rows) != BOND_CURVE_ROWS:
         errors.append(f"bond curve row count mismatch: {len(curve_rows)}")

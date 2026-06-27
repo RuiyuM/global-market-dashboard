@@ -154,6 +154,14 @@ BOND_SPECS = {
         header="Russia 10-Year Bond Yield Historical Data",
         output_name="RU10YR_INVESTING_1D_ohlc.csv",
     ),
+    "KR1Y": BondSpec(
+        key="KR1Y",
+        instrument_id="29294",
+        source_symbol="KR1YT=RR",
+        slug="south-korea-1-year-bond-yield-historical-data",
+        header="South Korea 1-Year Bond Yield Historical Data",
+        output_name="KR1YR_INVESTING_1D_ohlc.csv",
+    ),
     "KR2Y": BondSpec(
         key="KR2Y",
         instrument_id="29295",
@@ -162,6 +170,22 @@ BOND_SPECS = {
         header="South Korea 2-Year Bond Yield Historical Data",
         output_name="KR2YR_INVESTING_1D_ohlc.csv",
     ),
+    "KR3Y": BondSpec(
+        key="KR3Y",
+        instrument_id="29296",
+        source_symbol="KR3YT=RR",
+        slug="south-korea-3-year-bond-yield-historical-data",
+        header="South Korea 3-Year Bond Yield Historical Data",
+        output_name="KR3YR_INVESTING_1D_ohlc.csv",
+    ),
+    "KR5Y": BondSpec(
+        key="KR5Y",
+        instrument_id="29298",
+        source_symbol="KR5YT=RR",
+        slug="south-korea-5-year-bond-yield-historical-data",
+        header="South Korea 5-Year Bond Yield Historical Data",
+        output_name="KR5YR_INVESTING_1D_ohlc.csv",
+    ),
     "KR10Y": BondSpec(
         key="KR10Y",
         instrument_id="29292",
@@ -169,6 +193,14 @@ BOND_SPECS = {
         slug="south-korea-10-year-bond-yield-historical-data",
         header="South Korea 10-Year Bond Yield Historical Data",
         output_name="KR10YR_INVESTING_1D_ohlc.csv",
+    ),
+    "KR30Y": BondSpec(
+        key="KR30Y",
+        instrument_id="1052525",
+        source_symbol="KR30YT=RR",
+        slug="south-korea-30-year-historical-data",
+        header="South Korea 30-Year Bond Yield Historical Data",
+        output_name="KR30YR_INVESTING_1D_ohlc.csv",
     ),
     "RU_EQUITY": BondSpec(
         key="RU_EQUITY",

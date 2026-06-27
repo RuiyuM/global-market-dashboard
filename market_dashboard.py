@@ -147,12 +147,12 @@ KOREA_BOND_SPECS: list[tuple[SeriesSpec, str, str]] = [
     (SeriesSpec("KR_1M", "韩国1个月短端(KORIBOR)", "bond", "smbs-koribor", "SMBS:KORIBOR:1M", "KR_1M.csv"), "smbs-koribor", "1M"),
     (SeriesSpec("KR_3M", "韩国3个月短端(KORIBOR)", "bond", "smbs-koribor", "SMBS:KORIBOR:3M", "KR_3M.csv"), "smbs-koribor", "3M"),
     (SeriesSpec("KR_6M", "韩国6个月短端(KORIBOR)", "bond", "smbs-koribor", "SMBS:KORIBOR:6M", "KR_6M.csv"), "smbs-koribor", "6M"),
-    (SeriesSpec("KR_1Y", "韩国1年国债", "bond", "tradingeconomics", "KR:TE:1Y", "KR_1Y.csv"), "tradingeconomics:south-korea", TRADING_ECONOMICS_COUNTRY_SLUGS["south-korea"]["1Y"]),
-    (SeriesSpec("KR_2Y", "韩国2年国债", "bond", "tradingeconomics", "KR:TE:2Y", "KR_2Y.csv"), "tradingeconomics:south-korea", TRADING_ECONOMICS_COUNTRY_SLUGS["south-korea"]["2Y"]),
-    (SeriesSpec("KR_3Y", "韩国3年国债", "bond", "tradingeconomics", "KR:TE:3Y", "KR_3Y.csv"), "tradingeconomics:south-korea", TRADING_ECONOMICS_COUNTRY_SLUGS["south-korea"]["3Y"]),
-    (SeriesSpec("KR_5Y", "韩国5年国债", "bond", "tradingeconomics", "KR:TE:5Y", "KR_5Y.csv"), "tradingeconomics:south-korea", TRADING_ECONOMICS_COUNTRY_SLUGS["south-korea"]["5Y"]),
-    (SeriesSpec("KR_10Y", "韩国10年国债", "bond", "tradingeconomics", "KR:TE:10Y", "KR_10Y.csv"), "tradingeconomics:south-korea", TRADING_ECONOMICS_COUNTRY_SLUGS["south-korea"]["10Y"]),
-    (SeriesSpec("KR_30Y", "韩国30年国债", "bond", "tradingeconomics", "KR:TE:30Y", "KR_30Y.csv"), "tradingeconomics:south-korea", TRADING_ECONOMICS_COUNTRY_SLUGS["south-korea"]["30Y"]),
+    (SeriesSpec("KR_1Y", "韩国1年国债", "bond", "investing+tradingeconomics", "KR1YT=RR / KR:TE:1Y", "KR_1Y.csv", "KR1YR_INVESTING_1D_ohlc.csv"), "investing+tradingeconomics", "1Y"),
+    (SeriesSpec("KR_2Y", "韩国2年国债", "bond", "investing+tradingeconomics", "KR2YT=RR / KR:TE:2Y", "KR_2Y.csv", "KR2YR_INVESTING_1D_ohlc.csv"), "investing+tradingeconomics", "2Y"),
+    (SeriesSpec("KR_3Y", "韩国3年国债", "bond", "investing+tradingeconomics", "KR3YT=RR / KR:TE:3Y", "KR_3Y.csv", "KR3YR_INVESTING_1D_ohlc.csv"), "investing+tradingeconomics", "3Y"),
+    (SeriesSpec("KR_5Y", "韩国5年国债", "bond", "investing+tradingeconomics", "KR5YT=RR / KR:TE:5Y", "KR_5Y.csv", "KR5YR_INVESTING_1D_ohlc.csv"), "investing+tradingeconomics", "5Y"),
+    (SeriesSpec("KR_10Y", "韩国10年国债", "bond", "investing+tradingeconomics", "KR10YT=RR / KR:TE:10Y", "KR_10Y.csv", "KR10YR_INVESTING_1D_ohlc.csv"), "investing+tradingeconomics", "10Y"),
+    (SeriesSpec("KR_30Y", "韩国30年国债", "bond", "investing+tradingeconomics", "KR30YT=RR / KR:TE:30Y", "KR_30Y.csv", "KR30YR_INVESTING_1D_ohlc.csv"), "investing+tradingeconomics", "30Y"),
 ]
 
 
@@ -553,6 +553,24 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
                 if korea_koribor_rows is None:
                     korea_koribor_rows = fetch_smbs_koribor_rows_by_tenor(start, end)
                 rows = merge_ohlc_rows(rows, korea_koribor_rows.get(source_key, []))
+            elif source_kind == "investing+tradingeconomics":
+                investing_spec = INVESTING_BOND_SPECS[f"KR{source_key}"]
+                if series_spec.local_file and (LOCAL_DATA / series_spec.local_file).exists():
+                    rows = merge_ohlc_rows(rows, read_ohlc(LOCAL_DATA / series_spec.local_file))
+                try:
+                    investing_rows = rows_from_investing_html(fetch_investing_html(investing_spec, start, end))
+                    rows = merge_ohlc_rows(rows, investing_rows)
+                except Exception as exc:
+                    latest_error = f"Investing.com history failed: {exc}"
+                try:
+                    latest_row = fetch_tradingeconomics_country_latest_row(
+                        "south-korea",
+                        TRADING_ECONOMICS_COUNTRY_SLUGS["south-korea"][source_key],
+                    )
+                    if latest_row and (not rows or row_date_key(latest_row) > row_date_key(rows[-1])):
+                        rows = merge_ohlc_rows(rows, [latest_row])
+                except Exception as exc:
+                    latest_error = f"{latest_error}; Trading Economics latest failed: {exc}" if latest_error else f"Trading Economics latest failed: {exc}"
             else:
                 country_slug = source_kind.split(":", 1)[1]
                 try:
@@ -563,7 +581,12 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
                     latest_error = f"Trading Economics latest failed: {exc}"
             for row in rows:
                 row["source_symbol"] = series_spec.symbol
-                row["source"] = "SMBS KORIBOR money-market fixing; short-end proxy, not government bond" if source_kind == "smbs-koribor" else "Trading Economics latest yield page"
+                if source_kind == "smbs-koribor":
+                    row["source"] = "SMBS KORIBOR money-market fixing; short-end proxy, not government bond"
+                elif source_kind == "investing+tradingeconomics":
+                    row["source"] = "Investing.com historical table + Trading Economics latest yield page"
+                else:
+                    row["source"] = "Trading Economics latest yield page"
             write_ohlc(path, rows)
             record.update({"status": "ok" if rows else "empty", "rows": str(len(rows)), "latest": rows[-1]["date"] if rows else ""})
             if latest_error:
@@ -1628,7 +1651,7 @@ def build_snapshot(fetch_records: list[dict[str, str]], *, fetch_policy_news: bo
             "7D/30D 波动率 = 对应窗口相邻交易观测的平均绝对日变化；债券单位 bp/日，股指和汇率单位 %/日。",
             f"三币种资金流向直接调用用户提供代码：{USER_FX_FLOW_CODE}",
             "derived = 本地公式而非外部供应商：CNY_BASE=1；债券曲线=10Y-2Y；CNYJPY=1/JPYCNY；RUB 交叉汇率优先使用具备历史深度的 Yahoo 直接报价，历史不足才用 USDCNY/USDRUB 或 USDJPY/USDRUB 派生并在 source_audit 里比对最新直接报价。",
-            "美债扩展期限优先使用 WSCN 日线；中国国债使用 ChinaMoney/CFETS 官方收盘收益率曲线并按缺口回填历史；德国2Y/5Y/7Y/10Y/30Y使用 Bundesbank 当前联邦证券官方日频 CSV，德国1Y/3Y使用 Bundesbank 官方 Svensson 期限结构日频 CSV，德国3M/6M暂无稳定官方日频二级市场源，暂用 Trading Economics 最新页；日本1M/3M/6M 使用 Investing.com 历史表并在有更新日期时合并 Trading Economics 最新页；日本1Y/2Y/3Y/5Y/7Y/10Y/30Y 使用日本财务省 MOF 官方收益率曲线作为历史底座并合并 Trading Economics 最新页；韩国1M/3M/6M 使用 SMBS KORIBOR 作为短端资金代理而非政府债，韩国3M/6M可由 BOK ECOS 交叉验证，韩国1Y以上使用 Trading Economics 最新页并按日合并本地缓存。",
+            "美债扩展期限优先使用 WSCN 日线；中国国债使用 ChinaMoney/CFETS 官方收盘收益率曲线并按缺口回填历史；德国2Y/5Y/7Y/10Y/30Y使用 Bundesbank 当前联邦证券官方日频 CSV，德国1Y/3Y使用 Bundesbank 官方 Svensson 期限结构日频 CSV，德国3M/6M暂无稳定官方日频二级市场源，暂用 Trading Economics 最新页；日本1M/3M/6M 使用 Investing.com 历史表并在有更新日期时合并 Trading Economics 最新页；日本1Y/2Y/3Y/5Y/7Y/10Y/30Y 使用日本财务省 MOF 官方收益率曲线作为历史底座并合并 Trading Economics 最新页；韩国1M/3M/6M 使用 SMBS KORIBOR 作为短端资金代理而非政府债，韩国3M/6M可由 BOK ECOS 交叉验证，韩国1Y/2Y/3Y/5Y/10Y/30Y 使用 Investing.com 历史表并在有更新日期时合并 Trading Economics 最新页。",
             "宏观指标使用 Yahoo Finance 日线：美元指数 DX-Y.NYB、VIX ^VIX、黄金 GC=F、WTI 原油 CL=F。",
             "政策新闻雷达只做加息、降息、维持利率相关文本筛选；抓取或 AI 分类不可用时退回本地规则解析。",
         ],

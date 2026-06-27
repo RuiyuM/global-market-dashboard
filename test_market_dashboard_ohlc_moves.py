@@ -618,6 +618,63 @@ def test_korea_short_end_koribor_history_is_shared_across_tenors(monkeypatch, tm
     assert market_dashboard.read_ohlc(tmp_path / "KR_3M.csv")[0]["close"] == 3.01
 
 
+def test_korea_government_bonds_merge_investing_history_with_te_latest(monkeypatch, tmp_path) -> None:
+    series_spec = SeriesSpec(
+        "KR_1Y",
+        "韩国1年国债",
+        "bond",
+        "investing+tradingeconomics",
+        "KR1YT=RR / KR:TE:1Y",
+        "KR_1Y.csv",
+        "KR1YR_INVESTING_1D_ohlc.csv",
+    )
+    for name in [
+        "WSCN_SPECS",
+        "YAHOO_SPECS",
+        "NIKKEI_SPECS",
+        "CHINA_BOND_SPECS",
+        "GERMANY_BOND_SPECS",
+        "JAPAN_BOND_SPECS",
+        "INVESTING_SPECS",
+    ]:
+        monkeypatch.setattr(market_dashboard, name, [])
+    monkeypatch.setattr(market_dashboard, "KOREA_BOND_SPECS", [(series_spec, "investing+tradingeconomics", "1Y")])
+    monkeypatch.setattr(market_dashboard, "DASHBOARD_DATA", tmp_path)
+    monkeypatch.setattr(market_dashboard, "LOCAL_DATA", tmp_path / "empty-seed")
+    monkeypatch.setattr(market_dashboard, "fetch_investing_html", lambda spec, start, end: "<html></html>")
+    monkeypatch.setattr(
+        market_dashboard,
+        "rows_from_investing_html",
+        lambda html: [
+            {"date": "2026-06-24", "timestamp": 1782259200, "open": 3.42, "high": 3.46, "low": 3.40, "close": 3.44},
+            {"date": "2026-06-25", "timestamp": 1782345600, "open": 3.44, "high": 3.48, "low": 3.41, "close": 3.45},
+        ],
+    )
+    monkeypatch.setattr(
+        market_dashboard,
+        "fetch_tradingeconomics_country_latest_row",
+        lambda country_slug, slug: {"date": "2026-06-26", "timestamp": 1782432000, "open": 3.47, "high": 3.49, "low": 3.44, "close": 3.46},
+    )
+
+    records = market_dashboard.fetch_all(SimpleNamespace(wscn_count=500, lookback_days=90, sleep_sec=0))
+
+    assert records == [
+        {
+            "key": "KR_1Y",
+            "source": "investing+tradingeconomics",
+            "symbol": "KR1YT=RR / KR:TE:1Y",
+            "status": "ok",
+            "file": str(tmp_path / "KR_1Y.csv"),
+            "error": "",
+            "rows": "3",
+            "latest": "2026-06-26",
+        }
+    ]
+    rows = market_dashboard.read_ohlc(tmp_path / "KR_1Y.csv")
+    assert [row["date"].isoformat() for row in rows] == ["2026-06-24", "2026-06-25", "2026-06-26"]
+    assert "Investing.com historical table + Trading Economics latest yield page" in (tmp_path / "KR_1Y.csv").read_text()
+
+
 def test_cross_checked_china_germany_korea_bond_tenors_are_configured() -> None:
     china_sources = {series_spec.key: series_spec.source for series_spec, _, _ in CHINA_BOND_SPECS}
     germany_sources = {series_spec.key: series_spec.source for series_spec, _, _ in GERMANY_BOND_SPECS}
@@ -676,12 +733,24 @@ def test_cross_checked_china_germany_korea_bond_tenors_are_configured() -> None:
         "KR_1M": "smbs-koribor",
         "KR_3M": "smbs-koribor",
         "KR_6M": "smbs-koribor",
-        "KR_1Y": "tradingeconomics",
-        "KR_2Y": "tradingeconomics",
-        "KR_3Y": "tradingeconomics",
-        "KR_5Y": "tradingeconomics",
-        "KR_10Y": "tradingeconomics",
-        "KR_30Y": "tradingeconomics",
+        "KR_1Y": "investing+tradingeconomics",
+        "KR_2Y": "investing+tradingeconomics",
+        "KR_3Y": "investing+tradingeconomics",
+        "KR_5Y": "investing+tradingeconomics",
+        "KR_10Y": "investing+tradingeconomics",
+        "KR_30Y": "investing+tradingeconomics",
+    }
+    assert {
+        key: (spec.instrument_id, spec.source_symbol, spec.slug)
+        for key, spec in market_dashboard.INVESTING_BOND_SPECS.items()
+        if key in {"KR1Y", "KR2Y", "KR3Y", "KR5Y", "KR10Y", "KR30Y"}
+    } == {
+        "KR1Y": ("29294", "KR1YT=RR", "south-korea-1-year-bond-yield-historical-data"),
+        "KR2Y": ("29295", "KR2YT=RR", "south-korea-2-year-bond-yield-historical-data"),
+        "KR3Y": ("29296", "KR3YT=RR", "south-korea-3-year-bond-yield-historical-data"),
+        "KR5Y": ("29298", "KR5YT=RR", "south-korea-5-year-bond-yield-historical-data"),
+        "KR10Y": ("29292", "KR10YT=RR", "south-korea-10-year-bond-yield-historical-data"),
+        "KR30Y": ("1052525", "KR30YT=RR", "south-korea-30-year-historical-data"),
     }
     assert COUNTRY_BOND_TENORS["KR"] == [
         ("1M", "KR_1M"),
