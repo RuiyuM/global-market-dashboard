@@ -87,6 +87,71 @@ def test_ohlc_zoom_buttons_use_requested_direction() -> None:
     assert 'zoomOutButton?.addEventListener("click", () => zoomChart(-1));' in JS
 
 
+def test_ohlc_supports_custom_range_and_exact_date_controls() -> None:
+    assert 'id="ohlc-start-date"' in render_html(
+        {
+            "countries": [],
+            "volatility_rankings": {"bond": [], "equity": [], "fx": []},
+            "fx_rank_details": {},
+            "second_order_monitor": [],
+            "fx_flows": [],
+            "series_status": [],
+            "notes": [],
+            "generated_at": "2026-06-26T00:00:00",
+        }
+    )
+    assert "const customRangeByKey = {};" in JS
+    assert "const applyOhlcRange = () =>" in JS
+    assert "const jumpToOhlcDate = () =>" in JS
+
+
+def test_spread_calculator_is_separate_interactive_block() -> None:
+    html = render_html(
+        {
+            "countries": [],
+            "volatility_rankings": {"bond": [], "equity": [], "fx": []},
+            "fx_rank_details": {},
+            "second_order_monitor": [
+                {
+                    "key": "US_2Y",
+                    "country": "美国",
+                    "group": "债券",
+                    "label": "美国2年国债",
+                    "unit": "bp",
+                    "metrics": {},
+                    "summary": {},
+                    "ohlc": [{"date": "2026-06-25", "open": 4, "high": 4, "low": 4, "close": 4}],
+                },
+                {
+                    "key": "US_10Y",
+                    "country": "美国",
+                    "group": "债券",
+                    "label": "美国10年国债",
+                    "unit": "bp",
+                    "metrics": {},
+                    "summary": {},
+                    "ohlc": [{"date": "2026-06-25", "open": 5, "high": 5, "low": 5, "close": 5}],
+                },
+            ],
+            "fx_flows": [],
+            "series_status": [],
+            "notes": [],
+            "generated_at": "2026-06-26T00:00:00",
+        }
+    )
+
+    assert '<section class="panel spread-panel" id="spread-panel">' in html
+    assert 'id="spread-country-select"' in html
+    assert 'data-spread-window="1"' in html
+    assert 'data-spread-window="7"' in html
+    assert 'data-spread-window="30"' in html
+    assert 'id="spread-start-date"' in html
+    assert 'id="spread-exact-date"' in html
+    assert 'id="spread-data"' in html
+    assert "const buildSpreadRows = () =>" in JS
+    assert "const renderSpread = () =>" in JS
+
+
 def test_ohlc_comparison_legend_uses_inline_tspans_to_avoid_overlap() -> None:
     assert "const legendY = 18;" in JS
     assert "<tspan" in JS

@@ -42,6 +42,7 @@ DEFAULT_FX_FLOW_CODE = ROOT / "fx_flow_logic.py"
 USER_FX_FLOW_CODE = Path(os.environ.get("FX_FLOW_CODE_PATH", str(DEFAULT_FX_FLOW_CODE)))
 DAILY_MOVE_ALERT_WINDOW = 30
 DAILY_MOVE_ALERT_TOP_PCT = 20.0
+CHART_HISTORY_LIMIT = 1500
 
 
 @dataclass(frozen=True)
@@ -683,7 +684,7 @@ def build_second_order_monitor(
                 "label": spec.label if spec else key,
                 "unit": unit,
                 "metrics": metrics,
-                "ohlc": recent_ohlc_rows(data_rows, limit=360),
+                "ohlc": recent_ohlc_rows(data_rows, limit=CHART_HISTORY_LIMIT),
                 "chart_type": "ohlc",
             }
             if group != "债券曲线":
@@ -698,7 +699,7 @@ def build_second_order_monitor(
                     "rows": recent_bond_curve_rows(
                         series.get(country["bond_2y"], []),
                         series.get(country["bond_10y"], []),
-                        limit=360,
+                        limit=CHART_HISTORY_LIMIT,
                     ),
                 }
             rows.append(item)
@@ -2519,7 +2520,18 @@ def render_html(snapshot: dict[str, Any]) -> str:
         for key, item in ohlc_payload.items()
         if item.get("chartType") != "bond_curve" and item.get("ohlc")
     ]
+    spread_payload = []
+    for country in COUNTRIES:
+        bonds = []
+        for tenor, field in [("1Y", "bond_1y"), ("2Y", "bond_2y"), ("10Y", "bond_10y")]:
+            key = country.get(field)
+            item = ohlc_payload.get(key) if key else None
+            if item and item.get("ohlc"):
+                bonds.append({"tenor": tenor, "key": key, "label": item["label"]})
+        if len(bonds) >= 2:
+            spread_payload.append({"code": country["code"], "name": country["name"], "bonds": bonds})
     ohlc_json = json.dumps(ohlc_payload, ensure_ascii=False).replace("</", "<\\/")
+    spread_json = json.dumps(spread_payload, ensure_ascii=False).replace("</", "<\\/")
     generated = escape(snapshot["generated_at"])
     html = [
         "<!doctype html>",
@@ -2657,11 +2669,48 @@ def render_html(snapshot: dict[str, Any]) -> str:
             '<button type="button" id="ohlc-reset">Reset</button>',
             '<span id="ohlc-range-label"></span>',
             "</div>",
+            '<div class="date-tools">',
+            '<label>区间 <input type="date" id="ohlc-start-date"></label>',
+            '<label>到 <input type="date" id="ohlc-end-date"></label>',
+            '<button type="button" id="ohlc-apply-range">应用</button>',
+            '<button type="button" id="ohlc-clear-range">清除</button>',
+            '<label>日期 <input type="date" id="ohlc-jump-date"></label>',
+            '<button type="button" id="ohlc-jump-date-button">跳转</button>',
+            "</div>",
             "</div>",
             '<div class="ohlc-head" id="ohlc-head">点击上方一阶/二阶监控中的任意一行查看日线图；鼠标放在单日上显示 OHLC。</div>',
             '<div class="chart-shell">',
             '<svg id="ohlc-chart" viewBox="0 0 980 360" role="img" aria-label="日线 OHLC 图"></svg>',
             '<div class="chart-tooltip" id="ohlc-tooltip"></div>',
+            "</div>",
+            "</section>",
+        ]
+    )
+
+    html.extend(
+        [
+            '<section class="panel spread-panel" id="spread-panel">',
+            "<h2>利差计算</h2>",
+            '<div class="spread-toolbar">',
+            '<label>国家 <select id="spread-country-select"></select></label>',
+            '<label>长端 <select id="spread-long-select"></select></label>',
+            '<label>短端 <select id="spread-short-select"></select></label>',
+            '<div class="segmented" aria-label="利差窗口">',
+            '<button type="button" class="spread-window" data-spread-window="1">1D</button>',
+            '<button type="button" class="spread-window" data-spread-window="7">7D</button>',
+            '<button type="button" class="spread-window active" data-spread-window="30">30D</button>',
+            "</div>",
+            '<div class="date-tools spread-date-tools">',
+            '<label>区间 <input type="date" id="spread-start-date"></label>',
+            '<label>到 <input type="date" id="spread-end-date"></label>',
+            '<button type="button" id="spread-apply-range">计算</button>',
+            '<label>日期 <input type="date" id="spread-exact-date"></label>',
+            '<button type="button" id="spread-exact-button">查看日期</button>',
+            "</div>",
+            "</div>",
+            '<div class="spread-result" id="spread-result">选择国家、长短端和日期后计算利差。</div>',
+            '<div class="chart-shell spread-chart-shell">',
+            '<svg id="spread-chart" viewBox="0 0 980 260" role="img" aria-label="利差曲线"></svg>',
             "</div>",
             "</section>",
         ]
@@ -2823,6 +2872,7 @@ def render_html(snapshot: dict[str, Any]) -> str:
     html.extend(
         [
             f'<script id="ohlc-data" type="application/json">{ohlc_json}</script>',
+            f'<script id="spread-data" type="application/json">{spread_json}</script>',
             f'<script id="fx-flow-data" type="application/json">{flow_json}</script>',
             "<script>",
             JS,
@@ -3062,11 +3112,23 @@ th:first-child, td:first-child { text-align: left; }
 .ohlc-compare { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 650; }
 .ohlc-compare select { max-width: min(38vw, 280px); height: 30px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); padding: 0 28px 0 8px; font: inherit; font-size: 12px; }
 .ohlc-compare select:disabled { background: #f3f6fa; color: var(--muted); }
+.date-tools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; color: var(--muted); font-size: 12px; font-weight: 650; }
+.date-tools label { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.date-tools input, .spread-toolbar select { height: 30px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); padding: 0 8px; font: inherit; font-size: 12px; }
+.date-tools button, .spread-toolbar button { border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); cursor: pointer; min-width: 34px; height: 30px; padding: 0 10px; font: inherit; font-size: 12px; font-weight: 650; }
+.date-tools button:hover, .spread-toolbar button:hover { background: #f8fafc; border-color: #b7c2cf; }
 #ohlc-range-label { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .ohlc-head { color: var(--muted); margin: -4px 0 12px; font-size: 13px; }
 .chart-shell { position: relative; border: 1px solid var(--line); border-radius: 8px; background: #fff; overflow: hidden; }
 #ohlc-chart { display: block; width: 100%; height: min(52vw, 420px); min-height: 320px; cursor: grab; }
 #ohlc-chart.dragging { cursor: grabbing; }
+.spread-panel { scroll-margin-top: 18px; }
+.spread-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: -2px 0 12px; }
+.spread-toolbar label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 650; white-space: nowrap; }
+.spread-toolbar button.active { background: #eaf2ff; border-color: #aac5ee; color: var(--blue); }
+.spread-result { color: var(--ink); font-size: 13px; font-weight: 650; margin: 0 0 10px; }
+.spread-chart-shell { min-height: 250px; }
+#spread-chart { display: block; width: 100%; height: min(38vw, 300px); min-height: 240px; }
 .chart-tooltip {
   position: absolute;
   display: none;
@@ -3270,6 +3332,8 @@ JS = """
 (() => {
   const raw = document.getElementById("ohlc-data")?.textContent || "{}";
   const ohlcData = JSON.parse(raw);
+  const spreadRaw = document.getElementById("spread-data")?.textContent || "[]";
+  const spreadData = JSON.parse(spreadRaw);
   const flowRaw = document.getElementById("fx-flow-data")?.textContent || "[]";
   const flowData = JSON.parse(flowRaw);
   const rows = Array.from(document.querySelectorAll(".derivative-row"));
@@ -3294,13 +3358,32 @@ JS = """
   const zoomOutButton = document.getElementById("ohlc-zoom-out");
   const resetButton = document.getElementById("ohlc-reset");
   const compareSelect = document.getElementById("ohlc-compare-select");
+  const rangeStartInput = document.getElementById("ohlc-start-date");
+  const rangeEndInput = document.getElementById("ohlc-end-date");
+  const rangeApplyButton = document.getElementById("ohlc-apply-range");
+  const rangeClearButton = document.getElementById("ohlc-clear-range");
+  const jumpDateInput = document.getElementById("ohlc-jump-date");
+  const jumpDateButton = document.getElementById("ohlc-jump-date-button");
+  const spreadCountrySelect = document.getElementById("spread-country-select");
+  const spreadLongSelect = document.getElementById("spread-long-select");
+  const spreadShortSelect = document.getElementById("spread-short-select");
+  const spreadWindowButtons = Array.from(document.querySelectorAll(".spread-window"));
+  const spreadStartInput = document.getElementById("spread-start-date");
+  const spreadEndInput = document.getElementById("spread-end-date");
+  const spreadApplyRangeButton = document.getElementById("spread-apply-range");
+  const spreadExactDateInput = document.getElementById("spread-exact-date");
+  const spreadExactButton = document.getElementById("spread-exact-button");
+  const spreadResult = document.getElementById("spread-result");
+  const spreadChart = document.getElementById("spread-chart");
   const windowSteps = [90, 180, 360];
   let currentKey = null;
   let compareKey = "";
   let chartMode = "move";
   let visibleWindow = 90;
   const viewEndByKey = {};
+  const customRangeByKey = {};
   let dragStart = null;
+  let spreadMode = "30";
 
   const fmt = (value) => {
     if (value === null || value === undefined || Number.isNaN(Number(value))) return "缺失";
@@ -3553,6 +3636,13 @@ JS = """
     if (!total) {
       return { start: 0, end: 0, rows: [], total };
     }
+    const custom = customRangeByKey[key];
+    if (custom?.start && custom?.end) {
+      const rows = allRows.filter((row) => row.date >= custom.start && row.date <= custom.end);
+      const start = rows.length ? allRows.findIndex((row) => row.date === rows[0].date) : 0;
+      const end = rows.length ? start + rows.length : 0;
+      return { start, end, rows, total, custom: true, startDate: custom.start, endDate: custom.end };
+    }
     const size = Math.min(visibleWindow, total);
     const end = clamp(viewEndByKey[key] || total, size, total);
     const start = Math.max(0, end - size);
@@ -3638,7 +3728,18 @@ JS = """
     }
     const first = range.rows[0]?.date || "";
     const last = range.rows[range.rows.length - 1]?.date || "";
-    rangeLabel.textContent = `${first} 到 ${last} · ${range.rows.length}/${range.total}`;
+    rangeLabel.textContent = `${first} 到 ${last} · ${range.rows.length}/${range.total}${range.custom ? " · 自定义" : ""}`;
+    const allRows = currentKey ? sourceRows(ohlcData[currentKey]) : [];
+    const minDate = allRows[0]?.date || "";
+    const maxDate = allRows[allRows.length - 1]?.date || "";
+    [rangeStartInput, rangeEndInput, jumpDateInput].forEach((input) => {
+      if (!input) return;
+      input.min = minDate;
+      input.max = maxDate;
+    });
+    const custom = currentKey ? customRangeByKey[currentKey] : null;
+    if (rangeStartInput) rangeStartInput.value = custom?.start || "";
+    if (rangeEndInput) rangeEndInput.value = custom?.end || "";
   };
 
   const rerenderCurrent = () => {
@@ -3654,6 +3755,34 @@ JS = """
     const index = windowSteps.indexOf(visibleWindow);
     const nextIndex = clamp(index + direction, 0, windowSteps.length - 1);
     setVisibleWindow(windowSteps[nextIndex]);
+  };
+
+  const applyOhlcRange = () => {
+    if (!currentKey || !rangeStartInput || !rangeEndInput) return;
+    const start = rangeStartInput.value;
+    const end = rangeEndInput.value;
+    if (!start || !end || start > end) return;
+    customRangeByKey[currentKey] = { start, end };
+    render(currentKey, { scroll: false });
+  };
+
+  const clearOhlcRange = () => {
+    if (!currentKey) return;
+    delete customRangeByKey[currentKey];
+    render(currentKey, { scroll: false });
+  };
+
+  const jumpToOhlcDate = () => {
+    if (!currentKey || !jumpDateInput?.value) return;
+    const source = sourceRows(ohlcData[currentKey]);
+    if (!source.length) return;
+    const target = jumpDateInput.value;
+    let index = source.findIndex((row) => row.date >= target);
+    if (index < 0) index = source.length - 1;
+    delete customRangeByKey[currentKey];
+    const size = Math.min(visibleWindow, source.length);
+    viewEndByKey[currentKey] = clamp(index + Math.ceil(size / 2), size, source.length);
+    render(currentKey, { scroll: false });
   };
 
   const renderMoveChart = (item, compareItem = null) => {
@@ -4039,6 +4168,158 @@ JS = """
     });
   };
 
+  const selectedSpreadCountry = () => spreadData.find((item) => item.code === spreadCountrySelect?.value) || spreadData[0];
+
+  const setSpreadOptions = (select, bonds, preferred) => {
+    if (!select) return;
+    select.innerHTML = bonds.map((bond) => `<option value="${esc(bond.key)}">${esc(bond.tenor)} · ${esc(bond.label)}</option>`).join("");
+    if (bonds.some((bond) => bond.key === preferred)) {
+      select.value = preferred;
+    }
+  };
+
+  const updateSpreadTenors = () => {
+    const country = selectedSpreadCountry();
+    if (!country) return;
+    const bonds = country.bonds || [];
+    const byTenor = Object.fromEntries(bonds.map((bond) => [bond.tenor, bond.key]));
+    setSpreadOptions(spreadLongSelect, bonds, byTenor["10Y"] || bonds[bonds.length - 1]?.key);
+    setSpreadOptions(spreadShortSelect, bonds, byTenor["2Y"] || byTenor["1Y"] || bonds[0]?.key);
+    if (spreadLongSelect && spreadShortSelect && spreadLongSelect.value === spreadShortSelect.value && bonds.length > 1) {
+      const alternative = bonds.find((bond) => bond.key !== spreadLongSelect.value);
+      if (alternative) spreadShortSelect.value = alternative.key;
+    }
+  };
+
+  const buildSpreadRows = () => {
+    const longItem = ohlcData[spreadLongSelect?.value || ""];
+    const shortItem = ohlcData[spreadShortSelect?.value || ""];
+    if (!longItem || !shortItem || spreadLongSelect?.value === spreadShortSelect?.value) return [];
+    const dates = [...new Set([...(longItem.ohlc || []).map((row) => row.date), ...(shortItem.ohlc || []).map((row) => row.date)])].sort();
+    const longByDate = new Map((longItem.ohlc || []).map((row) => [row.date, Number(row.close)]));
+    const shortByDate = new Map((shortItem.ohlc || []).map((row) => [row.date, Number(row.close)]));
+    let longClose = null;
+    let shortClose = null;
+    const rows = [];
+    dates.forEach((day) => {
+      if (longByDate.has(day)) longClose = longByDate.get(day);
+      if (shortByDate.has(day)) shortClose = shortByDate.get(day);
+      if (Number.isFinite(longClose) && Number.isFinite(shortClose)) {
+        rows.push({
+          date: day,
+          longClose,
+          shortClose,
+          spreadBp: (longClose - shortClose) * 100
+        });
+      }
+    });
+    return rows;
+  };
+
+  const spreadChartRowsForMode = (rows) => {
+    if (!rows.length) return { rows: [], start: null, end: null, label: "缺少数据" };
+    if (spreadMode === "custom") {
+      const start = spreadStartInput?.value || "";
+      const end = spreadEndInput?.value || "";
+      const selected = rows.filter((row) => (!start || row.date >= start) && (!end || row.date <= end));
+      return { rows: selected, start: selected[0] || null, end: selected[selected.length - 1] || null, label: `${start || "最早"} 到 ${end || "最新"}` };
+    }
+    if (spreadMode === "exact") {
+      const target = spreadExactDateInput?.value || "";
+      let index = rows.findIndex((row) => row.date >= target);
+      if (index < 0) index = rows.length - 1;
+      const exact = rows[index];
+      const chartRows = rows.slice(Math.max(0, index - 15), Math.min(rows.length, index + 16));
+      return { rows: chartRows, start: exact, end: exact, label: exact ? `精确日期 ${exact.date}` : "缺少日期" };
+    }
+    const windowSize = Number(spreadMode || 30);
+    const selected = rows.slice(-Math.min(rows.length, windowSize + 1));
+    return { rows: selected, start: selected[0] || null, end: selected[selected.length - 1] || null, label: `${windowSize}D` };
+  };
+
+  const renderSpreadChart = (rows) => {
+    if (!spreadChart) return;
+    const width = 980;
+    const height = 260;
+    const margin = { left: 64, right: 22, top: 22, bottom: 42 };
+    const innerW = width - margin.left - margin.right;
+    const innerH = height - margin.top - margin.bottom;
+    if (!rows.length) {
+      spreadChart.innerHTML = `<text x="490" y="130" text-anchor="middle" fill="#66717d">没有可计算的利差数据</text>`;
+      return;
+    }
+    const values = rows.map((row) => Number(row.spreadBp)).filter(Number.isFinite);
+    let min = Math.min(...values);
+    let max = Math.max(...values);
+    if (min === max) {
+      min -= 1;
+      max += 1;
+    }
+    const pad = Math.max((max - min) * 0.12, 1);
+    min -= pad;
+    max += pad;
+    const xStep = innerW / Math.max(1, rows.length - 1);
+    const x = (index) => rows.length === 1 ? margin.left + innerW / 2 : margin.left + index * xStep;
+    const y = (value) => margin.top + (max - value) / (max - min) * innerH;
+    const grid = yTicks(min, max, 5).map((tick) => {
+      const yy = y(tick);
+      return `<line x1="${margin.left}" x2="${width - margin.right}" y1="${yy}" y2="${yy}" stroke="#e5e9ef" />`
+        + `<text x="${margin.left - 10}" y="${yy + 4}" text-anchor="end" fill="#66717d" font-size="11">${signed(tick, 1)}bp</text>`;
+    }).join("");
+    const path = rows.map((row, index) => `${index === 0 ? "M" : "L"} ${x(index).toFixed(2)} ${y(row.spreadBp).toFixed(2)}`).join(" ");
+    const tickCount = Math.min(7, rows.length);
+    const dateTicks = [];
+    for (let i = 0; i < tickCount; i += 1) {
+      const index = Math.round(i * (rows.length - 1) / Math.max(1, tickCount - 1));
+      dateTicks.push(`<text x="${x(index)}" y="${height - 13}" text-anchor="middle" fill="#66717d" font-size="11">${esc(rows[index].date.slice(5))}</text>`);
+    }
+    const dots = rows.map((row, index) => (
+      `<circle cx="${x(index).toFixed(2)}" cy="${y(row.spreadBp).toFixed(2)}" r="2.4" fill="#2563eb"><title>${esc(row.date)} ${signed(row.spreadBp, 1)}bp</title></circle>`
+    )).join("");
+    spreadChart.innerHTML = `<rect width="${width}" height="${height}" fill="#fff" />`
+      + grid
+      + `<line x1="${margin.left}" x2="${width - margin.right}" y1="${y(0)}" y2="${y(0)}" stroke="#b8c1cc" stroke-dasharray="4 4" />`
+      + `<path d="${path}" fill="none" stroke="#2563eb" stroke-width="2.2" />`
+      + dots
+      + dateTicks.join("");
+  };
+
+  const renderSpread = () => {
+    const country = selectedSpreadCountry();
+    const rows = buildSpreadRows();
+    const firstDate = rows[0]?.date || "";
+    const lastDate = rows[rows.length - 1]?.date || "";
+    [spreadStartInput, spreadEndInput, spreadExactDateInput].forEach((input) => {
+      if (!input) return;
+      input.min = firstDate;
+      input.max = lastDate;
+    });
+    const selection = spreadChartRowsForMode(rows);
+    const longLabel = spreadLongSelect?.selectedOptions?.[0]?.textContent || "长端";
+    const shortLabel = spreadShortSelect?.selectedOptions?.[0]?.textContent || "短端";
+    if (!selection.rows.length || !selection.start || !selection.end) {
+      if (spreadResult) spreadResult.textContent = `${country?.name || ""} ${longLabel} - ${shortLabel}：所选日期没有可计算数据。`;
+      renderSpreadChart([]);
+      return;
+    }
+    const start = selection.start;
+    const end = selection.end;
+    const delta = end.spreadBp - start.spreadBp;
+    const direction = delta > 0 ? "走阔" : delta < 0 ? "收窄" : "持平";
+    if (spreadResult) {
+      spreadResult.textContent = `${country?.name || ""} ${longLabel} - ${shortLabel}｜${selection.label}｜${start.date} ${signed(start.spreadBp, 1)}bp -> ${end.date} ${signed(end.spreadBp, 1)}bp，变化 ${signed(delta, 1)}bp（${direction}）`;
+    }
+    renderSpreadChart(selection.rows);
+  };
+
+  const initSpreadCalculator = () => {
+    if (!spreadCountrySelect || !spreadData.length) return;
+    spreadCountrySelect.innerHTML = spreadData.map((country) => `<option value="${esc(country.code)}">${esc(country.name)}</option>`).join("");
+    spreadCountrySelect.value = spreadData.some((country) => country.code === "US") ? "US" : spreadData[0].code;
+    updateSpreadTenors();
+    renderSpread();
+  };
+
   const render = (key, options = {}) => {
     const sourceItem = ohlcData[key];
     if (!sourceItem) return;
@@ -4154,15 +4435,44 @@ JS = """
   });
   zoomInButton?.addEventListener("click", () => zoomChart(1));
   zoomOutButton?.addEventListener("click", () => zoomChart(-1));
+  rangeApplyButton?.addEventListener("click", applyOhlcRange);
+  rangeClearButton?.addEventListener("click", clearOhlcRange);
+  jumpDateButton?.addEventListener("click", jumpToOhlcDate);
   resetButton?.addEventListener("click", () => {
     if (!currentKey) return;
+    delete customRangeByKey[currentKey];
     viewEndByKey[currentKey] = sourceRows(ohlcData[currentKey]).length;
     visibleWindow = 90;
     render(currentKey, { scroll: false });
   });
 
+  spreadCountrySelect?.addEventListener("change", () => {
+    updateSpreadTenors();
+    renderSpread();
+  });
+  spreadLongSelect?.addEventListener("change", renderSpread);
+  spreadShortSelect?.addEventListener("change", renderSpread);
+  spreadWindowButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      spreadMode = button.dataset.spreadWindow || "30";
+      spreadWindowButtons.forEach((item) => item.classList.toggle("active", item === button));
+      renderSpread();
+    });
+  });
+  spreadApplyRangeButton?.addEventListener("click", () => {
+    spreadMode = "custom";
+    spreadWindowButtons.forEach((button) => button.classList.remove("active"));
+    renderSpread();
+  });
+  spreadExactButton?.addEventListener("click", () => {
+    spreadMode = "exact";
+    spreadWindowButtons.forEach((button) => button.classList.remove("active"));
+    renderSpread();
+  });
+
   svg.addEventListener("mousedown", (event) => {
     if (!currentKey) return;
+    if (customRangeByKey[currentKey]) return;
     const source = sourceRows(ohlcData[currentKey]);
     if (source.length <= visibleWindow) return;
     dragStart = {
@@ -4189,6 +4499,7 @@ JS = """
     dragStart = null;
     svg.classList.remove("dragging");
   });
+  initSpreadCalculator();
   render(defaultOhlcKey, { scroll: false });
 })();
 """

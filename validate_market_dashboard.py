@@ -301,6 +301,22 @@ def main() -> int:
         "setVisibleWindow",
         "zoomChart",
         "dragStart",
+        'id="ohlc-start-date"',
+        'id="ohlc-end-date"',
+        'id="ohlc-jump-date"',
+        "customRangeByKey",
+        "applyOhlcRange",
+        "jumpToOhlcDate",
+        'id="spread-panel"',
+        'id="spread-country-select"',
+        'id="spread-start-date"',
+        'id="spread-exact-date"',
+        'id="spread-data"',
+        "buildSpreadRows",
+        "renderSpread",
+        "data-spread-window=\"1\"",
+        "data-spread-window=\"7\"",
+        "data-spread-window=\"30\"",
     ]:
         if marker not in html:
             errors.append(f"missing OHLC interaction marker: {marker}")
