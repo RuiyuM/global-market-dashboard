@@ -6,6 +6,7 @@ from __future__ import annotations
 import math
 from datetime import date, timedelta
 
+from market_dashboard import JS
 from market_dashboard import SeriesSpec
 from market_dashboard import build_daily_move_alert
 from market_dashboard import render_html
@@ -164,3 +165,6 @@ def test_daily_alert_renders_before_volatility_ranking_with_fixed_and_conditiona
     assert 'tabindex="0"' in html
     assert '点击查看日线 OHLC' in html
     assert 'document.querySelectorAll(".daily-alert-card[data-ohlc-key]")' in html
+    assert 'const openDailyAlertOhlc = (card) =>' in JS
+    assert 'chartMode = "ohlc";\n    render(key);' in JS
+    assert 'chartMode = "move";\n    render(key);' not in JS

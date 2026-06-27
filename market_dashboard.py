@@ -5000,7 +5000,7 @@ JS = """
   const openDailyAlertOhlc = (card) => {
     const key = card.dataset.ohlcKey;
     if (!key || !ohlcData[key]) return;
-    chartMode = "move";
+    chartMode = "ohlc";
     render(key);
   };
 
