@@ -96,7 +96,7 @@ def test_ohlc_zoom_buttons_use_requested_direction() -> None:
 
 
 def test_ohlc_supports_custom_range_and_exact_date_controls() -> None:
-    assert 'id="ohlc-start-date"' in render_html(
+    html = render_html(
         {
             "countries": [],
             "volatility_rankings": {"bond": [], "equity": [], "fx": []},
@@ -108,6 +108,8 @@ def test_ohlc_supports_custom_range_and_exact_date_controls() -> None:
             "generated_at": "2026-06-26T00:00:00",
         }
     )
+    assert 'id="ohlc-start-date"' in html
+    assert 'id="ohlc-align-spread"' in html
     assert "const customRangeByKey = {};" in JS
     assert "const applyOhlcRange = () =>" in JS
     assert "const jumpToOhlcDate = () =>" in JS
@@ -155,6 +157,7 @@ def test_spread_calculator_is_separate_interactive_block() -> None:
     assert 'data-spread-window="30"' in html
     assert 'id="spread-start-date"' in html
     assert 'id="spread-exact-date"' in html
+    assert 'id="spread-align-ohlc"' in html
     assert '<label>快速查看 <input type="date" id="spread-exact-date"></label>' in html
     assert '<label>日期 <input type="date" id="spread-exact-date"></label>' not in html
     assert 'id="spread-apply-range"' not in html
@@ -173,6 +176,17 @@ def test_spread_calculator_is_separate_interactive_block() -> None:
     assert "spread-negative-band" in JS
     assert "spread-long-line" in JS
     assert "spread-short-line" in JS
+
+
+def test_ohlc_and_spread_ranges_can_be_aligned_bidirectionally() -> None:
+    assert 'const alignOhlcToSpreadButton = document.getElementById("ohlc-align-spread");' in JS
+    assert 'const alignSpreadToOhlcButton = document.getElementById("spread-align-ohlc");' in JS
+    assert "const currentOhlcVisibleRange = () =>" in JS
+    assert "const currentSpreadVisibleRange = () =>" in JS
+    assert "const alignOhlcToSpread = () =>" in JS
+    assert "const alignSpreadToOhlc = () =>" in JS
+    assert 'alignOhlcToSpreadButton?.addEventListener("click", alignOhlcToSpread);' in JS
+    assert 'alignSpreadToOhlcButton?.addEventListener("click", alignSpreadToOhlc);' in JS
 
 
 def test_expanded_wscn_bond_tenors_feed_second_order_and_spreads() -> None:

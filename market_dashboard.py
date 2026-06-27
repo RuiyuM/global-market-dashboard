@@ -2980,6 +2980,7 @@ def render_html(snapshot: dict[str, Any]) -> str:
             '<button type="button" id="ohlc-zoom-in" title="放大">+</button>',
             '<button type="button" id="ohlc-zoom-out" title="缩小">-</button>',
             '<button type="button" id="ohlc-reset">Reset</button>',
+            '<button type="button" id="ohlc-align-spread" title="把日线图区间对齐到利差计算">对齐</button>',
             '<span id="ohlc-range-label"></span>',
             "</div>",
             '<div class="date-tools">',
@@ -3017,6 +3018,7 @@ def render_html(snapshot: dict[str, Any]) -> str:
             '<label>区间 <input type="date" id="spread-start-date"></label>',
             '<label>到 <input type="date" id="spread-end-date"></label>',
             '<label>快速查看 <input type="date" id="spread-exact-date"></label>',
+            '<button type="button" id="spread-align-ohlc" title="把利差区间对齐到日线 OHLC">对齐</button>',
             "</div>",
             "</div>",
             '<div class="spread-result" id="spread-result">选择国家、长短端和日期后自动显示利差。</div>',
@@ -3722,6 +3724,7 @@ JS = """
   const rangeClearButton = document.getElementById("ohlc-clear-range");
   const jumpDateInput = document.getElementById("ohlc-jump-date");
   const jumpDateButton = document.getElementById("ohlc-jump-date-button");
+  const alignOhlcToSpreadButton = document.getElementById("ohlc-align-spread");
   const spreadCountrySelect = document.getElementById("spread-country-select");
   const spreadLongSelect = document.getElementById("spread-long-select");
   const spreadShortSelect = document.getElementById("spread-short-select");
@@ -3729,6 +3732,7 @@ JS = """
   const spreadStartInput = document.getElementById("spread-start-date");
   const spreadEndInput = document.getElementById("spread-end-date");
   const spreadExactDateInput = document.getElementById("spread-exact-date");
+  const alignSpreadToOhlcButton = document.getElementById("spread-align-ohlc");
   const spreadResult = document.getElementById("spread-result");
   const spreadChart = document.getElementById("spread-chart");
   const spreadTooltip = document.getElementById("spread-tooltip");
@@ -4140,6 +4144,16 @@ JS = """
     const size = Math.min(visibleWindow, source.length);
     viewEndByKey[currentKey] = clamp(index + Math.ceil(size / 2), size, source.length);
     render(currentKey, { scroll: false });
+  };
+
+  const currentOhlcVisibleRange = () => {
+    if (!currentKey || !ohlcData[currentKey]) return null;
+    const range = viewRange(currentKey, ohlcData[currentKey]);
+    if (!range.rows.length) return null;
+    return {
+      start: range.rows[0].date,
+      end: range.rows[range.rows.length - 1].date
+    };
   };
 
   const renderMoveChart = (item, compareItem = null) => {
@@ -4594,6 +4608,37 @@ JS = """
     return { rows: selected, start: selected[0] || null, end: selected[selected.length - 1] || null, label: `${windowSize}D` };
   };
 
+  const currentSpreadVisibleRange = () => {
+    const rows = buildSpreadRows();
+    const selection = spreadChartRowsForMode(rows);
+    if (!selection.rows.length) return null;
+    return {
+      start: selection.rows[0].date,
+      end: selection.rows[selection.rows.length - 1].date
+    };
+  };
+
+  const alignOhlcToSpread = () => {
+    const range = currentSpreadVisibleRange();
+    const key = currentKey || (ohlcData[defaultOhlcKey] ? defaultOhlcKey : Object.keys(ohlcData)[0]);
+    if (!range || !key) return;
+    currentKey = key;
+    customRangeByKey[key] = { start: range.start, end: range.end };
+    if (rangeStartInput) rangeStartInput.value = range.start;
+    if (rangeEndInput) rangeEndInput.value = range.end;
+    render(key, { scroll: false });
+  };
+
+  const alignSpreadToOhlc = () => {
+    const range = currentOhlcVisibleRange();
+    if (!range || !spreadStartInput || !spreadEndInput) return;
+    spreadStartInput.value = range.start;
+    spreadEndInput.value = range.end;
+    spreadMode = "custom";
+    spreadWindowButtons.forEach((button) => button.classList.remove("active"));
+    renderSpread();
+  };
+
   const renderSpreadChart = (rows) => {
     if (!spreadChart) return;
     const width = 980;
@@ -4904,6 +4949,7 @@ JS = """
   rangeApplyButton?.addEventListener("click", applyOhlcRange);
   rangeClearButton?.addEventListener("click", clearOhlcRange);
   jumpDateButton?.addEventListener("click", jumpToOhlcDate);
+  alignOhlcToSpreadButton?.addEventListener("click", alignOhlcToSpread);
   resetButton?.addEventListener("click", () => {
     if (!currentKey) return;
     delete customRangeByKey[currentKey];
@@ -4938,6 +4984,7 @@ JS = """
   spreadStartInput?.addEventListener("change", setSpreadCustomMode);
   spreadEndInput?.addEventListener("change", setSpreadCustomMode);
   spreadExactDateInput?.addEventListener("change", setSpreadExactMode);
+  alignSpreadToOhlcButton?.addEventListener("click", alignSpreadToOhlc);
 
   svg.addEventListener("mousedown", (event) => {
     if (!currentKey) return;
