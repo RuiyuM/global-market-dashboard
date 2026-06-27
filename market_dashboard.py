@@ -23,6 +23,7 @@ from urllib.request import Request, urlopen
 
 from fetch_wscn_ohlc import fetch_ohlc as fetch_wscn_ohlc
 from fetch_investing_bond_ohlc import (
+    BOND_SPECS as INVESTING_BOND_SPECS,
     BondSpec as InvestingSpec,
     fetch_html as fetch_investing_html,
     rows_from_html as rows_from_investing_html,
@@ -98,9 +99,9 @@ WSCN_SPECS = [
 
 
 JAPAN_BOND_SPECS: list[tuple[SeriesSpec, str, str]] = [
-    (SeriesSpec("JP_1M", "日本1个月国债", "bond", "tradingeconomics", "GJGB1M", "JP_1M.csv", "JP1M_TE_1D_ohlc.csv"), "tradingeconomics", TRADINGECONOMICS_SLUGS["1M"]),
-    (SeriesSpec("JP_3M", "日本3个月国债", "bond", "tradingeconomics", "GJGB3M", "JP_3M.csv", "JP3M_TE_1D_ohlc.csv"), "tradingeconomics", TRADINGECONOMICS_SLUGS["3M"]),
-    (SeriesSpec("JP_6M", "日本6个月国债", "bond", "tradingeconomics", "GJGB6M", "JP_6M.csv", "JP6M_TE_1D_ohlc.csv"), "tradingeconomics", TRADINGECONOMICS_SLUGS["6M"]),
+    (SeriesSpec("JP_1M", "日本1个月国债", "bond", "investing+tradingeconomics", "JP1MT=XX / GJGB1M", "JP_1M.csv", "JP1M_INVESTING_1D_ohlc.csv"), "investing+tradingeconomics", "1M"),
+    (SeriesSpec("JP_3M", "日本3个月国债", "bond", "investing+tradingeconomics", "JP3MT=XX / GJGB3M", "JP_3M.csv", "JP3M_INVESTING_1D_ohlc.csv"), "investing+tradingeconomics", "3M"),
+    (SeriesSpec("JP_6M", "日本6个月国债", "bond", "investing+tradingeconomics", "JP6MT=XX / GJGB6M", "JP_6M.csv", "JP6M_INVESTING_1D_ohlc.csv"), "investing+tradingeconomics", "6M"),
     (SeriesSpec("JP_1Y", "日本1年国债", "bond", "mof+tradingeconomics", "MOF:JGB:1Y / GJGB1Y", "JP_1Y.csv", "JP1YR_MOF_1D_ohlc.csv"), "mof+tradingeconomics", "1Y"),
     (SeriesSpec("JP_2Y", "日本2年国债", "bond", "mof+tradingeconomics", "MOF:JGB:2Y / GJGB2Y", "JP_2Y.csv", "JP2YR_MOF_1D_ohlc.csv"), "mof+tradingeconomics", "2Y"),
     (SeriesSpec("JP_3Y", "日本3年国债", "bond", "mof+tradingeconomics", "MOF:JGB:3Y / GJGB3Y", "JP_3Y.csv", "JP3YR_MOF_1D_ohlc.csv"), "mof+tradingeconomics", "3Y"),
@@ -551,6 +552,17 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
                         rows = merge_ohlc_rows(rows, [latest_row])
                 except Exception as exc:
                     latest_error = f"Trading Economics latest failed: {exc}"
+            elif source_kind == "investing+tradingeconomics":
+                investing_spec = INVESTING_BOND_SPECS[f"JP{source_key}"]
+                rows = rows_from_investing_html(fetch_investing_html(investing_spec, start, end))
+                if path.exists():
+                    rows = merge_ohlc_rows(read_ohlc(path), rows)
+                try:
+                    latest_row = fetch_tradingeconomics_latest_row(TRADINGECONOMICS_SLUGS[source_key])
+                    if latest_row and (not rows or row_date_key(latest_row) > row_date_key(rows[-1])):
+                        rows = merge_ohlc_rows(rows, [latest_row])
+                except Exception as exc:
+                    latest_error = f"Trading Economics latest failed: {exc}"
             else:
                 rows = read_ohlc(path) if path.exists() else []
                 try:
@@ -565,6 +577,8 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
                     row["source"] = "Japan MOF official JGB yield curve"
                 elif source_kind == "mof+tradingeconomics":
                     row["source"] = "Japan MOF official JGB yield curve + Trading Economics latest yield page"
+                elif source_kind == "investing+tradingeconomics":
+                    row["source"] = "Investing.com historical table + Trading Economics latest yield page"
                 else:
                     row["source"] = "Trading Economics latest yield page"
             write_ohlc(path, rows)
@@ -1538,7 +1552,7 @@ def build_snapshot(fetch_records: list[dict[str, str]], *, fetch_policy_news: bo
             "7D/30D 波动率 = 对应窗口相邻交易观测的平均绝对日变化；债券单位 bp/日，股指和汇率单位 %/日。",
             f"三币种资金流向直接调用用户提供代码：{USER_FX_FLOW_CODE}",
             "derived = 本地公式而非外部供应商：CNY_BASE=1；债券曲线=10Y-2Y；CNYJPY=1/JPYCNY；RUB 交叉汇率优先使用具备历史深度的 Yahoo 直接报价，历史不足才用 USDCNY/USDRUB 或 USDJPY/USDRUB 派生并在 source_audit 里比对最新直接报价。",
-            "美债扩展期限优先使用 WSCN 日线；中国国债使用 ChinaMoney/CFETS 官方收盘收益率曲线；德国中长端使用 Bundesbank 官方 CSV，短端与3Y使用 Trading Economics 最新页；日本1Y/2Y/3Y/5Y/7Y/10Y/30Y 使用日本财务省 MOF 官方收益率曲线作为历史底座并合并 Trading Economics 最新页；日本短端和韩国可用期限使用 Trading Economics 最新页并按日合并本地缓存。",
+            "美债扩展期限优先使用 WSCN 日线；中国国债使用 ChinaMoney/CFETS 官方收盘收益率曲线；德国中长端使用 Bundesbank 官方 CSV，短端与3Y使用 Trading Economics 最新页；日本1M/3M/6M 使用 Investing.com 历史表并在有更新日期时合并 Trading Economics 最新页；日本1Y/2Y/3Y/5Y/7Y/10Y/30Y 使用日本财务省 MOF 官方收益率曲线作为历史底座并合并 Trading Economics 最新页；韩国可用期限使用 Trading Economics 最新页并按日合并本地缓存。",
             "政策新闻雷达只做加息、降息、维持利率相关文本筛选；抓取或 AI 分类不可用时退回本地规则解析。",
         ],
     }

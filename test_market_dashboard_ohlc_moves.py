@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 from datetime import date
+from types import SimpleNamespace
 
+import market_dashboard
 from market_dashboard import COUNTRY_BOND_TENORS
 from market_dashboard import CHINA_BOND_SPECS
 from market_dashboard import GERMANY_BOND_SPECS
@@ -281,9 +283,9 @@ def test_japan_extra_bond_tenors_use_server_safe_sources_not_stale_wscn() -> Non
         "JP_30Y",
     } <= set(spec_by_key)
     assert {key: spec_by_key[key].source for key in ["JP_1M", "JP_3M", "JP_6M"]} == {
-        "JP_1M": "tradingeconomics",
-        "JP_3M": "tradingeconomics",
-        "JP_6M": "tradingeconomics",
+        "JP_1M": "investing+tradingeconomics",
+        "JP_3M": "investing+tradingeconomics",
+        "JP_6M": "investing+tradingeconomics",
     }
     assert {key: spec_by_key[key].source for key in ["JP_3Y", "JP_5Y", "JP_7Y", "JP_30Y"]} == {
         "JP_3Y": "mof+tradingeconomics",
@@ -312,6 +314,110 @@ def test_japan_extra_bond_tenors_use_server_safe_sources_not_stale_wscn() -> Non
         ("10Y", "JP_10Y"),
         ("30Y", "JP_30Y"),
     ]
+
+
+def test_japan_short_bills_merge_investing_history_with_tradingeconomics_latest(monkeypatch, tmp_path) -> None:
+    series_spec = SeriesSpec(
+        "JP_1M",
+        "日本1个月国债",
+        "bond",
+        "investing+tradingeconomics",
+        "JP1MT=XX / GJGB1M",
+        "JP_1M.csv",
+        "JP1M_INVESTING_1D_ohlc.csv",
+    )
+    for name in [
+        "WSCN_SPECS",
+        "YAHOO_SPECS",
+        "NIKKEI_SPECS",
+        "CHINA_BOND_SPECS",
+        "GERMANY_BOND_SPECS",
+        "KOREA_BOND_SPECS",
+        "INVESTING_SPECS",
+    ]:
+        monkeypatch.setattr(market_dashboard, name, [])
+    monkeypatch.setattr(market_dashboard, "JAPAN_BOND_SPECS", [(series_spec, "investing+tradingeconomics", "1M")])
+    monkeypatch.setattr(market_dashboard, "DASHBOARD_DATA", tmp_path)
+    monkeypatch.setattr(market_dashboard, "fetch_investing_html", lambda spec, start, end: "<html></html>")
+    monkeypatch.setattr(
+        market_dashboard,
+        "rows_from_investing_html",
+        lambda html: [
+            {"date": "2026-06-24", "timestamp": 1782259200, "open": 0.50, "high": 0.55, "low": 0.48, "close": 0.52},
+            {"date": "2026-06-25", "timestamp": 1782345600, "open": 0.52, "high": 0.56, "low": 0.50, "close": 0.54},
+        ],
+    )
+    monkeypatch.setattr(
+        market_dashboard,
+        "fetch_tradingeconomics_latest_row",
+        lambda slug: {"date": "2026-06-26", "timestamp": 1782432000, "open": 0.55, "high": 0.57, "low": 0.54, "close": 0.56},
+    )
+
+    records = market_dashboard.fetch_all(SimpleNamespace(wscn_count=500, lookback_days=90, sleep_sec=0))
+
+    assert records == [
+        {
+            "key": "JP_1M",
+            "source": "investing+tradingeconomics",
+            "symbol": "JP1MT=XX / GJGB1M",
+            "status": "ok",
+            "file": str(tmp_path / "JP_1M.csv"),
+            "error": "",
+            "rows": "3",
+            "latest": "2026-06-26",
+        }
+    ]
+    assert [row["date"].isoformat() for row in market_dashboard.read_ohlc(tmp_path / "JP_1M.csv")] == [
+        "2026-06-24",
+        "2026-06-25",
+        "2026-06-26",
+    ]
+    assert "Investing.com historical table + Trading Economics latest yield page" in (tmp_path / "JP_1M.csv").read_text()
+
+
+def test_japan_short_bills_keep_investing_ohlc_when_te_has_same_date(monkeypatch, tmp_path) -> None:
+    series_spec = SeriesSpec(
+        "JP_3M",
+        "日本3个月国债",
+        "bond",
+        "investing+tradingeconomics",
+        "JP3MT=XX / GJGB3M",
+        "JP_3M.csv",
+        "JP3M_INVESTING_1D_ohlc.csv",
+    )
+    for name in [
+        "WSCN_SPECS",
+        "YAHOO_SPECS",
+        "NIKKEI_SPECS",
+        "CHINA_BOND_SPECS",
+        "GERMANY_BOND_SPECS",
+        "KOREA_BOND_SPECS",
+        "INVESTING_SPECS",
+    ]:
+        monkeypatch.setattr(market_dashboard, name, [])
+    monkeypatch.setattr(market_dashboard, "JAPAN_BOND_SPECS", [(series_spec, "investing+tradingeconomics", "3M")])
+    monkeypatch.setattr(market_dashboard, "DASHBOARD_DATA", tmp_path)
+    monkeypatch.setattr(market_dashboard, "fetch_investing_html", lambda spec, start, end: "<html></html>")
+    monkeypatch.setattr(
+        market_dashboard,
+        "rows_from_investing_html",
+        lambda html: [
+            {"date": "2026-06-26", "timestamp": 1782432000, "open": 0.91, "high": 0.95, "low": 0.90, "close": 0.942},
+        ],
+    )
+    monkeypatch.setattr(
+        market_dashboard,
+        "fetch_tradingeconomics_latest_row",
+        lambda slug: {"date": "2026-06-26", "timestamp": 1782432000, "open": 0.92, "high": 0.92, "low": 0.92, "close": 0.92},
+    )
+
+    market_dashboard.fetch_all(SimpleNamespace(wscn_count=500, lookback_days=90, sleep_sec=0))
+
+    rows = market_dashboard.read_ohlc(tmp_path / "JP_3M.csv")
+    assert rows[0]["open"] == 0.91
+    assert rows[0]["high"] == 0.95
+    assert rows[0]["low"] == 0.90
+    assert rows[0]["close"] == 0.942
 
 
 def test_cross_checked_china_germany_korea_bond_tenors_are_configured() -> None:
