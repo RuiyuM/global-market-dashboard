@@ -79,6 +79,41 @@ def test_ohlc_panel_exposes_comparison_selector() -> None:
     assert '<option value="">无比较</option>' in html
 
 
+def test_ohlc_panel_exposes_country_and_asset_picker() -> None:
+    html = render_html(
+        {
+            "countries": [],
+            "volatility_rankings": {"bond": [], "equity": [], "fx": []},
+            "fx_rank_details": {},
+            "second_order_monitor": [
+                {
+                    "key": "US_10Y",
+                    "country": "美国",
+                    "code": "US",
+                    "group": "债券",
+                    "label": "美国10年国债",
+                    "unit": "bp",
+                    "metrics": {},
+                    "summary": {},
+                    "ohlc": [{"date": "2026-06-25", "open": 4, "high": 4, "low": 4, "close": 4}],
+                }
+            ],
+            "fx_flows": [],
+            "series_status": [],
+            "notes": [],
+            "generated_at": "2026-06-26T00:00:00",
+        }
+    )
+
+    assert 'class="ohlc-picker"' in html
+    assert 'id="ohlc-country-select"' in html
+    assert 'id="ohlc-asset-select"' in html
+    assert "const ohlcPickerGroups =" in JS
+    assert "const syncOhlcPickers =" in JS
+    assert "ohlcCountrySelect?.addEventListener" in JS
+    assert "ohlcAssetSelect?.addEventListener" in JS
+
+
 def test_ohlc_javascript_supports_comparison_normalization() -> None:
     assert 'const compareSelect = document.getElementById("ohlc-compare-select");' in JS
     assert "const comparisonFor = (primaryItem) =>" in JS
@@ -200,6 +235,51 @@ def test_ohlc_and_spread_ranges_can_be_aligned_bidirectionally() -> None:
     assert "const alignSpreadToOhlc = () =>" in JS
     assert 'alignOhlcToSpreadButton?.addEventListener("click", alignOhlcToSpread);' in JS
     assert 'alignSpreadToOhlcButton?.addEventListener("click", alignSpreadToOhlc);' in JS
+    assert "customRangeByKey[key] = { start: range.start, end: range.end };" in JS
+    assert "spreadStartInput.value = range.start;" in JS
+    assert "spreadEndInput.value = range.end;" in JS
+
+
+def test_ohlc_and_spread_share_hover_date_crosshair() -> None:
+    assert "let sharedHoverDate = null;" in JS
+    assert "const setSharedHoverDate = (date) =>" in JS
+    assert 'data-hover-date="${esc(bar.date)}"' in JS
+    assert 'data-hover-date="${esc(row.date)}"' in JS
+    assert "syncSharedCrosshairs();" in JS
+    assert "setSharedHoverDate(bar.date);" in JS
+    assert "setSharedHoverDate(row.date);" in JS
+    assert "const crosshair = node.querySelector(\".candle-crosshair\");" in JS
+
+
+def test_macro_indicators_feed_second_order_and_ohlc_picker() -> None:
+    spec_keys = {spec.key for spec in market_dashboard.MACRO_SPECS}
+    assert {"DXY", "VIX", "GOLD", "USOIL"} <= spec_keys
+
+    specs = {spec.key: spec for spec in market_dashboard.MACRO_SPECS}
+    series = {key: [ohlc(1, 100), ohlc(10, 105), ohlc(20, 110), ohlc(26, 108)] for key in spec_keys}
+    rows = build_second_order_monitor(series, specs)
+
+    macro_rows = [row for row in rows if row["country"] == "宏观指标"]
+    assert [row["key"] for row in macro_rows] == ["DXY", "VIX", "GOLD", "USOIL"]
+    assert all(row["group"] == "宏观" for row in macro_rows)
+    assert all(row["unit"] == "pct" for row in macro_rows)
+
+    html = render_html(
+        {
+            "countries": [],
+            "volatility_rankings": {"bond": [], "equity": [], "fx": []},
+            "fx_rank_details": {},
+            "second_order_monitor": macro_rows,
+            "fx_flows": [],
+            "series_status": [],
+            "notes": [],
+            "generated_at": "2026-06-26T00:00:00",
+        }
+    )
+    assert '<strong>宏观指标</strong>' in html
+    assert 'data-country="宏观指标"' in html
+    assert '"code": "MACRO"' in html
+    assert '"country": "宏观指标"' in html
 
 
 def test_expanded_wscn_bond_tenors_feed_second_order_and_spreads() -> None:

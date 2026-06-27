@@ -172,6 +172,14 @@ INVESTING_SPECS: list[tuple[SeriesSpec, InvestingSpec]] = [
 ]
 
 
+MACRO_SPECS = [
+    SeriesSpec("DXY", "美元指数", "macro", "yahoo", "DX-Y.NYB", "DXY.csv", None),
+    SeriesSpec("VIX", "VIX波动率指数", "macro", "yahoo", "^VIX", "VIX.csv", None),
+    SeriesSpec("GOLD", "黄金", "macro", "yahoo", "GC=F", "GOLD.csv", None),
+    SeriesSpec("USOIL", "WTI原油", "macro", "yahoo", "CL=F", "USOIL.csv", None),
+]
+
+
 YAHOO_SPECS = [
     SeriesSpec("US_EQUITY", "标普500", "equity", "yahoo", "^GSPC", "US_EQUITY.csv", "SP500_YAHOO_1D_ohlc.csv"),
     SeriesSpec("JP_EQUITY_YAHOO", "日经225", "equity", "yahoo", "^N225", "JP_EQUITY_YAHOO.csv", "NIKKEI225_YAHOO_1D_ohlc.csv"),
@@ -182,6 +190,7 @@ YAHOO_SPECS = [
     SeriesSpec("RUBCNY_YAHOO", "卢布/人民币", "fx", "yahoo", "RUBCNY=X", "RUBCNY_YAHOO.csv", None),
     SeriesSpec("RUBJPY_YAHOO", "卢布/日元", "fx", "yahoo", "RUBJPY=X", "RUBJPY_YAHOO.csv", None),
     SeriesSpec("USDRUB_YAHOO", "美元/卢布", "fx", "yahoo", "USDRUB=X", "USDRUB_YAHOO.csv", None),
+    *MACRO_SPECS,
 ]
 
 NIKKEI_SPECS = [
@@ -1044,6 +1053,24 @@ def build_second_order_monitor(
                     ),
                 }
             rows.append(item)
+    for spec in MACRO_SPECS:
+        data_rows = series.get(spec.key, [])
+        rows.append(
+            {
+                "country": "宏观指标",
+                "code": "MACRO",
+                "group": "宏观",
+                "key": spec.key,
+                "label": spec.label,
+                "unit": "pct",
+                "tenor": "",
+                "extra_bond": False,
+                "metrics": {f"{days}D": derivative_metrics(data_rows, days, unit="pct") for days in windows},
+                "summary": series_summary(spec.key, data_rows, "pct", stale_days=spec.stale_days),
+                "ohlc": recent_ohlc_rows(data_rows, limit=CHART_HISTORY_LIMIT),
+                "chart_type": "ohlc",
+            }
+        )
     return rows
 
 
@@ -1602,6 +1629,7 @@ def build_snapshot(fetch_records: list[dict[str, str]], *, fetch_policy_news: bo
             f"三币种资金流向直接调用用户提供代码：{USER_FX_FLOW_CODE}",
             "derived = 本地公式而非外部供应商：CNY_BASE=1；债券曲线=10Y-2Y；CNYJPY=1/JPYCNY；RUB 交叉汇率优先使用具备历史深度的 Yahoo 直接报价，历史不足才用 USDCNY/USDRUB 或 USDJPY/USDRUB 派生并在 source_audit 里比对最新直接报价。",
             "美债扩展期限优先使用 WSCN 日线；中国国债使用 ChinaMoney/CFETS 官方收盘收益率曲线并按缺口回填历史；德国2Y/5Y/7Y/10Y/30Y使用 Bundesbank 当前联邦证券官方日频 CSV，德国1Y/3Y使用 Bundesbank 官方 Svensson 期限结构日频 CSV，德国3M/6M暂无稳定官方日频二级市场源，暂用 Trading Economics 最新页；日本1M/3M/6M 使用 Investing.com 历史表并在有更新日期时合并 Trading Economics 最新页；日本1Y/2Y/3Y/5Y/7Y/10Y/30Y 使用日本财务省 MOF 官方收益率曲线作为历史底座并合并 Trading Economics 最新页；韩国1M/3M/6M 使用 SMBS KORIBOR 作为短端资金代理而非政府债，韩国3M/6M可由 BOK ECOS 交叉验证，韩国1Y以上使用 Trading Economics 最新页并按日合并本地缓存。",
+            "宏观指标使用 Yahoo Finance 日线：美元指数 DX-Y.NYB、VIX ^VIX、黄金 GC=F、WTI 原油 CL=F。",
             "政策新闻雷达只做加息、降息、维持利率相关文本筛选；抓取或 AI 分类不可用时退回本地规则解析。",
         ],
     }
@@ -2855,6 +2883,7 @@ def render_html(snapshot: dict[str, Any]) -> str:
     ohlc_payload = {
         row["key"]: {
             "country": row["country"],
+            "code": row.get("code") or row["country"],
             "group": row["group"],
             "label": row["label"],
             "unit": row["unit"],
@@ -2972,16 +3001,17 @@ def render_html(snapshot: dict[str, Any]) -> str:
             "</tr>"
         )
 
-    for country in [item["name"] for item in COUNTRIES]:
+    derivative_group_order = [item["name"] for item in COUNTRIES] + ["宏观指标"]
+    for country in derivative_group_order:
         country_rows = second_order_by_country.get(country, [])
         if not country_rows:
             continue
         core_rows = [row for row in country_rows if not row.get("extra_bond")]
         extra_rows = [row for row in country_rows if row.get("extra_bond")]
-        expanded = country == "美国"
+        expanded = country in {"美国", "宏观指标"}
         toggle_class = "country-toggle expanded" if expanded else "country-toggle collapsed"
         toggle_icon = "▾" if expanded else "▸"
-        count_text = f"{len(core_rows)} 核心"
+        count_text = f"{len(core_rows)} 指标" if country == "宏观指标" else f"{len(core_rows)} 核心"
         if extra_rows:
             count_text += f" + {len(extra_rows)} 更多债券"
         html.append(
@@ -3029,6 +3059,14 @@ def render_html(snapshot: dict[str, Any]) -> str:
             '<button type="button" class="ohlc-window" data-window="180">180D</button>',
             '<button type="button" class="ohlc-window" data-window="360">360D</button>',
             "</div>",
+            '<label class="ohlc-picker" for="ohlc-country-select">',
+            "<span>国家</span>",
+            '<select id="ohlc-country-select"></select>',
+            "</label>",
+            '<label class="ohlc-picker" for="ohlc-asset-select">',
+            "<span>标的</span>",
+            '<select id="ohlc-asset-select"></select>',
+            "</label>",
             '<label class="ohlc-compare" for="ohlc-compare-select">',
             "<span>比较</span>",
             '<select id="ohlc-compare-select">',
@@ -3523,8 +3561,9 @@ th:first-child, td:first-child { text-align: left; }
 .segmented, .chart-tools { display: flex; align-items: center; gap: 6px; }
 .ohlc-toolbar button { border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); cursor: pointer; min-width: 34px; height: 30px; padding: 0 10px; font: inherit; font-size: 12px; font-weight: 650; }
 .ohlc-toolbar button.active { background: #eaf2ff; border-color: #aac5ee; color: var(--blue); }
-.ohlc-compare { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 650; }
-.ohlc-compare select { max-width: min(38vw, 280px); height: 30px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); padding: 0 28px 0 8px; font: inherit; font-size: 12px; }
+.ohlc-picker, .ohlc-compare { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 650; }
+.ohlc-picker select, .ohlc-compare select { max-width: min(38vw, 280px); height: 30px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); padding: 0 28px 0 8px; font: inherit; font-size: 12px; }
+.ohlc-picker select { max-width: min(28vw, 220px); }
 .ohlc-compare select:disabled { background: #f3f6fa; color: var(--muted); }
 .date-tools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; color: var(--muted); font-size: 12px; font-weight: 650; }
 .date-tools label { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
@@ -3750,13 +3789,16 @@ th:first-child, td:first-child { text-align: left; }
   .ohlc-toolbar { display: grid; grid-template-columns: 1fr; align-items: stretch; gap: 10px; }
   .ohlc-mode-group,
   .ohlc-window-group,
+  .ohlc-picker,
   .ohlc-compare,
   .ohlc-chart-tools,
   .ohlc-date-tools { width: 100%; min-width: 0; }
   .ohlc-mode-group .ohlc-mode,
   .ohlc-window-group .ohlc-window { flex: 1 1 0; min-width: 0; }
   .ohlc-toolbar button { height: 38px; white-space: nowrap; }
+  .ohlc-picker,
   .ohlc-compare { display: grid; grid-template-columns: 54px minmax(0, 1fr); align-items: center; }
+  .ohlc-picker select,
   .ohlc-compare select { width: 100%; max-width: none; height: 38px; min-width: 0; }
   .ohlc-chart-tools { display: grid; grid-template-columns: 44px 44px minmax(72px, 1fr) 56px; gap: 8px; align-items: center; }
   .ohlc-chart-tools button { width: 100%; min-width: 0; padding: 0 8px; }
@@ -3806,6 +3848,8 @@ JS = """
   const zoomInButton = document.getElementById("ohlc-zoom-in");
   const zoomOutButton = document.getElementById("ohlc-zoom-out");
   const resetButton = document.getElementById("ohlc-reset");
+  const ohlcCountrySelect = document.getElementById("ohlc-country-select");
+  const ohlcAssetSelect = document.getElementById("ohlc-asset-select");
   const compareSelect = document.getElementById("ohlc-compare-select");
   const rangeStartInput = document.getElementById("ohlc-start-date");
   const rangeEndInput = document.getElementById("ohlc-end-date");
@@ -3826,6 +3870,16 @@ JS = """
   const spreadChart = document.getElementById("spread-chart");
   const spreadTooltip = document.getElementById("spread-tooltip");
   const windowSteps = [90, 180, 360];
+  const ohlcPickerGroups = Object.entries(ohlcData).reduce((groups, [key, item]) => {
+    const code = item.code || item.country || "OTHER";
+    let group = groups.find((candidate) => candidate.code === code);
+    if (!group) {
+      group = { code, name: item.country || code, items: [] };
+      groups.push(group);
+    }
+    group.items.push({ key, label: `${item.group} / ${item.label}` });
+    return groups;
+  }, []);
   let currentKey = null;
   let compareKey = "";
   let chartMode = "move";
@@ -3834,6 +3888,7 @@ JS = """
   const customRangeByKey = {};
   let dragStart = null;
   let spreadMode = "30";
+  let sharedHoverDate = null;
 
   const fmt = (value) => {
     if (value === null || value === undefined || Number.isNaN(Number(value))) return "缺失";
@@ -4076,6 +4131,17 @@ JS = """
 
   const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
+  const syncSharedCrosshairs = () => {
+    document.querySelectorAll(".move-crosshair,.candle-crosshair,.spread-crosshair,.curve-crosshair").forEach((line) => {
+      line.setAttribute("opacity", sharedHoverDate && line.getAttribute("data-hover-date") === sharedHoverDate ? "1" : "0");
+    });
+  };
+
+  const setSharedHoverDate = (date) => {
+    sharedHoverDate = date || null;
+    syncSharedCrosshairs();
+  };
+
   const sourceRows = (item) => item?.chartType === "bond_curve"
     ? (item.curve?.rows || [])
     : (item.ohlc || []);
@@ -4160,6 +4226,31 @@ JS = """
     } else {
       compareSelect.value = compareKey;
     }
+  };
+
+  const setOhlcAssetOptions = (code, preferredKey = "") => {
+    if (!ohlcAssetSelect) return;
+    const group = ohlcPickerGroups.find((candidate) => candidate.code === code) || ohlcPickerGroups[0];
+    const items = group?.items || [];
+    ohlcAssetSelect.innerHTML = items.map((item) => `<option value="${esc(item.key)}">${esc(item.label)}</option>`).join("");
+    if (items.some((item) => item.key === preferredKey)) {
+      ohlcAssetSelect.value = preferredKey;
+    } else if (items[0]) {
+      ohlcAssetSelect.value = items[0].key;
+    }
+  };
+
+  const syncOhlcPickers = (key) => {
+    if (!ohlcCountrySelect || !ohlcAssetSelect) return;
+    if (!ohlcCountrySelect.options.length) {
+      ohlcCountrySelect.innerHTML = ohlcPickerGroups
+        .map((group) => `<option value="${esc(group.code)}">${esc(group.name)}</option>`)
+        .join("");
+    }
+    const item = ohlcData[key];
+    const code = item?.code || item?.country || ohlcPickerGroups[0]?.code || "";
+    if (code) ohlcCountrySelect.value = code;
+    setOhlcAssetOptions(code, key);
   };
 
   const updateControls = (item) => {
@@ -4336,7 +4427,7 @@ JS = """
     const hitW = Math.max(8, xStep);
     const hits = bars.map((bar, index) => (
       `<g class="move-hit" data-index="${index}">`
-      + `<line class="move-crosshair" x1="${x(index)}" x2="${x(index)}" y1="${margin.top}" y2="${height - margin.bottom}" stroke="#98a2b3" stroke-width="1" opacity="0" />`
+      + `<line class="move-crosshair" data-hover-date="${esc(bar.date)}" x1="${x(index)}" x2="${x(index)}" y1="${margin.top}" y2="${height - margin.bottom}" stroke="#98a2b3" stroke-width="1" opacity="0" />`
       + `<rect x="${x(index) - hitW / 2}" y="${margin.top}" width="${hitW}" height="${innerH}" fill="transparent" />`
       + `</g>`
     )).join("");
@@ -4351,15 +4442,14 @@ JS = """
       + dots
       + (compareLinePath ? `<path d="${compareLinePath}" fill="none" stroke="#2563eb" stroke-width="1.8" stroke-dasharray="4 3" />${compareDots}${legend}` : "")
       + hits;
+    syncSharedCrosshairs();
 
     const compareByDate = new Map((compareItem?.ohlc || []).map((bar) => [bar.date, bar]));
     Array.from(svg.querySelectorAll(".move-hit")).forEach((node) => {
       const bar = bars[Number(node.dataset.index)];
       const change = Number(bar.change_pct);
       node.addEventListener("mousemove", (event) => {
-        Array.from(svg.querySelectorAll(".move-crosshair")).forEach((line) => { line.setAttribute("opacity", "0"); });
-        const crosshair = node.querySelector(".move-crosshair");
-        if (crosshair) crosshair.setAttribute("opacity", "1");
+        setSharedHoverDate(bar.date);
         const bounds = panel.getBoundingClientRect();
         tooltip.classList.add("dark");
         tooltip.style.display = "block";
@@ -4381,8 +4471,7 @@ JS = """
           + compareHtml;
       });
       node.addEventListener("mouseleave", () => {
-        const crosshair = node.querySelector(".move-crosshair");
-        if (crosshair) crosshair.setAttribute("opacity", "0");
+        setSharedHoverDate(null);
         tooltip.style.display = "none";
       });
     });
@@ -4475,6 +4564,7 @@ JS = """
     const candles = primarySeries.map((bar) => {
       const hitW = Math.max(8, xStep);
       return `<g class="candle" data-date="${esc(bar.date)}">`
+        + `<line class="candle-crosshair" data-hover-date="${esc(bar.date)}" x1="${x(bar.plotIndex)}" x2="${x(bar.plotIndex)}" y1="${margin.top}" y2="${height - margin.bottom}" stroke="#98a2b3" stroke-width="1" opacity="0" />`
         + candleSvg(bar, "primary")
         + `<rect class="hit" x="${x(bar.plotIndex) - hitW / 2}" y="${margin.top}" width="${hitW}" height="${innerH}" fill="transparent" />`
         + `</g>`;
@@ -4496,6 +4586,7 @@ JS = """
       + compareCandles
       + candles;
     svg.innerHTML += legend;
+    syncSharedCrosshairs();
 
     const compareByDate = new Map((compareItem?.ohlc || []).map((bar) => [bar.date, bar]));
     const normalizedPrimaryByDate = new Map(primarySeries.map((bar) => [bar.date, bar]));
@@ -4503,6 +4594,8 @@ JS = """
     Array.from(svg.querySelectorAll(".candle")).forEach((node) => {
       const bar = bars.find((item) => item.date === node.dataset.date);
       node.addEventListener("mousemove", (event) => {
+        const crosshair = node.querySelector(".candle-crosshair");
+        setSharedHoverDate(bar.date);
         const bounds = panel.getBoundingClientRect();
         tooltip.style.display = "block";
         tooltip.style.left = `${Math.min(bounds.width - 190, Math.max(8, event.clientX - bounds.left + 14))}px`;
@@ -4525,6 +4618,7 @@ JS = """
           + compareHtml;
       });
       node.addEventListener("mouseleave", () => {
+        setSharedHoverDate(null);
         tooltip.style.display = "none";
       });
     });
@@ -4789,7 +4883,7 @@ JS = """
     const hitW = Math.max(12, xStep);
     const hits = rows.map((row, index) => (
       `<g class="spread-hit" data-index="${index}">`
-      + `<line class="spread-crosshair" x1="${x(index).toFixed(2)}" x2="${x(index).toFixed(2)}" y1="${margin.top}" y2="${height - margin.bottom}" stroke="#98a2b3" stroke-width="1" opacity="0" />`
+      + `<line class="spread-crosshair" data-hover-date="${esc(row.date)}" x1="${x(index).toFixed(2)}" x2="${x(index).toFixed(2)}" y1="${margin.top}" y2="${height - margin.bottom}" stroke="#98a2b3" stroke-width="1" opacity="0" />`
       + `<rect x="${(x(index) - hitW / 2).toFixed(2)}" y="${margin.top}" width="${hitW.toFixed(2)}" height="${innerH}" fill="transparent" />`
       + `</g>`
     )).join("");
@@ -4805,13 +4899,12 @@ JS = """
       + `<text x="${margin.left + 98}" y="17" fill="#66717d" font-size="12">绿色=长端高，红色=短端高</text>`
       + dateTicks.join("")
       + hits;
+    syncSharedCrosshairs();
     Array.from(spreadChart.querySelectorAll(".spread-hit")).forEach((node) => {
       const row = rows[Number(node.dataset.index)];
       const previous = rows[Number(node.dataset.index) - 1] || null;
       node.addEventListener("mousemove", (event) => {
-        Array.from(spreadChart.querySelectorAll(".spread-crosshair")).forEach((line) => { line.setAttribute("opacity", "0"); });
-        const crosshair = node.querySelector(".spread-crosshair");
-        if (crosshair) crosshair.setAttribute("opacity", "1");
+        setSharedHoverDate(row.date);
         if (!spreadTooltip) return;
         const bounds = spreadChart.parentElement.getBoundingClientRect();
         const delta = previous ? row.spreadBp - previous.spreadBp : null;
@@ -4826,8 +4919,7 @@ JS = """
           + `<div class="muted">较前日：${delta === null ? "缺失" : `${signed(delta, 1)}bp`}</div>`;
       });
       node.addEventListener("mouseleave", () => {
-        const crosshair = node.querySelector(".spread-crosshair");
-        if (crosshair) crosshair.setAttribute("opacity", "0");
+        setSharedHoverDate(null);
         if (spreadTooltip) spreadTooltip.style.display = "none";
       });
     });
@@ -4874,6 +4966,7 @@ JS = """
     if (!sourceItem) return;
     const { scroll = true } = options;
     currentKey = key;
+    syncOhlcPickers(key);
     const item = visibleItem(key, sourceItem);
     const compareItem = comparisonFor(item);
     rows.forEach((row) => row.classList.toggle("selected", row.dataset.ohlcKey === key));
@@ -5028,6 +5121,17 @@ JS = """
   compareSelect?.addEventListener("change", () => {
     compareKey = compareSelect.value || "";
     rerenderCurrent();
+  });
+
+  ohlcCountrySelect?.addEventListener("change", () => {
+    setOhlcAssetOptions(ohlcCountrySelect.value);
+    const key = ohlcAssetSelect?.value || "";
+    if (key) render(key, { scroll: false });
+  });
+
+  ohlcAssetSelect?.addEventListener("change", () => {
+    const key = ohlcAssetSelect.value || "";
+    if (key) render(key, { scroll: false });
   });
 
   windowButtons.forEach((button) => {

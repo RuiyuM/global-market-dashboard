@@ -25,6 +25,7 @@ VOLS = {"equity", "bond", "fx"}
 VOL_WINDOWS = {"7D", "30D"}
 VOL_RANKING_ROWS = 6
 INLINE_VOL_COUNT = len(COUNTRIES) * len(FIELDS)
+MACRO_KEYS = {"DXY", "VIX", "GOLD", "USOIL"}
 ONE_YEAR_BOND_KEYS = {"US_1Y": "美国", "CN_1Y": "中国", "JP_1Y": "日本", "DE_1Y": "德国", "KR_1Y": "韩国"}
 EXTENDED_BOND_KEYS = {
     "US_1M": "美国",
@@ -61,9 +62,9 @@ EXTENDED_BOND_KEYS = {
     "KR_5Y": "韩国",
     "KR_30Y": "韩国",
 }
-DERIVATIVE_VOL_COUNT = INLINE_VOL_COUNT + len(ONE_YEAR_BOND_KEYS) + len(EXTENDED_BOND_KEYS)
+DERIVATIVE_VOL_COUNT = INLINE_VOL_COUNT + len(ONE_YEAR_BOND_KEYS) + len(EXTENDED_BOND_KEYS) + len(MACRO_KEYS)
 SECOND_ORDER_WINDOWS = {"1D", "7D", "30D"}
-SECOND_ORDER_ROWS = len(COUNTRIES) * 5 + len(ONE_YEAR_BOND_KEYS) + len(EXTENDED_BOND_KEYS)
+SECOND_ORDER_ROWS = len(COUNTRIES) * 5 + len(ONE_YEAR_BOND_KEYS) + len(EXTENDED_BOND_KEYS) + len(MACRO_KEYS)
 BOND_CURVE_ROWS = len(COUNTRIES)
 OHLC_MAX_WINDOW = 360
 
@@ -356,6 +357,14 @@ def main() -> int:
         "data-spread-window=\"1\"",
         "data-spread-window=\"7\"",
         "data-spread-window=\"30\"",
+        'id="ohlc-country-select"',
+        'id="ohlc-asset-select"',
+        "ohlcPickerGroups",
+        "syncOhlcPickers",
+        "sharedHoverDate",
+        "setSharedHoverDate",
+        "candle-crosshair",
+        "data-hover-date",
     ]:
         if marker not in html:
             errors.append(f"missing OHLC interaction marker: {marker}")
@@ -396,6 +405,15 @@ def main() -> int:
             errors.append(f"extended bond row should be marked extra: {key}")
         if f'data-ohlc-key="{key}"' not in html:
             errors.append(f"missing extended bond OHLC row marker: {key}")
+    for key in MACRO_KEYS:
+        row = row_by_key.get(key)
+        if not row:
+            errors.append(f"missing macro second-order row: {key}")
+            continue
+        if row.get("country") != "宏观指标" or row.get("group") != "宏观":
+            errors.append(f"bad macro row placement: {key} {row.get('country')} {row.get('group')}")
+        if f'data-ohlc-key="{key}"' not in html:
+            errors.append(f"missing macro OHLC row marker: {key}")
     curve_rows = [row for row in second_order if row.get("group") == "债券曲线"]
     if len(curve_rows) != BOND_CURVE_ROWS:
         errors.append(f"bond curve row count mismatch: {len(curve_rows)}")
