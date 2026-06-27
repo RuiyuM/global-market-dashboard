@@ -3020,11 +3020,11 @@ def render_html(snapshot: dict[str, Any]) -> str:
             '<section class="panel ohlc-panel" id="ohlc-panel">',
             "<h2>日线 OHLC 可视化</h2>",
             '<div class="ohlc-toolbar">',
-            '<div class="segmented" aria-label="OHLC 图表模式">',
+            '<div class="segmented ohlc-mode-group" aria-label="OHLC 图表模式">',
             '<button type="button" class="ohlc-mode active" data-mode="move">涨跌幅</button>',
             '<button type="button" class="ohlc-mode" data-mode="ohlc">K线</button>',
             "</div>",
-            '<div class="segmented" aria-label="OHLC 时间窗口">',
+            '<div class="segmented ohlc-window-group" aria-label="OHLC 时间窗口">',
             '<button type="button" class="ohlc-window active" data-window="90">90D</button>',
             '<button type="button" class="ohlc-window" data-window="180">180D</button>',
             '<button type="button" class="ohlc-window" data-window="360">360D</button>',
@@ -3039,19 +3039,19 @@ def render_html(snapshot: dict[str, Any]) -> str:
             ],
             "</select>",
             "</label>",
-            '<div class="chart-tools">',
+            '<div class="chart-tools ohlc-chart-tools">',
             '<button type="button" id="ohlc-zoom-in" title="放大">+</button>',
             '<button type="button" id="ohlc-zoom-out" title="缩小">-</button>',
             '<button type="button" id="ohlc-reset">Reset</button>',
             '<button type="button" id="ohlc-align-spread" title="把日线图区间对齐到利差计算">对齐</button>',
             '<span id="ohlc-range-label"></span>',
             "</div>",
-            '<div class="date-tools">',
-            '<label>区间 <input type="date" id="ohlc-start-date"></label>',
-            '<label>到 <input type="date" id="ohlc-end-date"></label>',
+            '<div class="date-tools ohlc-date-tools">',
+            '<label class="date-field ohlc-start-field">区间 <input type="date" id="ohlc-start-date"></label>',
+            '<label class="date-field ohlc-end-field">到 <input type="date" id="ohlc-end-date"></label>',
             '<button type="button" id="ohlc-apply-range">应用</button>',
             '<button type="button" id="ohlc-clear-range">清除</button>',
-            '<label>日期 <input type="date" id="ohlc-jump-date"></label>',
+            '<label class="date-field ohlc-jump-field">快速查看 <input type="date" id="ohlc-jump-date"></label>',
             '<button type="button" id="ohlc-jump-date-button">跳转</button>',
             "</div>",
             "</div>",
@@ -3743,6 +3743,32 @@ th:first-child, td:first-child { text-align: left; }
   .quant-fund-head { flex-direction: column; }
   .quant-fund-grid { grid-template-columns: 1fr; }
   .ranking-block + .ranking-block { border-left: 0; border-top: 1px solid var(--line); padding-left: 0; padding-top: 12px; }
+}
+@media (max-width: 640px) {
+  main { padding: 10px; }
+  .panel { padding: 12px; }
+  .ohlc-toolbar { display: grid; grid-template-columns: 1fr; align-items: stretch; gap: 10px; }
+  .ohlc-mode-group,
+  .ohlc-window-group,
+  .ohlc-compare,
+  .ohlc-chart-tools,
+  .ohlc-date-tools { width: 100%; min-width: 0; }
+  .ohlc-mode-group .ohlc-mode,
+  .ohlc-window-group .ohlc-window { flex: 1 1 0; min-width: 0; }
+  .ohlc-toolbar button { height: 38px; white-space: nowrap; }
+  .ohlc-compare { display: grid; grid-template-columns: 54px minmax(0, 1fr); align-items: center; }
+  .ohlc-compare select { width: 100%; max-width: none; height: 38px; min-width: 0; }
+  .ohlc-chart-tools { display: grid; grid-template-columns: 44px 44px minmax(72px, 1fr) 56px; gap: 8px; align-items: center; }
+  .ohlc-chart-tools button { width: 100%; min-width: 0; padding: 0 8px; }
+  #ohlc-range-label { grid-column: 1 / -1; min-width: 0; line-height: 1.35; overflow-wrap: anywhere; }
+  .ohlc-date-tools { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; align-items: center; }
+  .ohlc-date-tools .date-field { display: grid; grid-template-columns: auto minmax(0, 1fr); width: 100%; min-width: 0; }
+  .ohlc-date-tools .date-field input { width: 100%; min-width: 0; height: 38px; }
+  .ohlc-date-tools button { width: 100%; min-width: 0; height: 38px; }
+  .ohlc-jump-field,
+  #ohlc-jump-date-button { grid-column: 1 / -1; }
+  .ohlc-head { font-size: 12px; line-height: 1.45; }
+  #ohlc-chart { min-height: 260px; }
 }
 """
 

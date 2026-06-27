@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import market_dashboard
 from market_dashboard import COUNTRY_BOND_TENORS
 from market_dashboard import CHINA_BOND_SPECS
+from market_dashboard import CSS
 from market_dashboard import GERMANY_BOND_SPECS
 from market_dashboard import JAPAN_BOND_SPECS
 from market_dashboard import JS
@@ -112,6 +113,16 @@ def test_ohlc_supports_custom_range_and_exact_date_controls() -> None:
     )
     assert 'id="ohlc-start-date"' in html
     assert 'id="ohlc-align-spread"' in html
+    assert 'class="segmented ohlc-mode-group"' in html
+    assert 'class="segmented ohlc-window-group"' in html
+    assert 'class="chart-tools ohlc-chart-tools"' in html
+    assert 'class="date-tools ohlc-date-tools"' in html
+    assert '<label class="date-field ohlc-jump-field">快速查看 <input type="date" id="ohlc-jump-date"></label>' in html
+    assert '<label>日期 <input type="date" id="ohlc-jump-date"></label>' not in html
+    assert "@media (max-width: 640px)" in CSS
+    assert ".ohlc-chart-tools { display: grid;" in CSS
+    assert "#ohlc-range-label { grid-column: 1 / -1;" in CSS
+    assert ".ohlc-jump-field," in CSS
     assert "const customRangeByKey = {};" in JS
     assert "const applyOhlcRange = () =>" in JS
     assert "const jumpToOhlcDate = () =>" in JS
