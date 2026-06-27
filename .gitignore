@@ -4,3 +4,6 @@ __pycache__/
 dashboard/index.html
 dashboard/latest_market_snapshot.json
 dashboard/quant_fund_snapshot.json
+dashboard/quant_fund.html
+dashboard/data/
+*.log

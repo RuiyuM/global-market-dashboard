@@ -4,50 +4,24 @@ set -euo pipefail
 REPO_URL="${REPO_URL:-https://github.com/RuiyuM/global-market-dashboard.git}"
 APP_DIR="${APP_DIR:-/opt/global-market-dashboard}"
 SERVICE_USER="${SERVICE_USER:-globaldash}"
-UPDATE_TIME="${UPDATE_TIME:-}"
-UPDATE_CALENDAR="${UPDATE_CALENDAR:-}"
-
-if [[ -z "${UPDATE_CALENDAR}" ]]; then
-  if [[ -n "${UPDATE_TIME}" ]]; then
-    UPDATE_CALENDAR="*-*-* ${UPDATE_TIME}"
-  else
-    UPDATE_CALENDAR="Mon..Fri *-*-* 17:30:00 America/New_York"
-  fi
-fi
+UPDATE_TIME="${UPDATE_TIME:-07:30:00}"
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "Run as root: curl -fsSL ... | sudo bash" >&2
   exit 1
 fi
 
-NGINX_SITE_TARGET=""
-
 if command -v apt-get >/dev/null 2>&1; then
   apt-get update
   DEBIAN_FRONTEND=noninteractive apt-get install -y git python3 curl nginx ca-certificates
-  NGINX_SITE_TARGET="/etc/nginx/sites-available/global-market-dashboard"
-elif command -v dnf >/dev/null 2>&1; then
-  dnf install -y git python3 curl ca-certificates
-  dnf install -y nginx || dnf install -y --disableexcludes=all nginx
-  NGINX_SITE_TARGET="/etc/nginx/conf.d/global-market-dashboard.conf"
-elif command -v yum >/dev/null 2>&1; then
-  yum install -y git python3 curl ca-certificates
-  yum install -y nginx || yum install -y --disableexcludes=all nginx
-  NGINX_SITE_TARGET="/etc/nginx/conf.d/global-market-dashboard.conf"
 else
-  echo "This installer supports Debian/Ubuntu apt, OpenCloudOS/CentOS/RHEL dnf, or yum systems." >&2
+  echo "This installer currently supports Debian/Ubuntu systems with apt-get." >&2
   exit 1
 fi
 
 if ! id "${SERVICE_USER}" >/dev/null 2>&1; then
-  NOLOGIN_SHELL="$(command -v nologin || true)"
-  if [[ -z "${NOLOGIN_SHELL}" ]]; then
-    NOLOGIN_SHELL="/sbin/nologin"
-  fi
-  useradd --system --home "${APP_DIR}" --shell "${NOLOGIN_SHELL}" "${SERVICE_USER}"
+  useradd --system --home "${APP_DIR}" --shell /usr/sbin/nologin "${SERVICE_USER}"
 fi
-
-PYTHON_BIN="$(command -v python3)"
 
 if [[ -d "${APP_DIR}/.git" ]]; then
   git -C "${APP_DIR}" pull --ff-only
@@ -67,12 +41,11 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-TimeoutStartSec=600
 User=${SERVICE_USER}
 Group=${SERVICE_USER}
 WorkingDirectory=${APP_DIR}
 ExecStart=${APP_DIR}/update_market_dashboard.sh
-ExecStartPost=-${PYTHON_BIN} ${APP_DIR}/validate_market_dashboard.py
+ExecStartPost=/usr/bin/python3 ${APP_DIR}/validate_market_dashboard.py
 EOF
 
 cat >/etc/systemd/system/global-market-dashboard-update.timer <<EOF
@@ -80,7 +53,7 @@ cat >/etc/systemd/system/global-market-dashboard-update.timer <<EOF
 Description=Daily Global Market Dashboard update
 
 [Timer]
-OnCalendar=${UPDATE_CALENDAR}
+OnCalendar=*-*-* ${UPDATE_TIME}
 Persistent=true
 Unit=global-market-dashboard-update.service
 
@@ -88,7 +61,7 @@ Unit=global-market-dashboard-update.service
 WantedBy=timers.target
 EOF
 
-cat >"${NGINX_SITE_TARGET}" <<EOF
+cat >/etc/nginx/sites-available/global-market-dashboard <<EOF
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
@@ -103,29 +76,17 @@ server {
 }
 EOF
 
-if [[ -d /etc/nginx/sites-enabled ]]; then
-  rm -f /etc/nginx/sites-enabled/default
-  ln -sf "${NGINX_SITE_TARGET}" /etc/nginx/sites-enabled/global-market-dashboard
-fi
-rm -f /etc/nginx/conf.d/default.conf
+rm -f /etc/nginx/sites-enabled/default
+ln -sf /etc/nginx/sites-available/global-market-dashboard /etc/nginx/sites-enabled/global-market-dashboard
 
 systemctl daemon-reload
-systemctl enable --now nginx
 systemctl enable --now global-market-dashboard-update.timer
 systemctl start global-market-dashboard-update.service
-if command -v chcon >/dev/null 2>&1; then
-  chcon -R -t httpd_sys_content_t "${APP_DIR}/dashboard" || true
-fi
 nginx -t
 systemctl reload nginx
 
 if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
   ufw allow 80/tcp || true
-fi
-
-if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
-  firewall-cmd --permanent --add-service=http || true
-  firewall-cmd --reload || true
 fi
 
 PUBLIC_IP="$(curl -fsS --max-time 5 https://api.ipify.org || hostname -I | awk '{print $1}')"

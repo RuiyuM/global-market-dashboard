@@ -87,6 +87,26 @@ WSCN_SPECS = [
 
 INVESTING_SPECS: list[tuple[SeriesSpec, InvestingSpec]] = [
     (
+        SeriesSpec("JP_1M", "日本1个月国债", "bond", "investing", "JP1MT=XX", "JP_1M.csv", "JP1M_INVESTING_1D_ohlc.csv"),
+        InvestingSpec(
+            "JP1M",
+            "208090",
+            "JP1MT=XX",
+            "japan-1-month-historical-data",
+            "Japan 1-Month Bond Yield Historical Data",
+            "JP1M_INVESTING_1D_ohlc.csv",
+            fetch_mode="page",
+        ),
+    ),
+    (
+        SeriesSpec("JP_3M", "日本3个月国债", "bond", "investing", "JP3MT=XX", "JP_3M.csv", "JP3M_INVESTING_1D_ohlc.csv"),
+        InvestingSpec("JP3M", "23890", "JP3MT=XX", "japan-3-month-bond-yield-historical-data", "Japan 3-Month Bond Yield Historical Data", "JP3M_INVESTING_1D_ohlc.csv"),
+    ),
+    (
+        SeriesSpec("JP_6M", "日本6个月国债", "bond", "investing", "JP6MT=XX", "JP_6M.csv", "JP6M_INVESTING_1D_ohlc.csv"),
+        InvestingSpec("JP6M", "23891", "JP6MT=XX", "japan-6-month-bond-yield-historical-data", "Japan 6-Month Bond Yield Historical Data", "JP6M_INVESTING_1D_ohlc.csv"),
+    ),
+    (
         SeriesSpec("JP_1Y", "日本1年国债", "bond", "investing", "JP1YT=XX", "JP_1Y.csv", "JP1YR_INVESTING_1D_ohlc.csv"),
         InvestingSpec("JP1Y", "23892", "JP1YT=XX", "japan-1-year-bond-yield-historical-data", "Japan 1-Year Bond Yield Historical Data", "JP1YR_INVESTING_1D_ohlc.csv"),
     ),
@@ -95,8 +115,24 @@ INVESTING_SPECS: list[tuple[SeriesSpec, InvestingSpec]] = [
         InvestingSpec("JP2Y", "23893", "JP2YT=XX", "japan-2-year-bond-yield-historical-data", "Japan 2-Year Bond Yield Historical Data", "JP2YR_INVESTING_1D_ohlc.csv"),
     ),
     (
+        SeriesSpec("JP_3Y", "日本3年国债", "bond", "investing", "JP3YT=XX", "JP_3Y.csv", "JP3YR_INVESTING_1D_ohlc.csv"),
+        InvestingSpec("JP3Y", "23894", "JP3YT=XX", "japan-3-year-bond-yield-historical-data", "Japan 3-Year Bond Yield Historical Data", "JP3YR_INVESTING_1D_ohlc.csv"),
+    ),
+    (
+        SeriesSpec("JP_5Y", "日本5年国债", "bond", "investing", "JP5YT=XX", "JP_5Y.csv", "JP5YR_INVESTING_1D_ohlc.csv"),
+        InvestingSpec("JP5Y", "23896", "JP5YT=XX", "japan-5-year-bond-yield-historical-data", "Japan 5-Year Bond Yield Historical Data", "JP5YR_INVESTING_1D_ohlc.csv"),
+    ),
+    (
+        SeriesSpec("JP_7Y", "日本7年国债", "bond", "investing", "JP7YT=XX", "JP_7Y.csv", "JP7YR_INVESTING_1D_ohlc.csv"),
+        InvestingSpec("JP7Y", "23898", "JP7YT=XX", "japan-7-year-bond-yield-historical-data", "Japan 7-Year Bond Yield Historical Data", "JP7YR_INVESTING_1D_ohlc.csv"),
+    ),
+    (
         SeriesSpec("JP_10Y", "日本10年国债", "bond", "investing", "JP10YT=RR", "JP_10Y.csv", "JP10YR_OTC_1D_ohlc.csv"),
         InvestingSpec("JP10Y", "23901", "JP10YT=RR", "japan-10-year-bond-yield-historical-data", "Japan 10-Year Bond Yield Historical Data", "JP10YR_INVESTING_1D_ohlc.csv"),
+    ),
+    (
+        SeriesSpec("JP_30Y", "日本30年国债", "bond", "investing", "JP30YT=XX", "JP_30Y.csv", "JP30YR_INVESTING_1D_ohlc.csv"),
+        InvestingSpec("JP30Y", "23903", "JP30YT=XX", "japan-30-year-bond-yield-historical-data", "Japan 30-Year Bond Yield Historical Data", "JP30YR_INVESTING_1D_ohlc.csv"),
     ),
     (
         SeriesSpec("DE_2Y", "德国2年国债", "bond", "investing", "DE2YT=RR", "DE_2Y.csv"),
@@ -177,7 +213,18 @@ COUNTRY_BOND_TENORS: dict[str, list[tuple[str, str]]] = {
         ("7Y", "CN_7Y"),
         ("10Y", "CN_10Y"),
     ],
-    "JP": [("1Y", "JP_1Y"), ("2Y", "JP_2Y"), ("10Y", "JP_10Y")],
+    "JP": [
+        ("1M", "JP_1M"),
+        ("3M", "JP_3M"),
+        ("6M", "JP_6M"),
+        ("1Y", "JP_1Y"),
+        ("2Y", "JP_2Y"),
+        ("3Y", "JP_3Y"),
+        ("5Y", "JP_5Y"),
+        ("7Y", "JP_7Y"),
+        ("10Y", "JP_10Y"),
+        ("30Y", "JP_30Y"),
+    ],
     "DE": [("2Y", "DE_2Y"), ("10Y", "DE_10Y")],
     "RU": [("2Y", "RU_2Y"), ("10Y", "RU_10Y")],
     "KR": [("2Y", "KR_2Y"), ("10Y", "KR_10Y")],
@@ -325,6 +372,21 @@ def write_ohlc(path: Path, rows: list[dict[str, Any]]) -> None:
         writer.writerows(rows)
 
 
+def row_date_key(row: dict[str, Any]) -> date:
+    value = row["date"]
+    if isinstance(value, date):
+        return value
+    return datetime.strptime(str(value), "%Y-%m-%d").date()
+
+
+def merge_ohlc_rows(existing: list[dict[str, Any]], incoming: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: dict[date, dict[str, Any]] = {}
+    for row in [*existing, *incoming]:
+        key = row_date_key(row)
+        merged[key] = {**row, "date": key.isoformat()}
+    return [merged[key] for key in sorted(merged)]
+
+
 def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
     records: list[dict[str, str]] = []
     DASHBOARD_DATA.mkdir(parents=True, exist_ok=True)
@@ -383,6 +445,8 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
         }
         try:
             rows = rows_from_investing_html(fetch_investing_html(investing_spec, start, end))
+            if investing_spec.fetch_mode == "page" and path.exists():
+                rows = merge_ohlc_rows(read_ohlc(path), rows)
             write_ohlc(path, rows)
             record.update({"status": "ok" if rows else "empty", "rows": str(len(rows)), "latest": rows[-1]["date"] if rows else ""})
         except Exception as exc:
@@ -1314,7 +1378,7 @@ def build_snapshot(fetch_records: list[dict[str, str]], *, fetch_policy_news: bo
             "7D/30D 波动率 = 对应窗口相邻交易观测的平均绝对日变化；债券单位 bp/日，股指和汇率单位 %/日。",
             f"三币种资金流向直接调用用户提供代码：{USER_FX_FLOW_CODE}",
             "derived = 本地公式而非外部供应商：CNY_BASE=1；债券曲线=10Y-2Y；CNYJPY=1/JPYCNY；RUB 交叉汇率优先使用具备历史深度的 Yahoo 直接报价，历史不足才用 USDCNY/USDRUB 或 USDJPY/USDRUB 派生并在 source_audit 里比对最新直接报价。",
-            "美债/中债扩展期限优先使用 WSCN 日线；WSCN 停更或陈旧的日本/德国长端不进入主监控，仍使用 Investing 的可更新期限。",
+            "美债/中债扩展期限优先使用 WSCN 日线；日本扩展期限使用 Investing 市场日线，1Y+ 可用日本财务省 MOF 官方收益率曲线做口径校验，1M/3M/6M 不在 MOF 曲线内。",
             "政策新闻雷达只做加息、降息、维持利率相关文本筛选；抓取或 AI 分类不可用时退回本地规则解析。",
         ],
     }

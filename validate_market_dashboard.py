@@ -37,6 +37,13 @@ EXTENDED_BOND_KEYS = {
     "CN_3Y": "中国",
     "CN_5Y": "中国",
     "CN_7Y": "中国",
+    "JP_1M": "日本",
+    "JP_3M": "日本",
+    "JP_6M": "日本",
+    "JP_3Y": "日本",
+    "JP_5Y": "日本",
+    "JP_7Y": "日本",
+    "JP_30Y": "日本",
 }
 DERIVATIVE_VOL_COUNT = INLINE_VOL_COUNT + len(ONE_YEAR_BOND_KEYS) + len(EXTENDED_BOND_KEYS)
 SECOND_ORDER_WINDOWS = {"1D", "7D", "30D"}
@@ -378,17 +385,20 @@ def main() -> int:
         errors.append(f"bond curve row count mismatch: {len(curve_rows)}")
     for row in second_order:
         metrics = row.get("metrics", {})
+        ohlc = row.get("ohlc") or []
         if set(metrics) != SECOND_ORDER_WINDOWS:
             errors.append(f"{row.get('country')} {row.get('label')} second order windows mismatch: {sorted(metrics)}")
         for window in SECOND_ORDER_WINDOWS:
             metric = metrics.get(window)
             if not metric:
+                minimum_rows = {"1D": 3, "7D": 14, "30D": 60}[window]
+                if len(ohlc) < minimum_rows:
+                    continue
                 errors.append(f"{row.get('country')} {row.get('label')} missing {window} derivative")
                 continue
             for key in ["velocity", "previous_velocity", "acceleration", "signal"]:
                 if key not in metric:
                     errors.append(f"{row.get('country')} {row.get('label')} {window} missing {key}")
-        ohlc = row.get("ohlc") or []
         if not ohlc:
             errors.append(f"{row.get('country')} {row.get('label')} missing OHLC rows")
         if row.get("key") == "US_10Y" and len(ohlc) < OHLC_MAX_WINDOW:

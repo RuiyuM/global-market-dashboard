@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import time
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
+from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Iterable
@@ -31,6 +33,7 @@ class BondSpec:
     header: str
     output_name: str
     path_prefix: str = "rates-bonds"
+    fetch_mode: str = "ajax"
 
     @property
     def page_url(self) -> str:
@@ -38,6 +41,31 @@ class BondSpec:
 
 
 BOND_SPECS = {
+    "JP1M": BondSpec(
+        key="JP1M",
+        instrument_id="208090",
+        source_symbol="JP1MT=XX",
+        slug="japan-1-month-historical-data",
+        header="Japan 1-Month Bond Yield Historical Data",
+        output_name="JP1M_INVESTING_1D_ohlc.csv",
+        fetch_mode="page",
+    ),
+    "JP3M": BondSpec(
+        key="JP3M",
+        instrument_id="23890",
+        source_symbol="JP3MT=XX",
+        slug="japan-3-month-bond-yield-historical-data",
+        header="Japan 3-Month Bond Yield Historical Data",
+        output_name="JP3M_INVESTING_1D_ohlc.csv",
+    ),
+    "JP6M": BondSpec(
+        key="JP6M",
+        instrument_id="23891",
+        source_symbol="JP6MT=XX",
+        slug="japan-6-month-bond-yield-historical-data",
+        header="Japan 6-Month Bond Yield Historical Data",
+        output_name="JP6M_INVESTING_1D_ohlc.csv",
+    ),
     "DE2Y": BondSpec(
         key="DE2Y",
         instrument_id="23685",
@@ -70,6 +98,30 @@ BOND_SPECS = {
         header="Japan 2-Year Bond Yield Historical Data",
         output_name="JP2YR_INVESTING_1D_ohlc.csv",
     ),
+    "JP3Y": BondSpec(
+        key="JP3Y",
+        instrument_id="23894",
+        source_symbol="JP3YT=XX",
+        slug="japan-3-year-bond-yield-historical-data",
+        header="Japan 3-Year Bond Yield Historical Data",
+        output_name="JP3YR_INVESTING_1D_ohlc.csv",
+    ),
+    "JP5Y": BondSpec(
+        key="JP5Y",
+        instrument_id="23896",
+        source_symbol="JP5YT=XX",
+        slug="japan-5-year-bond-yield-historical-data",
+        header="Japan 5-Year Bond Yield Historical Data",
+        output_name="JP5YR_INVESTING_1D_ohlc.csv",
+    ),
+    "JP7Y": BondSpec(
+        key="JP7Y",
+        instrument_id="23898",
+        source_symbol="JP7YT=XX",
+        slug="japan-7-year-bond-yield-historical-data",
+        header="Japan 7-Year Bond Yield Historical Data",
+        output_name="JP7YR_INVESTING_1D_ohlc.csv",
+    ),
     "JP10Y": BondSpec(
         key="JP10Y",
         instrument_id="23901",
@@ -77,6 +129,14 @@ BOND_SPECS = {
         slug="japan-10-year-bond-yield-historical-data",
         header="Japan 10-Year Bond Yield Historical Data",
         output_name="JP10YR_INVESTING_1D_ohlc.csv",
+    ),
+    "JP30Y": BondSpec(
+        key="JP30Y",
+        instrument_id="23903",
+        source_symbol="JP30YT=XX",
+        slug="japan-30-year-bond-yield-historical-data",
+        header="Japan 30-Year Bond Yield Historical Data",
+        output_name="JP30YR_INVESTING_1D_ohlc.csv",
     ),
     "RU2Y": BondSpec(
         key="RU2Y",
@@ -186,7 +246,9 @@ def build_cookie_opener():
 
 def fetch_html(spec: BondSpec, start_date: date, end_date: date) -> str:
     opener = build_cookie_opener()
-    opener.open(Request(spec.page_url, headers=make_headers()), timeout=30).read()
+    page_html = opener.open(Request(spec.page_url, headers=make_headers()), timeout=30).read().decode("utf-8", "ignore")
+    if spec.fetch_mode == "page":
+        return page_html
 
     form = urlencode(
         {
@@ -213,6 +275,79 @@ def fetch_html(spec: BondSpec, start_date: date, end_date: date) -> str:
         return response.read().decode("utf-8", "ignore")
 
 
+def extract_json_object_after_marker(text: str, marker: str) -> dict[str, object] | None:
+    marker_index = text.find(marker)
+    if marker_index < 0:
+        return None
+    start = text.find("{", marker_index + len(marker))
+    if start < 0:
+        return None
+
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return json.loads(text[start : index + 1])
+    return None
+
+
+def parse_float(value: object) -> float:
+    return float(str(value).replace(",", ""))
+
+
+def rows_from_next_historical_data(html: str) -> list[dict[str, str | int | float]]:
+    text = html if '"historicalDataStore"' in html else unescape(html)
+    store = extract_json_object_after_marker(text, '"historicalDataStore":')
+    if not store:
+        return []
+
+    historical = store.get("historicalData")
+    if not isinstance(historical, dict):
+        return []
+    data = historical.get("data")
+    if not isinstance(data, list):
+        return []
+
+    rows_by_timestamp: dict[int, dict[str, str | int | float]] = {}
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        try:
+            timestamp = int(item["rowDateRaw"])
+            close = parse_float(item.get("last_closeRaw") or item.get("last_close"))
+            open_ = parse_float(item.get("last_openRaw") or item.get("last_open") or close)
+            high = parse_float(item.get("last_maxRaw") or item.get("last_max") or close)
+            low = parse_float(item.get("last_minRaw") or item.get("last_min") or close)
+        except (KeyError, TypeError, ValueError):
+            continue
+        rows_by_timestamp[timestamp] = {
+            "date": datetime.fromtimestamp(timestamp, tz=timezone.utc).date().isoformat(),
+            "timestamp": timestamp,
+            "open": open_,
+            "high": high,
+            "low": low,
+            "close": close,
+        }
+
+    return [rows_by_timestamp[key] for key in sorted(rows_by_timestamp)]
+
+
 def rows_from_html(html: str) -> list[dict[str, str | int | float]]:
     parser = InvestingHistoricalParser()
     parser.feed(html)
@@ -236,7 +371,10 @@ def rows_from_html(html: str) -> list[dict[str, str | int | float]]:
             "close": close,
         }
 
-    return [rows_by_timestamp[key] for key in sorted(rows_by_timestamp)]
+    rows = [rows_by_timestamp[key] for key in sorted(rows_by_timestamp)]
+    if rows:
+        return rows
+    return rows_from_next_historical_data(html)
 
 
 def write_csv(path: Path, rows: Iterable[dict[str, str | int | float]]) -> None:
