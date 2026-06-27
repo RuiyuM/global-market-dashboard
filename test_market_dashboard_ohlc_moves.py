@@ -552,9 +552,9 @@ def test_cross_checked_china_germany_korea_bond_tenors_are_configured() -> None:
     assert germany_sources == {
         "DE_3M": "tradingeconomics",
         "DE_6M": "tradingeconomics",
-        "DE_1Y": "tradingeconomics",
+        "DE_1Y": "bundesbank-term",
         "DE_2Y": "bundesbank",
-        "DE_3Y": "tradingeconomics",
+        "DE_3Y": "bundesbank-term",
         "DE_5Y": "bundesbank",
         "DE_7Y": "bundesbank",
         "DE_10Y": "bundesbank",

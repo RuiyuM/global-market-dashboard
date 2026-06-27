@@ -8,6 +8,7 @@ from datetime import date
 import fetch_global_bond_ohlc
 from fetch_japan_bond_ohlc import close_only_row
 from fetch_global_bond_ohlc import fetch_chinamoney_history_rows_by_tenor
+from fetch_global_bond_ohlc import fetch_bundesbank_term_structure_rows
 from fetch_global_bond_ohlc import rows_by_tenor_from_chinamoney_payload
 from fetch_global_bond_ohlc import rows_by_tenor_from_smbs_koribor_html
 from fetch_global_bond_ohlc import rows_from_bok_ecos_payload
@@ -126,6 +127,26 @@ def test_rows_from_bundesbank_csv_skips_missing_weekends() -> None:
         "close": 2.51,
     }
     assert len(rows) == 2
+
+
+def test_fetch_bundesbank_term_structure_rows_uses_bbsis_dataset(monkeypatch) -> None:
+    seen: dict[str, str] = {}
+
+    class FakeResponse:
+        def read(self) -> bytes:
+            return b'header,value,flag\n2026-06-26,2.51,\n'
+
+    def fake_urlopen(request, timeout=0):
+        seen["url"] = request.full_url
+        return FakeResponse()
+
+    monkeypatch.setattr(fetch_global_bond_ohlc, "urlopen", fake_urlopen)
+
+    rows = fetch_bundesbank_term_structure_rows("D.I.ZST.ZI.EUR.S1311.B.A604.R03XX.R.A.A._Z._Z.A")
+
+    assert "/rest/data/BBSIS/" in seen["url"]
+    assert rows[-1]["date"] == "2026-06-26"
+    assert rows[-1]["close"] == 2.51
 
 
 def test_row_from_tradingeconomics_quote_html_handles_non_japan_country() -> None:

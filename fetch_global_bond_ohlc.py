@@ -53,6 +53,11 @@ BUNDESBANK_CODES = {
     "30Y": "D.REN.EUR.A640.000000WT3030.A",
 }
 
+BUNDESBANK_TERM_STRUCTURE_CODES = {
+    "1Y": "D.I.ZST.ZI.EUR.S1311.B.A604.R01XX.R.A.A._Z._Z.A",
+    "3Y": "D.I.ZST.ZI.EUR.S1311.B.A604.R03XX.R.A.A._Z._Z.A",
+}
+
 TRADING_ECONOMICS_COUNTRY_SLUGS = {
     "germany": {
         "3M": "3-month-bill-yield",
@@ -296,6 +301,13 @@ def fetch_chinamoney_rows_by_tenor() -> dict[str, list[dict[str, Any]]]:
 
 def fetch_bundesbank_rows(code: str) -> list[dict[str, Any]]:
     url = f"https://api.statistiken.bundesbank.de/rest/data/BBSSY/{code}?format=csv&lang=en"
+    request = Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    text = urlopen(request, timeout=30).read().decode("utf-8-sig", "ignore")
+    return rows_from_bundesbank_csv(text)
+
+
+def fetch_bundesbank_term_structure_rows(code: str) -> list[dict[str, Any]]:
+    url = f"https://api.statistiken.bundesbank.de/rest/data/BBSIS/{code}?format=csv&lang=en"
     request = Request(url, headers={"User-Agent": "Mozilla/5.0"})
     text = urlopen(request, timeout=30).read().decode("utf-8-sig", "ignore")
     return rows_from_bundesbank_csv(text)

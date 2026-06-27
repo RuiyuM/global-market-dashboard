@@ -30,8 +30,10 @@ from fetch_investing_bond_ohlc import (
 )
 from fetch_global_bond_ohlc import (
     BUNDESBANK_CODES,
+    BUNDESBANK_TERM_STRUCTURE_CODES,
     TRADING_ECONOMICS_COUNTRY_SLUGS,
     fetch_bundesbank_rows,
+    fetch_bundesbank_term_structure_rows,
     fetch_chinamoney_history_rows_by_tenor,
     fetch_chinamoney_rows_by_tenor,
     fetch_smbs_koribor_rows_by_tenor,
@@ -131,9 +133,9 @@ CHINA_BOND_SPECS: list[tuple[SeriesSpec, str, str]] = [
 GERMANY_BOND_SPECS: list[tuple[SeriesSpec, str, str]] = [
     (SeriesSpec("DE_3M", "德国3个月国债", "bond", "tradingeconomics", "DE:TE:3M", "DE_3M.csv"), "tradingeconomics:germany", TRADING_ECONOMICS_COUNTRY_SLUGS["germany"]["3M"]),
     (SeriesSpec("DE_6M", "德国6个月国债", "bond", "tradingeconomics", "DE:TE:6M", "DE_6M.csv"), "tradingeconomics:germany", TRADING_ECONOMICS_COUNTRY_SLUGS["germany"]["6M"]),
-    (SeriesSpec("DE_1Y", "德国1年国债", "bond", "tradingeconomics", "DE:TE:1Y", "DE_1Y.csv"), "tradingeconomics:germany", TRADING_ECONOMICS_COUNTRY_SLUGS["germany"]["1Y"]),
+    (SeriesSpec("DE_1Y", "德国1年国债", "bond", "bundesbank-term", BUNDESBANK_TERM_STRUCTURE_CODES["1Y"], "DE_1Y.csv"), "bundesbank-term", BUNDESBANK_TERM_STRUCTURE_CODES["1Y"]),
     (SeriesSpec("DE_2Y", "德国2年国债", "bond", "bundesbank", BUNDESBANK_CODES["2Y"], "DE_2Y.csv"), "bundesbank", BUNDESBANK_CODES["2Y"]),
-    (SeriesSpec("DE_3Y", "德国3年国债", "bond", "tradingeconomics", "DE:TE:3Y", "DE_3Y.csv"), "tradingeconomics:germany", TRADING_ECONOMICS_COUNTRY_SLUGS["germany"]["3Y"]),
+    (SeriesSpec("DE_3Y", "德国3年国债", "bond", "bundesbank-term", BUNDESBANK_TERM_STRUCTURE_CODES["3Y"], "DE_3Y.csv"), "bundesbank-term", BUNDESBANK_TERM_STRUCTURE_CODES["3Y"]),
     (SeriesSpec("DE_5Y", "德国5年国债", "bond", "bundesbank", BUNDESBANK_CODES["5Y"], "DE_5Y.csv"), "bundesbank", BUNDESBANK_CODES["5Y"]),
     (SeriesSpec("DE_7Y", "德国7年国债", "bond", "bundesbank", BUNDESBANK_CODES["7Y"], "DE_7Y.csv"), "bundesbank", BUNDESBANK_CODES["7Y"]),
     (SeriesSpec("DE_10Y", "德国10年国债", "bond", "bundesbank", BUNDESBANK_CODES["10Y"], "DE_10Y.csv"), "bundesbank", BUNDESBANK_CODES["10Y"]),
@@ -502,6 +504,8 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
             latest_error = ""
             if source_kind == "bundesbank":
                 rows = fetch_bundesbank_rows(source_key)
+            elif source_kind == "bundesbank-term":
+                rows = fetch_bundesbank_term_structure_rows(source_key)
             else:
                 rows = read_ohlc(path) if path.exists() else []
                 country_slug = source_kind.split(":", 1)[1]
@@ -513,7 +517,12 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
                     latest_error = f"Trading Economics latest failed: {exc}"
             for row in rows:
                 row["source_symbol"] = series_spec.symbol
-                row["source"] = "Deutsche Bundesbank official daily yield CSV" if source_kind == "bundesbank" else "Trading Economics latest yield page"
+                if source_kind == "bundesbank":
+                    row["source"] = "Deutsche Bundesbank official daily yield CSV"
+                elif source_kind == "bundesbank-term":
+                    row["source"] = "Deutsche Bundesbank official daily term-structure CSV"
+                else:
+                    row["source"] = "Trading Economics latest yield page"
             write_ohlc(path, rows)
             record.update({"status": "ok" if rows else "empty", "rows": str(len(rows)), "latest": rows[-1]["date"] if rows else ""})
             if latest_error:
@@ -1592,7 +1601,7 @@ def build_snapshot(fetch_records: list[dict[str, str]], *, fetch_policy_news: bo
             "7D/30D 波动率 = 对应窗口相邻交易观测的平均绝对日变化；债券单位 bp/日，股指和汇率单位 %/日。",
             f"三币种资金流向直接调用用户提供代码：{USER_FX_FLOW_CODE}",
             "derived = 本地公式而非外部供应商：CNY_BASE=1；债券曲线=10Y-2Y；CNYJPY=1/JPYCNY；RUB 交叉汇率优先使用具备历史深度的 Yahoo 直接报价，历史不足才用 USDCNY/USDRUB 或 USDJPY/USDRUB 派生并在 source_audit 里比对最新直接报价。",
-            "美债扩展期限优先使用 WSCN 日线；中国国债使用 ChinaMoney/CFETS 官方收盘收益率曲线并按缺口回填历史；德国中长端使用 Bundesbank 官方 CSV，短端与3Y使用 Trading Economics 最新页；日本1M/3M/6M 使用 Investing.com 历史表并在有更新日期时合并 Trading Economics 最新页；日本1Y/2Y/3Y/5Y/7Y/10Y/30Y 使用日本财务省 MOF 官方收益率曲线作为历史底座并合并 Trading Economics 最新页；韩国1M/3M/6M 使用 SMBS KORIBOR 作为短端资金代理而非政府债，韩国1Y以上使用 Trading Economics 最新页并按日合并本地缓存。",
+            "美债扩展期限优先使用 WSCN 日线；中国国债使用 ChinaMoney/CFETS 官方收盘收益率曲线并按缺口回填历史；德国2Y/5Y/7Y/10Y/30Y使用 Bundesbank 当前联邦证券官方日频 CSV，德国1Y/3Y使用 Bundesbank 官方 Svensson 期限结构日频 CSV，德国3M/6M暂无稳定官方日频二级市场源，暂用 Trading Economics 最新页；日本1M/3M/6M 使用 Investing.com 历史表并在有更新日期时合并 Trading Economics 最新页；日本1Y/2Y/3Y/5Y/7Y/10Y/30Y 使用日本财务省 MOF 官方收益率曲线作为历史底座并合并 Trading Economics 最新页；韩国1M/3M/6M 使用 SMBS KORIBOR 作为短端资金代理而非政府债，韩国3M/6M可由 BOK ECOS 交叉验证，韩国1Y以上使用 Trading Economics 最新页并按日合并本地缓存。",
             "政策新闻雷达只做加息、降息、维持利率相关文本筛选；抓取或 AI 分类不可用时退回本地规则解析。",
         ],
     }
