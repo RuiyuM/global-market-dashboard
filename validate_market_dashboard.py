@@ -25,7 +25,7 @@ VOLS = {"equity", "bond", "fx"}
 VOL_WINDOWS = {"7D", "30D"}
 VOL_RANKING_ROWS = 6
 INLINE_VOL_COUNT = len(COUNTRIES) * len(FIELDS)
-ONE_YEAR_BOND_KEYS = {"US_1Y": "美国", "CN_1Y": "中国", "JP_1Y": "日本"}
+ONE_YEAR_BOND_KEYS = {"US_1Y": "美国", "CN_1Y": "中国", "JP_1Y": "日本", "DE_1Y": "德国", "KR_1Y": "韩国"}
 EXTENDED_BOND_KEYS = {
     "US_1M": "美国",
     "US_3M": "美国",
@@ -34,9 +34,13 @@ EXTENDED_BOND_KEYS = {
     "US_5Y": "美国",
     "US_7Y": "美国",
     "US_30Y": "美国",
+    "CN_1M": "中国",
+    "CN_3M": "中国",
+    "CN_6M": "中国",
     "CN_3Y": "中国",
     "CN_5Y": "中国",
     "CN_7Y": "中国",
+    "CN_30Y": "中国",
     "JP_1M": "日本",
     "JP_3M": "日本",
     "JP_6M": "日本",
@@ -44,6 +48,15 @@ EXTENDED_BOND_KEYS = {
     "JP_5Y": "日本",
     "JP_7Y": "日本",
     "JP_30Y": "日本",
+    "DE_3M": "德国",
+    "DE_6M": "德国",
+    "DE_3Y": "德国",
+    "DE_5Y": "德国",
+    "DE_7Y": "德国",
+    "DE_30Y": "德国",
+    "KR_3Y": "韩国",
+    "KR_5Y": "韩国",
+    "KR_30Y": "韩国",
 }
 DERIVATIVE_VOL_COUNT = INLINE_VOL_COUNT + len(ONE_YEAR_BOND_KEYS) + len(EXTENDED_BOND_KEYS)
 SECOND_ORDER_WINDOWS = {"1D", "7D", "30D"}

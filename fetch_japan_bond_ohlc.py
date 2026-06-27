@@ -75,7 +75,7 @@ def fetch_mof_jgb_rows_by_tenor() -> dict[str, list[dict[str, Any]]]:
 
 def row_from_tradingeconomics_quote_html(html: str) -> dict[str, Any] | None:
     match = re.search(
-        r"The yield on.*?(?:rose|eased|fell|declined|increased|decreased|held steady|was)\s+(?:(?:to|at)\s+)?(-?\d+(?:\.\d+)?)%\s+on\s+([A-Z][a-z]+ \d{1,2}, \d{4})",
+        r"The yield on.*?(?:rose|eased|fell|declined|increased|decreased|held\s+steady|was)\s+(?:(?:to|at)\s+)?(-?\d+(?:\.\d+)?)%\s+on\s+([A-Z][a-z]+ \d{1,2}, \d{4})",
         html,
         flags=re.IGNORECASE | re.DOTALL,
     )

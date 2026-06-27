@@ -6,8 +6,11 @@ from __future__ import annotations
 from datetime import date
 
 from market_dashboard import COUNTRY_BOND_TENORS
+from market_dashboard import CHINA_BOND_SPECS
+from market_dashboard import GERMANY_BOND_SPECS
 from market_dashboard import JAPAN_BOND_SPECS
 from market_dashboard import JS
+from market_dashboard import KOREA_BOND_SPECS
 from market_dashboard import WSCN_SPECS
 from market_dashboard import SeriesSpec
 from market_dashboard import build_second_order_monitor
@@ -186,9 +189,10 @@ def test_expanded_wscn_bond_tenors_feed_second_order_and_spreads() -> None:
         "CN_5Y",
         "CN_7Y",
     } <= spec_keys
-    assert {"US_20Y", "CN_30Y", "JP_30Y", "DE_30Y"}.isdisjoint(spec_keys)
+    assert {"US_20Y", "JP_30Y", "DE_30Y"}.isdisjoint(spec_keys)
 
     wanted_specs = {spec.key: spec for spec in WSCN_SPECS}
+    wanted_specs.update({series_spec.key: series_spec for series_spec, _, _ in CHINA_BOND_SPECS})
     for key, label in [
         ("US_EQUITY", "标普500"),
         ("USDCNY", "美元/人民币"),
@@ -209,12 +213,16 @@ def test_expanded_wscn_bond_tenors_feed_second_order_and_spreads() -> None:
             "US_7Y",
             "US_10Y",
             "US_30Y",
+            "CN_1M",
+            "CN_3M",
+            "CN_6M",
             "CN_1Y",
             "CN_2Y",
             "CN_3Y",
             "CN_5Y",
             "CN_7Y",
             "CN_10Y",
+            "CN_30Y",
         ]
     }
     rows = build_second_order_monitor(series, wanted_specs)
@@ -222,8 +230,8 @@ def test_expanded_wscn_bond_tenors_feed_second_order_and_spreads() -> None:
     us_bonds = [row["key"] for row in rows if row["country"] == "美国" and row["group"] == "债券"]
     cn_bonds = [row["key"] for row in rows if row["country"] == "中国" and row["group"] == "债券"]
     assert us_bonds == ["US_1M", "US_3M", "US_6M", "US_1Y", "US_2Y", "US_3Y", "US_5Y", "US_7Y", "US_10Y", "US_30Y"]
-    assert cn_bonds == ["CN_1Y", "CN_2Y", "CN_3Y", "CN_5Y", "CN_7Y", "CN_10Y"]
-    assert all(row["key"] not in {"DE_30Y", "CN_30Y", "US_20Y"} for row in rows)
+    assert cn_bonds == ["CN_1M", "CN_3M", "CN_6M", "CN_1Y", "CN_2Y", "CN_3Y", "CN_5Y", "CN_7Y", "CN_10Y", "CN_30Y"]
+    assert all(row["key"] != "US_20Y" for row in rows)
 
     html = render_html(
         {
@@ -242,6 +250,7 @@ def test_expanded_wscn_bond_tenors_feed_second_order_and_spreads() -> None:
     assert '"tenor": "1M", "key": "US_1M", "label": "美国1个月国债"' in html
     assert '"tenor": "30Y", "key": "US_30Y", "label": "美国30年国债"' in html
     assert '"tenor": "7Y", "key": "CN_7Y", "label": "中国7年国债"' in html
+    assert '"tenor": "30Y", "key": "CN_30Y", "label": "中国30年国债"' in html
 
 
 def test_japan_extra_bond_tenors_use_server_safe_sources_not_stale_wscn() -> None:
@@ -288,6 +297,78 @@ def test_japan_extra_bond_tenors_use_server_safe_sources_not_stale_wscn() -> Non
         ("7Y", "JP_7Y"),
         ("10Y", "JP_10Y"),
         ("30Y", "JP_30Y"),
+    ]
+
+
+def test_cross_checked_china_germany_korea_bond_tenors_are_configured() -> None:
+    china_sources = {series_spec.key: series_spec.source for series_spec, _, _ in CHINA_BOND_SPECS}
+    germany_sources = {series_spec.key: series_spec.source for series_spec, _, _ in GERMANY_BOND_SPECS}
+    korea_sources = {series_spec.key: series_spec.source for series_spec, _, _ in KOREA_BOND_SPECS}
+
+    assert {
+        "CN_1M",
+        "CN_3M",
+        "CN_6M",
+        "CN_1Y",
+        "CN_2Y",
+        "CN_3Y",
+        "CN_5Y",
+        "CN_7Y",
+        "CN_10Y",
+        "CN_30Y",
+    } <= set(china_sources)
+    assert set(china_sources.values()) == {"chinamoney"}
+    assert COUNTRY_BOND_TENORS["CN"] == [
+        ("1M", "CN_1M"),
+        ("3M", "CN_3M"),
+        ("6M", "CN_6M"),
+        ("1Y", "CN_1Y"),
+        ("2Y", "CN_2Y"),
+        ("3Y", "CN_3Y"),
+        ("5Y", "CN_5Y"),
+        ("7Y", "CN_7Y"),
+        ("10Y", "CN_10Y"),
+        ("30Y", "CN_30Y"),
+    ]
+
+    assert germany_sources == {
+        "DE_3M": "tradingeconomics",
+        "DE_6M": "tradingeconomics",
+        "DE_1Y": "tradingeconomics",
+        "DE_2Y": "bundesbank",
+        "DE_3Y": "tradingeconomics",
+        "DE_5Y": "bundesbank",
+        "DE_7Y": "bundesbank",
+        "DE_10Y": "bundesbank",
+        "DE_30Y": "bundesbank",
+    }
+    assert COUNTRY_BOND_TENORS["DE"] == [
+        ("3M", "DE_3M"),
+        ("6M", "DE_6M"),
+        ("1Y", "DE_1Y"),
+        ("2Y", "DE_2Y"),
+        ("3Y", "DE_3Y"),
+        ("5Y", "DE_5Y"),
+        ("7Y", "DE_7Y"),
+        ("10Y", "DE_10Y"),
+        ("30Y", "DE_30Y"),
+    ]
+
+    assert korea_sources == {
+        "KR_1Y": "tradingeconomics",
+        "KR_2Y": "tradingeconomics",
+        "KR_3Y": "tradingeconomics",
+        "KR_5Y": "tradingeconomics",
+        "KR_10Y": "tradingeconomics",
+        "KR_30Y": "tradingeconomics",
+    }
+    assert COUNTRY_BOND_TENORS["KR"] == [
+        ("1Y", "KR_1Y"),
+        ("2Y", "KR_2Y"),
+        ("3Y", "KR_3Y"),
+        ("5Y", "KR_5Y"),
+        ("10Y", "KR_10Y"),
+        ("30Y", "KR_30Y"),
     ]
 
 

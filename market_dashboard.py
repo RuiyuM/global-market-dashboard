@@ -27,6 +27,13 @@ from fetch_investing_bond_ohlc import (
     fetch_html as fetch_investing_html,
     rows_from_html as rows_from_investing_html,
 )
+from fetch_global_bond_ohlc import (
+    BUNDESBANK_CODES,
+    TRADING_ECONOMICS_COUNTRY_SLUGS,
+    fetch_bundesbank_rows,
+    fetch_chinamoney_rows_by_tenor,
+    fetch_tradingeconomics_country_latest_row,
+)
 from fetch_japan_bond_ohlc import (
     TRADINGECONOMICS_SLUGS,
     fetch_mof_jgb_rows_by_tenor,
@@ -104,15 +111,44 @@ JAPAN_BOND_SPECS: list[tuple[SeriesSpec, str, str]] = [
 ]
 
 
+CHINA_BOND_SPECS: list[tuple[SeriesSpec, str, str]] = [
+    (SeriesSpec("CN_1M", "中国1个月国债", "bond", "chinamoney", "CFETS:CYCC000:1M", "CN_1M.csv", "CN1MR_CHINAMONEY_1D_ohlc.csv"), "chinamoney", "1M"),
+    (SeriesSpec("CN_3M", "中国3个月国债", "bond", "chinamoney", "CFETS:CYCC000:3M", "CN_3M.csv", "CN3MR_CHINAMONEY_1D_ohlc.csv"), "chinamoney", "3M"),
+    (SeriesSpec("CN_6M", "中国6个月国债", "bond", "chinamoney", "CFETS:CYCC000:6M", "CN_6M.csv", "CN6MR_CHINAMONEY_1D_ohlc.csv"), "chinamoney", "6M"),
+    (SeriesSpec("CN_1Y", "中国1年国债", "bond", "chinamoney", "CFETS:CYCC000:1Y", "CN_1Y.csv", "CN1YR_CHINAMONEY_1D_ohlc.csv"), "chinamoney", "1Y"),
+    (SeriesSpec("CN_2Y", "中国2年国债", "bond", "chinamoney", "CFETS:CYCC000:2Y", "CN_2Y.csv", "CN2YR_CHINAMONEY_1D_ohlc.csv"), "chinamoney", "2Y"),
+    (SeriesSpec("CN_3Y", "中国3年国债", "bond", "chinamoney", "CFETS:CYCC000:3Y", "CN_3Y.csv", "CN3YR_CHINAMONEY_1D_ohlc.csv"), "chinamoney", "3Y"),
+    (SeriesSpec("CN_5Y", "中国5年国债", "bond", "chinamoney", "CFETS:CYCC000:5Y", "CN_5Y.csv", "CN5YR_CHINAMONEY_1D_ohlc.csv"), "chinamoney", "5Y"),
+    (SeriesSpec("CN_7Y", "中国7年国债", "bond", "chinamoney", "CFETS:CYCC000:7Y", "CN_7Y.csv", "CN7YR_CHINAMONEY_1D_ohlc.csv"), "chinamoney", "7Y"),
+    (SeriesSpec("CN_10Y", "中国10年国债", "bond", "chinamoney", "CFETS:CYCC000:10Y", "CN_10Y.csv", "CN10YR_CHINAMONEY_1D_ohlc.csv"), "chinamoney", "10Y"),
+    (SeriesSpec("CN_30Y", "中国30年国债", "bond", "chinamoney", "CFETS:CYCC000:30Y", "CN_30Y.csv", "CN30YR_CHINAMONEY_1D_ohlc.csv"), "chinamoney", "30Y"),
+]
+
+
+GERMANY_BOND_SPECS: list[tuple[SeriesSpec, str, str]] = [
+    (SeriesSpec("DE_3M", "德国3个月国债", "bond", "tradingeconomics", "DE:TE:3M", "DE_3M.csv"), "tradingeconomics:germany", TRADING_ECONOMICS_COUNTRY_SLUGS["germany"]["3M"]),
+    (SeriesSpec("DE_6M", "德国6个月国债", "bond", "tradingeconomics", "DE:TE:6M", "DE_6M.csv"), "tradingeconomics:germany", TRADING_ECONOMICS_COUNTRY_SLUGS["germany"]["6M"]),
+    (SeriesSpec("DE_1Y", "德国1年国债", "bond", "tradingeconomics", "DE:TE:1Y", "DE_1Y.csv"), "tradingeconomics:germany", TRADING_ECONOMICS_COUNTRY_SLUGS["germany"]["1Y"]),
+    (SeriesSpec("DE_2Y", "德国2年国债", "bond", "bundesbank", BUNDESBANK_CODES["2Y"], "DE_2Y.csv"), "bundesbank", BUNDESBANK_CODES["2Y"]),
+    (SeriesSpec("DE_3Y", "德国3年国债", "bond", "tradingeconomics", "DE:TE:3Y", "DE_3Y.csv"), "tradingeconomics:germany", TRADING_ECONOMICS_COUNTRY_SLUGS["germany"]["3Y"]),
+    (SeriesSpec("DE_5Y", "德国5年国债", "bond", "bundesbank", BUNDESBANK_CODES["5Y"], "DE_5Y.csv"), "bundesbank", BUNDESBANK_CODES["5Y"]),
+    (SeriesSpec("DE_7Y", "德国7年国债", "bond", "bundesbank", BUNDESBANK_CODES["7Y"], "DE_7Y.csv"), "bundesbank", BUNDESBANK_CODES["7Y"]),
+    (SeriesSpec("DE_10Y", "德国10年国债", "bond", "bundesbank", BUNDESBANK_CODES["10Y"], "DE_10Y.csv"), "bundesbank", BUNDESBANK_CODES["10Y"]),
+    (SeriesSpec("DE_30Y", "德国30年国债", "bond", "bundesbank", BUNDESBANK_CODES["30Y"], "DE_30Y.csv"), "bundesbank", BUNDESBANK_CODES["30Y"]),
+]
+
+
+KOREA_BOND_SPECS: list[tuple[SeriesSpec, str, str]] = [
+    (SeriesSpec("KR_1Y", "韩国1年国债", "bond", "tradingeconomics", "KR:TE:1Y", "KR_1Y.csv"), "tradingeconomics:south-korea", TRADING_ECONOMICS_COUNTRY_SLUGS["south-korea"]["1Y"]),
+    (SeriesSpec("KR_2Y", "韩国2年国债", "bond", "tradingeconomics", "KR:TE:2Y", "KR_2Y.csv"), "tradingeconomics:south-korea", TRADING_ECONOMICS_COUNTRY_SLUGS["south-korea"]["2Y"]),
+    (SeriesSpec("KR_3Y", "韩国3年国债", "bond", "tradingeconomics", "KR:TE:3Y", "KR_3Y.csv"), "tradingeconomics:south-korea", TRADING_ECONOMICS_COUNTRY_SLUGS["south-korea"]["3Y"]),
+    (SeriesSpec("KR_5Y", "韩国5年国债", "bond", "tradingeconomics", "KR:TE:5Y", "KR_5Y.csv"), "tradingeconomics:south-korea", TRADING_ECONOMICS_COUNTRY_SLUGS["south-korea"]["5Y"]),
+    (SeriesSpec("KR_10Y", "韩国10年国债", "bond", "tradingeconomics", "KR:TE:10Y", "KR_10Y.csv"), "tradingeconomics:south-korea", TRADING_ECONOMICS_COUNTRY_SLUGS["south-korea"]["10Y"]),
+    (SeriesSpec("KR_30Y", "韩国30年国债", "bond", "tradingeconomics", "KR:TE:30Y", "KR_30Y.csv"), "tradingeconomics:south-korea", TRADING_ECONOMICS_COUNTRY_SLUGS["south-korea"]["30Y"]),
+]
+
+
 INVESTING_SPECS: list[tuple[SeriesSpec, InvestingSpec]] = [
-    (
-        SeriesSpec("DE_2Y", "德国2年国债", "bond", "investing", "DE2YT=RR", "DE_2Y.csv"),
-        InvestingSpec("DE2Y", "23685", "DE2YT=RR", "germany-2-year-bond-yield-historical-data", "Germany 2-Year Bond Yield Historical Data", "DE2YR_INVESTING_1D_ohlc.csv"),
-    ),
-    (
-        SeriesSpec("DE_10Y", "德国10年国债", "bond", "investing", "DE10YT=RR", "DE_10Y.csv"),
-        InvestingSpec("DE10Y", "23693", "DE10YT=RR", "germany-10-year-bond-yield-historical-data", "Germany 10-Year Bond Yield Historical Data", "DE10YR_INVESTING_1D_ohlc.csv"),
-    ),
     (
         SeriesSpec("RU_2Y", "俄罗斯2年国债", "bond", "investing", "RU2YT=RR", "RU_2Y.csv"),
         InvestingSpec("RU2Y", "23971", "RU2YT=RR", "russia-2-year-bond-yield-historical-data", "Russia 2-Year Bond Yield Historical Data", "RU2YR_INVESTING_1D_ohlc.csv"),
@@ -120,14 +156,6 @@ INVESTING_SPECS: list[tuple[SeriesSpec, InvestingSpec]] = [
     (
         SeriesSpec("RU_10Y", "俄罗斯10年国债", "bond", "investing", "RU10YT=RR", "RU_10Y.csv"),
         InvestingSpec("RU10Y", "23974", "RU10YT=RR", "russia-10-year-bond-yield-historical-data", "Russia 10-Year Bond Yield Historical Data", "RU10YR_INVESTING_1D_ohlc.csv"),
-    ),
-    (
-        SeriesSpec("KR_2Y", "韩国2年国债", "bond", "investing", "KR2YT=RR", "KR_2Y.csv"),
-        InvestingSpec("KR2Y", "29295", "KR2YT=RR", "south-korea-2-year-bond-yield-historical-data", "South Korea 2-Year Bond Yield Historical Data", "KR2YR_INVESTING_1D_ohlc.csv"),
-    ),
-    (
-        SeriesSpec("KR_10Y", "韩国10年国债", "bond", "investing", "KR10YT=RR", "KR_10Y.csv"),
-        InvestingSpec("KR10Y", "29292", "KR10YT=RR", "south-korea-10-year-bond-yield-historical-data", "South Korea 10-Year Bond Yield Historical Data", "KR10YR_INVESTING_1D_ohlc.csv"),
     ),
     (
         SeriesSpec("RU_EQUITY", "俄罗斯MOEX", "equity", "investing", "IMOEX", "RU_EQUITY.csv"),
@@ -177,12 +205,16 @@ COUNTRY_BOND_TENORS: dict[str, list[tuple[str, str]]] = {
         ("30Y", "US_30Y"),
     ],
     "CN": [
+        ("1M", "CN_1M"),
+        ("3M", "CN_3M"),
+        ("6M", "CN_6M"),
         ("1Y", "CN_1Y"),
         ("2Y", "CN_2Y"),
         ("3Y", "CN_3Y"),
         ("5Y", "CN_5Y"),
         ("7Y", "CN_7Y"),
         ("10Y", "CN_10Y"),
+        ("30Y", "CN_30Y"),
     ],
     "JP": [
         ("1M", "JP_1M"),
@@ -196,9 +228,19 @@ COUNTRY_BOND_TENORS: dict[str, list[tuple[str, str]]] = {
         ("10Y", "JP_10Y"),
         ("30Y", "JP_30Y"),
     ],
-    "DE": [("2Y", "DE_2Y"), ("10Y", "DE_10Y")],
+    "DE": [
+        ("3M", "DE_3M"),
+        ("6M", "DE_6M"),
+        ("1Y", "DE_1Y"),
+        ("2Y", "DE_2Y"),
+        ("3Y", "DE_3Y"),
+        ("5Y", "DE_5Y"),
+        ("7Y", "DE_7Y"),
+        ("10Y", "DE_10Y"),
+        ("30Y", "DE_30Y"),
+    ],
     "RU": [("2Y", "RU_2Y"), ("10Y", "RU_10Y")],
-    "KR": [("2Y", "KR_2Y"), ("10Y", "KR_10Y")],
+    "KR": [("1Y", "KR_1Y"), ("2Y", "KR_2Y"), ("3Y", "KR_3Y"), ("5Y", "KR_5Y"), ("10Y", "KR_10Y"), ("30Y", "KR_30Y")],
 }
 
 CURRENCY_NAMES = {
@@ -404,6 +446,82 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
         if args.sleep_sec:
             time.sleep(args.sleep_sec)
 
+    chinamoney_rows: dict[str, list[dict[str, Any]]] | None = None
+    for series_spec, source_kind, source_key in CHINA_BOND_SPECS:
+        path = DASHBOARD_DATA / series_spec.cache_file
+        record = {"key": series_spec.key, "source": series_spec.source, "symbol": series_spec.symbol, "status": "pending", "file": str(path), "error": ""}
+        try:
+            if chinamoney_rows is None:
+                chinamoney_rows = fetch_chinamoney_rows_by_tenor()
+            rows = list(chinamoney_rows.get(source_key, []))
+            if path.exists():
+                rows = merge_ohlc_rows(read_ohlc(path), rows)
+            for row in rows:
+                row["source_symbol"] = series_spec.symbol
+                row["source"] = "ChinaMoney CFETS closing treasury yield curve"
+            write_ohlc(path, rows)
+            record.update({"status": "ok" if rows else "empty", "rows": str(len(rows)), "latest": rows[-1]["date"] if rows else ""})
+        except Exception as exc:
+            record.update({"status": "error", "error": str(exc)})
+        records.append(record)
+        if args.sleep_sec:
+            time.sleep(args.sleep_sec)
+
+    for series_spec, source_kind, source_key in GERMANY_BOND_SPECS:
+        path = DASHBOARD_DATA / series_spec.cache_file
+        record = {"key": series_spec.key, "source": series_spec.source, "symbol": series_spec.symbol, "status": "pending", "file": str(path), "error": ""}
+        try:
+            latest_error = ""
+            if source_kind == "bundesbank":
+                rows = fetch_bundesbank_rows(source_key)
+            else:
+                rows = read_ohlc(path) if path.exists() else []
+                country_slug = source_kind.split(":", 1)[1]
+                try:
+                    latest_row = fetch_tradingeconomics_country_latest_row(country_slug, source_key)
+                    if latest_row:
+                        rows = merge_ohlc_rows(rows, [latest_row])
+                except Exception as exc:
+                    latest_error = f"Trading Economics latest failed: {exc}"
+            for row in rows:
+                row["source_symbol"] = series_spec.symbol
+                row["source"] = "Deutsche Bundesbank official daily yield CSV" if source_kind == "bundesbank" else "Trading Economics latest yield page"
+            write_ohlc(path, rows)
+            record.update({"status": "ok" if rows else "empty", "rows": str(len(rows)), "latest": rows[-1]["date"] if rows else ""})
+            if latest_error:
+                record["error"] = latest_error
+        except Exception as exc:
+            record.update({"status": "error", "error": str(exc)})
+        records.append(record)
+        if args.sleep_sec:
+            time.sleep(args.sleep_sec)
+
+    for series_spec, source_kind, source_key in KOREA_BOND_SPECS:
+        path = DASHBOARD_DATA / series_spec.cache_file
+        record = {"key": series_spec.key, "source": series_spec.source, "symbol": series_spec.symbol, "status": "pending", "file": str(path), "error": ""}
+        try:
+            rows = read_ohlc(path) if path.exists() else []
+            latest_error = ""
+            country_slug = source_kind.split(":", 1)[1]
+            try:
+                latest_row = fetch_tradingeconomics_country_latest_row(country_slug, source_key)
+                if latest_row:
+                    rows = merge_ohlc_rows(rows, [latest_row])
+            except Exception as exc:
+                latest_error = f"Trading Economics latest failed: {exc}"
+            for row in rows:
+                row["source_symbol"] = series_spec.symbol
+                row["source"] = "Trading Economics latest yield page"
+            write_ohlc(path, rows)
+            record.update({"status": "ok" if rows else "empty", "rows": str(len(rows)), "latest": rows[-1]["date"] if rows else ""})
+            if latest_error:
+                record["error"] = latest_error
+        except Exception as exc:
+            record.update({"status": "error", "error": str(exc)})
+        records.append(record)
+        if args.sleep_sec:
+            time.sleep(args.sleep_sec)
+
     japan_mof_rows: dict[str, list[dict[str, Any]]] | None = None
     for series_spec, source_kind, source_key in JAPAN_BOND_SPECS:
         path = DASHBOARD_DATA / series_spec.cache_file
@@ -579,7 +697,22 @@ def derived_difference(key: str, left: list[dict[str, Any]], right: list[dict[st
 def load_all_series() -> tuple[dict[str, list[dict[str, Any]]], dict[str, SeriesSpec]]:
     investing_series_specs = [series_spec for series_spec, _ in INVESTING_SPECS]
     japan_bond_series_specs = [series_spec for series_spec, _, _ in JAPAN_BOND_SPECS]
-    specs = {spec.key: spec for spec in [*WSCN_SPECS, *YAHOO_SPECS, *NIKKEI_SPECS, *japan_bond_series_specs, *investing_series_specs]}
+    china_bond_series_specs = [series_spec for series_spec, _, _ in CHINA_BOND_SPECS]
+    germany_bond_series_specs = [series_spec for series_spec, _, _ in GERMANY_BOND_SPECS]
+    korea_bond_series_specs = [series_spec for series_spec, _, _ in KOREA_BOND_SPECS]
+    specs = {
+        spec.key: spec
+        for spec in [
+            *WSCN_SPECS,
+            *YAHOO_SPECS,
+            *NIKKEI_SPECS,
+            *japan_bond_series_specs,
+            *china_bond_series_specs,
+            *germany_bond_series_specs,
+            *korea_bond_series_specs,
+            *investing_series_specs,
+        ]
+    }
     series = {key: read_series(spec) for key, spec in specs.items()}
 
     # Base currency and derived crosses.
@@ -1405,7 +1538,7 @@ def build_snapshot(fetch_records: list[dict[str, str]], *, fetch_policy_news: bo
             "7D/30D 波动率 = 对应窗口相邻交易观测的平均绝对日变化；债券单位 bp/日，股指和汇率单位 %/日。",
             f"三币种资金流向直接调用用户提供代码：{USER_FX_FLOW_CODE}",
             "derived = 本地公式而非外部供应商：CNY_BASE=1；债券曲线=10Y-2Y；CNYJPY=1/JPYCNY；RUB 交叉汇率优先使用具备历史深度的 Yahoo 直接报价，历史不足才用 USDCNY/USDRUB 或 USDJPY/USDRUB 派生并在 source_audit 里比对最新直接报价。",
-            "美债/中债扩展期限优先使用 WSCN 日线；日本1Y/2Y/3Y/5Y/7Y/10Y/30Y 使用日本财务省 MOF 官方收益率曲线作为历史底座并合并 Trading Economics 最新页；日本1M/3M/6M 使用 Trading Economics 最新页并按日合并本地缓存，WSCN/Investing 在服务器上不可作为日本主源。",
+            "美债扩展期限优先使用 WSCN 日线；中国国债使用 ChinaMoney/CFETS 官方收盘收益率曲线；德国中长端使用 Bundesbank 官方 CSV，短端与3Y使用 Trading Economics 最新页；日本1Y/2Y/3Y/5Y/7Y/10Y/30Y 使用日本财务省 MOF 官方收益率曲线作为历史底座并合并 Trading Economics 最新页；日本短端和韩国可用期限使用 Trading Economics 最新页并按日合并本地缓存。",
             "政策新闻雷达只做加息、降息、维持利率相关文本筛选；抓取或 AI 分类不可用时退回本地规则解析。",
         ],
     }
