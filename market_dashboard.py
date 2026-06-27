@@ -3008,7 +3008,7 @@ def render_html(snapshot: dict[str, Any]) -> str:
             continue
         core_rows = [row for row in country_rows if not row.get("extra_bond")]
         extra_rows = [row for row in country_rows if row.get("extra_bond")]
-        expanded = country in {"美国", "宏观指标"}
+        expanded = country in {"美国"}
         toggle_class = "country-toggle expanded" if expanded else "country-toggle collapsed"
         toggle_icon = "▾" if expanded else "▸"
         count_text = f"{len(core_rows)} 指标" if country == "宏观指标" else f"{len(core_rows)} 核心"

@@ -281,6 +281,11 @@ def test_macro_indicators_feed_second_order_and_ohlc_picker() -> None:
         }
     )
     assert '<strong>宏观指标</strong>' in html
+    assert 'class="country-toggle collapsed" data-country="宏观指标" aria-expanded="false"' in html
+    assert '<span class="toggle-icon">▸</span><strong>宏观指标</strong>' in html
+    macro_row_start = html.index('<tr class="derivative-row" data-country="宏观指标" data-ohlc-key="DXY"')
+    macro_row_end = html.index(">", macro_row_start)
+    assert " hidden" in html[macro_row_start:macro_row_end]
     assert 'data-country="宏观指标"' in html
     assert '"code": "MACRO"' in html
     assert '"country": "宏观指标"' in html
