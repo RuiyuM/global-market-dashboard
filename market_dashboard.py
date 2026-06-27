@@ -32,7 +32,9 @@ from fetch_global_bond_ohlc import (
     BUNDESBANK_CODES,
     TRADING_ECONOMICS_COUNTRY_SLUGS,
     fetch_bundesbank_rows,
+    fetch_chinamoney_history_rows_by_tenor,
     fetch_chinamoney_rows_by_tenor,
+    fetch_smbs_koribor_rows_by_tenor,
     fetch_tradingeconomics_country_latest_row,
 )
 from fetch_japan_bond_ohlc import (
@@ -140,6 +142,9 @@ GERMANY_BOND_SPECS: list[tuple[SeriesSpec, str, str]] = [
 
 
 KOREA_BOND_SPECS: list[tuple[SeriesSpec, str, str]] = [
+    (SeriesSpec("KR_1M", "韩国1个月短端(KORIBOR)", "bond", "smbs-koribor", "SMBS:KORIBOR:1M", "KR_1M.csv"), "smbs-koribor", "1M"),
+    (SeriesSpec("KR_3M", "韩国3个月短端(KORIBOR)", "bond", "smbs-koribor", "SMBS:KORIBOR:3M", "KR_3M.csv"), "smbs-koribor", "3M"),
+    (SeriesSpec("KR_6M", "韩国6个月短端(KORIBOR)", "bond", "smbs-koribor", "SMBS:KORIBOR:6M", "KR_6M.csv"), "smbs-koribor", "6M"),
     (SeriesSpec("KR_1Y", "韩国1年国债", "bond", "tradingeconomics", "KR:TE:1Y", "KR_1Y.csv"), "tradingeconomics:south-korea", TRADING_ECONOMICS_COUNTRY_SLUGS["south-korea"]["1Y"]),
     (SeriesSpec("KR_2Y", "韩国2年国债", "bond", "tradingeconomics", "KR:TE:2Y", "KR_2Y.csv"), "tradingeconomics:south-korea", TRADING_ECONOMICS_COUNTRY_SLUGS["south-korea"]["2Y"]),
     (SeriesSpec("KR_3Y", "韩国3年国债", "bond", "tradingeconomics", "KR:TE:3Y", "KR_3Y.csv"), "tradingeconomics:south-korea", TRADING_ECONOMICS_COUNTRY_SLUGS["south-korea"]["3Y"]),
@@ -241,7 +246,17 @@ COUNTRY_BOND_TENORS: dict[str, list[tuple[str, str]]] = {
         ("30Y", "DE_30Y"),
     ],
     "RU": [("2Y", "RU_2Y"), ("10Y", "RU_10Y")],
-    "KR": [("1Y", "KR_1Y"), ("2Y", "KR_2Y"), ("3Y", "KR_3Y"), ("5Y", "KR_5Y"), ("10Y", "KR_10Y"), ("30Y", "KR_30Y")],
+    "KR": [
+        ("1M", "KR_1M"),
+        ("3M", "KR_3M"),
+        ("6M", "KR_6M"),
+        ("1Y", "KR_1Y"),
+        ("2Y", "KR_2Y"),
+        ("3Y", "KR_3Y"),
+        ("5Y", "KR_5Y"),
+        ("10Y", "KR_10Y"),
+        ("30Y", "KR_30Y"),
+    ],
 }
 
 CURRENCY_NAMES = {
@@ -448,12 +463,22 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
             time.sleep(args.sleep_sec)
 
     chinamoney_rows: dict[str, list[dict[str, Any]]] | None = None
+    chinamoney_error = ""
     for series_spec, source_kind, source_key in CHINA_BOND_SPECS:
         path = DASHBOARD_DATA / series_spec.cache_file
         record = {"key": series_spec.key, "source": series_spec.source, "symbol": series_spec.symbol, "status": "pending", "file": str(path), "error": ""}
         try:
             if chinamoney_rows is None:
-                chinamoney_rows = fetch_chinamoney_rows_by_tenor()
+                sample_path = DASHBOARD_DATA / CHINA_BOND_SPECS[0][0].cache_file
+                existing_sample = read_ohlc(sample_path) if sample_path.exists() else []
+                fetch_start = start
+                if len(existing_sample) >= 45:
+                    fetch_start = max(start, row_date_key(existing_sample[-1]) - timedelta(days=7))
+                try:
+                    chinamoney_rows = fetch_chinamoney_history_rows_by_tenor(fetch_start, end, args.sleep_sec)
+                except Exception as exc:
+                    chinamoney_error = f"ChinaMoney history failed: {exc}"
+                    chinamoney_rows = fetch_chinamoney_rows_by_tenor()
             rows = list(chinamoney_rows.get(source_key, []))
             if path.exists():
                 rows = merge_ohlc_rows(read_ohlc(path), rows)
@@ -462,6 +487,8 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
                 row["source"] = "ChinaMoney CFETS closing treasury yield curve"
             write_ohlc(path, rows)
             record.update({"status": "ok" if rows else "empty", "rows": str(len(rows)), "latest": rows[-1]["date"] if rows else ""})
+            if chinamoney_error:
+                record["error"] = chinamoney_error
         except Exception as exc:
             record.update({"status": "error", "error": str(exc)})
         records.append(record)
@@ -497,22 +524,28 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
         if args.sleep_sec:
             time.sleep(args.sleep_sec)
 
+    korea_koribor_rows: dict[str, list[dict[str, Any]]] | None = None
     for series_spec, source_kind, source_key in KOREA_BOND_SPECS:
         path = DASHBOARD_DATA / series_spec.cache_file
         record = {"key": series_spec.key, "source": series_spec.source, "symbol": series_spec.symbol, "status": "pending", "file": str(path), "error": ""}
         try:
             rows = read_ohlc(path) if path.exists() else []
             latest_error = ""
-            country_slug = source_kind.split(":", 1)[1]
-            try:
-                latest_row = fetch_tradingeconomics_country_latest_row(country_slug, source_key)
-                if latest_row:
-                    rows = merge_ohlc_rows(rows, [latest_row])
-            except Exception as exc:
-                latest_error = f"Trading Economics latest failed: {exc}"
+            if source_kind == "smbs-koribor":
+                if korea_koribor_rows is None:
+                    korea_koribor_rows = fetch_smbs_koribor_rows_by_tenor(start, end)
+                rows = merge_ohlc_rows(rows, korea_koribor_rows.get(source_key, []))
+            else:
+                country_slug = source_kind.split(":", 1)[1]
+                try:
+                    latest_row = fetch_tradingeconomics_country_latest_row(country_slug, source_key)
+                    if latest_row:
+                        rows = merge_ohlc_rows(rows, [latest_row])
+                except Exception as exc:
+                    latest_error = f"Trading Economics latest failed: {exc}"
             for row in rows:
                 row["source_symbol"] = series_spec.symbol
-                row["source"] = "Trading Economics latest yield page"
+                row["source"] = "SMBS KORIBOR money-market fixing; short-end proxy, not government bond" if source_kind == "smbs-koribor" else "Trading Economics latest yield page"
             write_ohlc(path, rows)
             record.update({"status": "ok" if rows else "empty", "rows": str(len(rows)), "latest": rows[-1]["date"] if rows else ""})
             if latest_error:
@@ -1559,7 +1592,7 @@ def build_snapshot(fetch_records: list[dict[str, str]], *, fetch_policy_news: bo
             "7D/30D 波动率 = 对应窗口相邻交易观测的平均绝对日变化；债券单位 bp/日，股指和汇率单位 %/日。",
             f"三币种资金流向直接调用用户提供代码：{USER_FX_FLOW_CODE}",
             "derived = 本地公式而非外部供应商：CNY_BASE=1；债券曲线=10Y-2Y；CNYJPY=1/JPYCNY；RUB 交叉汇率优先使用具备历史深度的 Yahoo 直接报价，历史不足才用 USDCNY/USDRUB 或 USDJPY/USDRUB 派生并在 source_audit 里比对最新直接报价。",
-            "美债扩展期限优先使用 WSCN 日线；中国国债使用 ChinaMoney/CFETS 官方收盘收益率曲线；德国中长端使用 Bundesbank 官方 CSV，短端与3Y使用 Trading Economics 最新页；日本1M/3M/6M 使用 Investing.com 历史表并在有更新日期时合并 Trading Economics 最新页；日本1Y/2Y/3Y/5Y/7Y/10Y/30Y 使用日本财务省 MOF 官方收益率曲线作为历史底座并合并 Trading Economics 最新页；韩国可用期限使用 Trading Economics 最新页并按日合并本地缓存。",
+            "美债扩展期限优先使用 WSCN 日线；中国国债使用 ChinaMoney/CFETS 官方收盘收益率曲线并按缺口回填历史；德国中长端使用 Bundesbank 官方 CSV，短端与3Y使用 Trading Economics 最新页；日本1M/3M/6M 使用 Investing.com 历史表并在有更新日期时合并 Trading Economics 最新页；日本1Y/2Y/3Y/5Y/7Y/10Y/30Y 使用日本财务省 MOF 官方收益率曲线作为历史底座并合并 Trading Economics 最新页；韩国1M/3M/6M 使用 SMBS KORIBOR 作为短端资金代理而非政府债，韩国1Y以上使用 Trading Economics 最新页并按日合并本地缓存。",
             "政策新闻雷达只做加息、降息、维持利率相关文本筛选；抓取或 AI 分类不可用时退回本地规则解析。",
         ],
     }

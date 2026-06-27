@@ -480,6 +480,44 @@ def test_japan_short_bills_fall_back_to_seed_when_investing_is_blocked(monkeypat
     ]
 
 
+def test_korea_short_end_koribor_history_is_shared_across_tenors(monkeypatch, tmp_path) -> None:
+    specs = [
+        (SeriesSpec("KR_1M", "韩国1个月短端(KORIBOR)", "bond", "smbs-koribor", "SMBS:KORIBOR:1M", "KR_1M.csv"), "smbs-koribor", "1M"),
+        (SeriesSpec("KR_3M", "韩国3个月短端(KORIBOR)", "bond", "smbs-koribor", "SMBS:KORIBOR:3M", "KR_3M.csv"), "smbs-koribor", "3M"),
+        (SeriesSpec("KR_6M", "韩国6个月短端(KORIBOR)", "bond", "smbs-koribor", "SMBS:KORIBOR:6M", "KR_6M.csv"), "smbs-koribor", "6M"),
+    ]
+    for name in [
+        "WSCN_SPECS",
+        "YAHOO_SPECS",
+        "NIKKEI_SPECS",
+        "CHINA_BOND_SPECS",
+        "GERMANY_BOND_SPECS",
+        "JAPAN_BOND_SPECS",
+        "INVESTING_SPECS",
+    ]:
+        monkeypatch.setattr(market_dashboard, name, [])
+    monkeypatch.setattr(market_dashboard, "KOREA_BOND_SPECS", specs)
+    monkeypatch.setattr(market_dashboard, "DASHBOARD_DATA", tmp_path)
+    calls = []
+
+    def fake_koribor(start, end):
+        calls.append((start, end))
+        return {
+            "1M": [{"date": "2026-06-26", "timestamp": 1782432000, "open": 2.68, "high": 2.68, "low": 2.68, "close": 2.68}],
+            "3M": [{"date": "2026-06-26", "timestamp": 1782432000, "open": 3.01, "high": 3.01, "low": 3.01, "close": 3.01}],
+            "6M": [{"date": "2026-06-26", "timestamp": 1782432000, "open": 3.23, "high": 3.23, "low": 3.23, "close": 3.23}],
+        }
+
+    monkeypatch.setattr(market_dashboard, "fetch_smbs_koribor_rows_by_tenor", fake_koribor)
+
+    records = market_dashboard.fetch_all(SimpleNamespace(wscn_count=500, lookback_days=90, sleep_sec=0))
+
+    assert len(calls) == 1
+    assert [record["key"] for record in records] == ["KR_1M", "KR_3M", "KR_6M"]
+    assert [record["rows"] for record in records] == ["1", "1", "1"]
+    assert market_dashboard.read_ohlc(tmp_path / "KR_3M.csv")[0]["close"] == 3.01
+
+
 def test_cross_checked_china_germany_korea_bond_tenors_are_configured() -> None:
     china_sources = {series_spec.key: series_spec.source for series_spec, _, _ in CHINA_BOND_SPECS}
     germany_sources = {series_spec.key: series_spec.source for series_spec, _, _ in GERMANY_BOND_SPECS}
@@ -535,6 +573,9 @@ def test_cross_checked_china_germany_korea_bond_tenors_are_configured() -> None:
     ]
 
     assert korea_sources == {
+        "KR_1M": "smbs-koribor",
+        "KR_3M": "smbs-koribor",
+        "KR_6M": "smbs-koribor",
         "KR_1Y": "tradingeconomics",
         "KR_2Y": "tradingeconomics",
         "KR_3Y": "tradingeconomics",
@@ -543,6 +584,9 @@ def test_cross_checked_china_germany_korea_bond_tenors_are_configured() -> None:
         "KR_30Y": "tradingeconomics",
     }
     assert COUNTRY_BOND_TENORS["KR"] == [
+        ("1M", "KR_1M"),
+        ("3M", "KR_3M"),
+        ("6M", "KR_6M"),
         ("1Y", "KR_1Y"),
         ("2Y", "KR_2Y"),
         ("3Y", "KR_3Y"),

@@ -5,6 +5,9 @@ from __future__ import annotations
 
 import csv
 import json
+import re
+import time
+from datetime import date, datetime, timedelta
 from io import StringIO
 from typing import Any
 from urllib.parse import urlencode
@@ -19,6 +22,8 @@ CHINAMONEY_CURVE_DATA_URL = "https://www.chinamoney.com.cn/ags/ms/cm-u-bk-curren
 CHINAMONEY_CURVE_XML_URL = "https://www.chinamoney.com.cn/ags/ms/cm-u-bk-currency/ClsYldCurvXml"
 CHINAMONEY_REFERER = "https://www.chinamoney.com.cn/english/bmkycvcyc/"
 TRADINGECONOMICS_BASE_URL = "https://tradingeconomics.com"
+BOK_ECOS_BASE_URL = "https://ecos.bok.or.kr/api"
+SMBS_KORIBOR_URL = "http://www.smbs.biz/Eng/Funds/Koribor.jsp"
 
 CHINAMONEY_TERMS = {
     "0.083": "1M",
@@ -31,6 +36,13 @@ CHINAMONEY_TERMS = {
     "7": "7Y",
     "10": "10Y",
     "30": "30Y",
+}
+
+BOK_ECOS_MARKET_RATE_ITEMS = {
+    "KORIBOR_3M": "010150000",
+    "KORIBOR_6M": "010151000",
+    "MSB_91D": "010400000",
+    "CD_91D": "010502000",
 }
 
 BUNDESBANK_CODES = {
@@ -78,6 +90,157 @@ def rows_by_tenor_from_chinamoney_payload(payload_text: str, date_text: str) -> 
         if not tenor or not value.text:
             continue
         rows[tenor] = close_only_row(date_text, float(value.text))
+    return rows
+
+
+def chinamoney_curve_date(day: date) -> str:
+    return f"{day.day} {day:%b %Y}"
+
+
+def fetch_chinamoney_rows_by_tenor_for_date(day: date) -> dict[str, dict[str, Any]]:
+    payload = post_json(
+        CHINAMONEY_CURVE_XML_URL,
+        {
+            "lang": "EN",
+            "bondType": "CYCC000",
+            "interestRateDate": chinamoney_curve_date(day),
+            "maturityYield": "1",
+            "currentYield": "",
+            "futureYield": "",
+        },
+    )
+    return rows_by_tenor_from_chinamoney_payload(json.dumps(payload), day.isoformat())
+
+
+def fetch_chinamoney_history_rows_by_tenor(start_day: date, end_day: date, sleep_sec: float = 0.0) -> dict[str, list[dict[str, Any]]]:
+    rows_by_tenor: dict[str, list[dict[str, Any]]] = {}
+    current = start_day
+    while current <= end_day:
+        if current.weekday() < 5:
+            for tenor, row in fetch_chinamoney_rows_by_tenor_for_date(current).items():
+                rows_by_tenor.setdefault(tenor, []).append(row)
+            if sleep_sec:
+                time.sleep(sleep_sec)
+        current += timedelta(days=1)
+    return rows_by_tenor
+
+
+def decode_smbs_obfuscated_html(html: str) -> str:
+    def decode_payload(match: re.Match[str]) -> str:
+        encoded = match.group(2)
+        return re.sub(r"%_[A-Z]([0-9A-Fa-f]{2})", lambda item: chr(int(item.group(1), 16)), encoded)
+
+    return re.sub(r"<script>\s*d\d\(\s*([\"'])(.*?)\1\s*\);\s*</script>", decode_payload, html, flags=re.DOTALL)
+
+
+def rows_by_tenor_from_smbs_koribor_html(html: str) -> dict[str, list[dict[str, Any]]]:
+    decoded = decode_smbs_obfuscated_html(html)
+    table_match = re.search(
+        r"<caption>\s*Daily KORIBOR result\s*</caption>.*?<thead>(?P<thead>.*?)</thead>.*?<tbody>(?P<tbody>.*?)</tbody>",
+        decoded,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if not table_match:
+        return {}
+
+    headers = [
+        re.sub(r"\s+", " ", re.sub(r"<.*?>", " ", cell)).strip()
+        for cell in re.findall(r"<th[^>]*>(.*?)</th>", table_match.group("thead"), flags=re.IGNORECASE | re.DOTALL)
+    ][1:]
+    rows_by_tenor: dict[str, list[dict[str, Any]]] = {header: [] for header in headers if header}
+    for row_html in re.findall(r"<tr[^>]*>(.*?)</tr>", table_match.group("tbody"), flags=re.IGNORECASE | re.DOTALL):
+        cells = [
+            re.sub(r"\s+", " ", re.sub(r"<.*?>", " ", cell)).strip()
+            for cell in re.findall(r"<td[^>]*>(.*?)</td>", row_html, flags=re.IGNORECASE | re.DOTALL)
+        ]
+        if len(cells) < len(headers) + 1:
+            continue
+        try:
+            row_date = datetime.strptime(cells[0], "%Y/%m/%d").date().isoformat()
+        except ValueError:
+            continue
+        for tenor, value in zip(headers, cells[1:]):
+            if not tenor or not value or value == "-":
+                continue
+            try:
+                close = float(value)
+            except ValueError:
+                continue
+            row = close_only_row(row_date, close)
+            row["source"] = "Seoul Money Brokerage Services KORIBOR fixing"
+            rows_by_tenor.setdefault(tenor, []).append(row)
+
+    return {tenor: sorted(rows, key=lambda row: row["date"]) for tenor, rows in rows_by_tenor.items() if rows}
+
+
+def fetch_smbs_koribor_rows_by_tenor(start_day: date, end_day: date) -> dict[str, list[dict[str, Any]]]:
+    form = {
+        "StrSch_Year": f"{end_day.year}",
+        "StrSch_Month": f"{end_day.month:02d}",
+        "StrSch_Day": f"{end_day.day:02d}",
+        "StrSch_sYear": f"{start_day.year}",
+        "StrSch_sMonth": f"{start_day.month:02d}",
+        "StrSch_sDay": f"{start_day.day:02d}",
+        "StrSch_eYear": f"{end_day.year}",
+        "StrSch_eMonth": f"{end_day.month:02d}",
+        "StrSch_eDay": f"{end_day.day:02d}",
+        "StrSch_tsYear": f"{start_day.year}",
+        "StrSch_tsMonth": f"{start_day.month:02d}",
+        "StrSch_tsDay": f"{start_day.day:02d}",
+        "StrSch_teYear": f"{end_day.year}",
+        "StrSch_teMonth": f"{end_day.month:02d}",
+        "StrSch_teDay": f"{end_day.day:02d}",
+        "StrSchFull": end_day.strftime("%Y.%m.%d"),
+        "StrSchFull2": start_day.strftime("%Y.%m.%d"),
+        "StrSchFull3": end_day.strftime("%Y.%m.%d"),
+        "StrSchFull4": start_day.strftime("%Y.%m.%d"),
+        "StrSchFull5": end_day.strftime("%Y.%m.%d"),
+    }
+    request = Request(
+        SMBS_KORIBOR_URL,
+        data=urlencode(form).encode("utf-8"),
+        method="POST",
+        headers={
+            "User-Agent": "Mozilla/5.0",
+            "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+    )
+    html = urlopen(request, timeout=60).read().decode("euc-kr", "ignore")
+    return rows_by_tenor_from_smbs_koribor_html(html)
+
+
+def rows_from_bok_ecos_payload(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for item in payload.get("StatisticSearch", {}).get("row", []):
+        try:
+            row_date = datetime.strptime(str(item.get("TIME", "")), "%Y%m%d").date().isoformat()
+            close = float(item.get("DATA_VALUE", ""))
+        except ValueError:
+            continue
+        rows.append(close_only_row(row_date, close))
+    return rows
+
+
+def fetch_bok_ecos_rows(item_code: str, start_day: date, end_day: date, api_key: str = "sample") -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    start_row = 1
+    while True:
+        end_row = start_row + 9
+        url = (
+            f"{BOK_ECOS_BASE_URL}/StatisticSearch/{api_key}/json/en/{start_row}/{end_row}"
+            f"/817Y002/D/{start_day:%Y%m%d}/{end_day:%Y%m%d}/{item_code}"
+        )
+        request = Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        payload = json.loads(urlopen(request, timeout=30).read().decode("utf-8", "ignore"))
+        batch = rows_from_bok_ecos_payload(payload)
+        if not batch:
+            break
+        rows.extend(batch)
+        total_count = int(payload.get("StatisticSearch", {}).get("list_total_count", len(rows)))
+        if len(rows) >= total_count:
+            break
+        start_row += 10
     return rows
 
 

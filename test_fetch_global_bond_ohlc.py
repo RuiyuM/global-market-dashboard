@@ -3,7 +3,14 @@
 
 from __future__ import annotations
 
+from datetime import date
+
+import fetch_global_bond_ohlc
+from fetch_japan_bond_ohlc import close_only_row
+from fetch_global_bond_ohlc import fetch_chinamoney_history_rows_by_tenor
 from fetch_global_bond_ohlc import rows_by_tenor_from_chinamoney_payload
+from fetch_global_bond_ohlc import rows_by_tenor_from_smbs_koribor_html
+from fetch_global_bond_ohlc import rows_from_bok_ecos_payload
 from fetch_global_bond_ohlc import rows_from_bundesbank_csv
 from fetch_global_bond_ohlc import row_from_tradingeconomics_quote_html
 
@@ -30,6 +37,73 @@ def test_rows_by_tenor_from_chinamoney_payload_extracts_key_curve_terms() -> Non
         "low": 2.2196,
         "close": 2.2196,
     }
+
+
+def test_fetch_chinamoney_history_rows_skips_weekends(monkeypatch) -> None:
+    calls: list[date] = []
+
+    def fake_fetch(day: date):
+        calls.append(day)
+        return {"1M": close_only_row(day.isoformat(), 1.0 + len(calls))}
+
+    monkeypatch.setattr(fetch_global_bond_ohlc, "fetch_chinamoney_rows_by_tenor_for_date", fake_fetch)
+
+    rows = fetch_chinamoney_history_rows_by_tenor(date(2026, 6, 20), date(2026, 6, 23))
+
+    assert calls == [date(2026, 6, 22), date(2026, 6, 23)]
+    assert [row["date"] for row in rows["1M"]] == ["2026-06-22", "2026-06-23"]
+
+
+def test_rows_by_tenor_from_smbs_koribor_html_decodes_daily_history() -> None:
+    html = """
+    <table><caption>Daily KORIBOR result</caption>
+      <thead><tr><th>&nbsp;</th><th>1W</th><th>1M</th><th>2M</th><th>3M</th><th>6M</th><th>12M</th></tr></thead>
+      <tbody>
+        <script>d2('%_A3c%_A74%_A72%_A3e%_A3c%_A74%_A64%_A3e%_A32%_A30%_A32%_A36%_A2f%_A30%_A36%_A2f%_A32%_A36%_A3c%_A2f%_A74%_A64%_A3e%_A3c%_A74%_A64%_A3e%_A32%_A2e%_A35%_A30%_A3c%_A2f%_A74%_A64%_A3e%_A3c%_A74%_A64%_A3e%_A32%_A2e%_A36%_A38%_A3c%_A2f%_A74%_A64%_A3e%_A3c%_A74%_A64%_A3e%_A32%_A2e%_A38%_A35%_A3c%_A2f%_A74%_A64%_A3e%_A3c%_A74%_A64%_A3e%_A33%_A2e%_A30%_A31%_A3c%_A2f%_A74%_A64%_A3e%_A3c%_A74%_A64%_A3e%_A33%_A2e%_A32%_A33%_A3c%_A2f%_A74%_A64%_A3e%_A3c%_A74%_A64%_A3e%_A33%_A2e%_A36%_A35%_A3c%_A2f%_A74%_A64%_A3e%_A3c%_A2f%_A74%_A72%_A3e');</script>
+        <tr><td>2026/06/25</td><td>2.50</td><td>2.68</td><td>2.84</td><td>3.00</td><td>3.21</td><td class='brr0'>3.64</td></tr>
+      </tbody>
+    </table>
+    """
+
+    rows = rows_by_tenor_from_smbs_koribor_html(html)
+
+    assert [row["date"] for row in rows["1M"]] == ["2026-06-25", "2026-06-26"]
+    assert rows["1M"][-1]["close"] == 2.68
+    assert rows["3M"][-1]["close"] == 3.01
+    assert rows["6M"][-1]["close"] == 3.23
+    assert rows["12M"][-1]["source"] == "Seoul Money Brokerage Services KORIBOR fixing"
+
+
+def test_rows_from_bok_ecos_payload_parses_daily_market_rates() -> None:
+    payload = {
+        "StatisticSearch": {
+            "row": [
+                {"TIME": "20260625", "DATA_VALUE": "2.65"},
+                {"TIME": "20260626", "DATA_VALUE": "2.67"},
+            ]
+        }
+    }
+
+    rows = rows_from_bok_ecos_payload(payload)
+
+    assert rows == [
+        {
+            "date": "2026-06-25",
+            "timestamp": 1782345600,
+            "open": 2.65,
+            "high": 2.65,
+            "low": 2.65,
+            "close": 2.65,
+        },
+        {
+            "date": "2026-06-26",
+            "timestamp": 1782432000,
+            "open": 2.67,
+            "high": 2.67,
+            "low": 2.67,
+            "close": 2.67,
+        },
+    ]
 
 
 def test_rows_from_bundesbank_csv_skips_missing_weekends() -> None:
