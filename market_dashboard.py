@@ -2912,7 +2912,13 @@ def render_html(snapshot: dict[str, Any]) -> str:
     html.extend(['<section class="panel hedge-cycle-panel">', "<h2>长短债 8 种对冲</h2>"])
     for cycle_title, cases in hedge_cycles:
         html.append('<div class="hedge-cycle-block">')
+        html.append('<div class="hedge-cycle-title">')
         html.append(f"<h3>{escape(cycle_title)}</h3>")
+        if cycle_title == "加息周期" and snapshot.get("hike_cycle_example"):
+            html.append(
+                '<button type="button" class="hike-example-toggle" data-hike-example-toggle aria-expanded="false">实际案例</button>'
+            )
+        html.append("</div>")
         html.append('<div class="hedge-case-grid">')
         for index, action, detail, state in cases:
             html.append(
@@ -2924,7 +2930,9 @@ def render_html(snapshot: dict[str, Any]) -> str:
             )
         html.append("</div>")
         if cycle_title == "加息周期":
-            html.append(render_hike_cycle_example(snapshot.get("hike_cycle_example", {})))
+            example_html = render_hike_cycle_example(snapshot.get("hike_cycle_example", {}))
+            if example_html:
+                html.append(f'<div class="hike-example-wrap" data-hike-example-wrap hidden>{example_html}</div>')
         html.append("</div>")
     html.append('<p class="hedge-footnote">前两种偏缩，后两种偏扩；第一次加息常见长短债交叉。</p>')
     html.append("</section>")
@@ -3369,7 +3377,11 @@ th:first-child, td:first-child { text-align: left; }
 .notes p { margin: 4px 0; }
 .hedge-cycle-panel h2 { margin-bottom: 12px; }
 .hedge-cycle-block + .hedge-cycle-block { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
-.hedge-cycle-block h3 { margin: 0 0 10px; font-size: 15px; letter-spacing: 0; }
+.hedge-cycle-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.hedge-cycle-block h3 { margin: 0; font-size: 15px; letter-spacing: 0; }
+.hike-example-toggle { border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--blue); cursor: pointer; min-height: 30px; padding: 0 10px; font: inherit; font-size: 12px; font-weight: 750; white-space: nowrap; }
+.hike-example-toggle:hover,
+.hike-example-toggle:focus-visible { background: #eef5ff; border-color: #aac5ee; outline: none; }
 .hedge-case-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .hedge-case {
   border: 1px solid var(--line);
@@ -3436,6 +3448,7 @@ th:first-child, td:first-child { text-align: left; }
   .policy-action-row small { grid-column: 1 / 4; text-align: left; }
   .flow-detail-grid { grid-template-columns: 1fr; }
   .hedge-case-grid { grid-template-columns: 1fr; }
+  .hedge-cycle-title { align-items: flex-start; flex-direction: column; }
   .hike-example-head { align-items: flex-start; flex-direction: column; }
   .hike-phase-grid { grid-template-columns: 1fr; }
   .quant-fund-head { flex-direction: column; }
@@ -3464,6 +3477,7 @@ JS = """
   const policyActionToggles = Array.from(document.querySelectorAll("[data-policy-actions-toggle]"));
   const fxRankToggles = Array.from(document.querySelectorAll("[data-fx-rank-toggle]"));
   const dailyAlertCards = Array.from(document.querySelectorAll(".daily-alert-card[data-ohlc-key]"));
+  const hikeExampleToggles = Array.from(document.querySelectorAll("[data-hike-example-toggle]"));
   let activeFlowDetail = null;
   let activeFlowRouteKey = null;
   const defaultOhlcKey = "US_10Y";
@@ -4545,6 +4559,18 @@ JS = """
       if (event.key !== "Enter" && event.key !== " ") return;
       event.preventDefault();
       openDailyAlertOhlc(card);
+    });
+  });
+
+  hikeExampleToggles.forEach((button) => {
+    button.addEventListener("click", () => {
+      const block = button.closest(".hedge-cycle-block");
+      const wrap = block?.querySelector("[data-hike-example-wrap]");
+      if (!wrap) return;
+      const nextExpanded = button.getAttribute("aria-expanded") !== "true";
+      button.setAttribute("aria-expanded", String(nextExpanded));
+      wrap.hidden = !nextExpanded;
+      button.textContent = nextExpanded ? "收起案例" : "实际案例";
     });
   });
 

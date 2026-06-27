@@ -394,7 +394,11 @@ th:first-child, td:first-child { text-align: left; }
 .notes p { margin: 4px 0; }
 .hedge-cycle-panel h2 { margin-bottom: 12px; }
 .hedge-cycle-block + .hedge-cycle-block { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
-.hedge-cycle-block h3 { margin: 0 0 10px; font-size: 15px; letter-spacing: 0; }
+.hedge-cycle-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.hedge-cycle-block h3 { margin: 0; font-size: 15px; letter-spacing: 0; }
+.hike-example-toggle { border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--blue); cursor: pointer; min-height: 30px; padding: 0 10px; font: inherit; font-size: 12px; font-weight: 750; white-space: nowrap; }
+.hike-example-toggle:hover,
+.hike-example-toggle:focus-visible { background: #eef5ff; border-color: #aac5ee; outline: none; }
 .hedge-case-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .hedge-case {
   border: 1px solid var(--line);
@@ -461,6 +465,7 @@ th:first-child, td:first-child { text-align: left; }
   .policy-action-row small { grid-column: 1 / 4; text-align: left; }
   .flow-detail-grid { grid-template-columns: 1fr; }
   .hedge-case-grid { grid-template-columns: 1fr; }
+  .hedge-cycle-title { align-items: flex-start; flex-direction: column; }
   .hike-example-head { align-items: flex-start; flex-direction: column; }
   .hike-phase-grid { grid-template-columns: 1fr; }
   .quant-fund-head { flex-direction: column; }
