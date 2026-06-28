@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from types import SimpleNamespace
 
 import market_dashboard
@@ -879,6 +879,7 @@ def test_cross_checked_china_germany_korea_bond_tenors_are_configured() -> None:
         ("30Y", "DE_30Y"),
     ]
 
+
     assert korea_sources == {
         "KR_1M": "smbs-koribor",
         "KR_3M": "smbs-koribor",
@@ -913,6 +914,94 @@ def test_cross_checked_china_germany_korea_bond_tenors_are_configured() -> None:
         ("10Y", "KR_10Y"),
         ("30Y", "KR_30Y"),
     ]
+
+
+def test_china_short_bills_backfill_from_lookback_when_cache_is_short(monkeypatch, tmp_path) -> None:
+    cn_specs = [
+        (SeriesSpec("CN_1M", "中国1个月国债", "bond", "chinamoney", "CFETS:CYCC000:1M", "CN_1M.csv"), "chinamoney", "1M"),
+        (SeriesSpec("CN_3M", "中国3个月国债", "bond", "chinamoney", "CFETS:CYCC000:3M", "CN_3M.csv"), "chinamoney", "3M"),
+    ]
+    captured: dict[str, date] = {}
+    for name in [
+        "WSCN_SPECS",
+        "YAHOO_SPECS",
+        "NIKKEI_SPECS",
+        "JAPAN_BOND_SPECS",
+        "GERMANY_BOND_SPECS",
+        "KOREA_BOND_SPECS",
+        "INVESTING_SPECS",
+    ]:
+        monkeypatch.setattr(market_dashboard, name, [])
+    monkeypatch.setattr(market_dashboard, "CHINA_BOND_SPECS", cn_specs)
+    monkeypatch.setattr(market_dashboard, "DASHBOARD_DATA", tmp_path)
+    monkeypatch.setattr(market_dashboard, "today_utc", lambda: date(2026, 6, 26))
+
+    short_cache = [
+        {"date": (date(2026, 4, 28) + timedelta(days=offset)).isoformat(), "open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0}
+        for offset in range(60)
+    ]
+    market_dashboard.write_ohlc(tmp_path / "CN_1M.csv", short_cache)
+    market_dashboard.write_ohlc(tmp_path / "CN_3M.csv", [{**row, "close": 1.2} for row in short_cache])
+
+    def fake_chinamoney_history(start, end, sleep_sec):
+        captured["start"] = start
+        captured["end"] = end
+        return {
+            "1M": [{"date": "2026-03-28", "open": 0.9, "high": 0.9, "low": 0.9, "close": 0.9}],
+            "3M": [{"date": "2026-03-28", "open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0}],
+        }
+
+    monkeypatch.setattr(market_dashboard, "fetch_chinamoney_history_rows_by_tenor", fake_chinamoney_history)
+    monkeypatch.setattr(market_dashboard, "fetch_chinabond_pbc_history_rows_by_tenor", lambda start, end, tenors, sleep_sec=0: {})
+
+    records = market_dashboard.fetch_all(SimpleNamespace(wscn_count=500, lookback_days=90, sleep_sec=0))
+
+    assert captured == {"start": date(2026, 3, 28), "end": date(2026, 6, 26)}
+    assert [record["rows"] for record in records] == ["61", "61"]
+
+
+def test_china_3m_merges_chinabond_history_with_chinamoney_recent(monkeypatch, tmp_path) -> None:
+    cn_specs = [
+        (SeriesSpec("CN_1M", "中国1个月国债", "bond", "chinamoney", "CFETS:CYCC000:1M", "CN_1M.csv"), "chinamoney", "1M"),
+        (SeriesSpec("CN_3M", "中国3个月国债", "bond", "chinamoney", "CFETS:CYCC000:3M", "CN_3M.csv"), "chinamoney", "3M"),
+    ]
+    for name in [
+        "WSCN_SPECS",
+        "YAHOO_SPECS",
+        "NIKKEI_SPECS",
+        "JAPAN_BOND_SPECS",
+        "GERMANY_BOND_SPECS",
+        "KOREA_BOND_SPECS",
+        "INVESTING_SPECS",
+    ]:
+        monkeypatch.setattr(market_dashboard, name, [])
+    monkeypatch.setattr(market_dashboard, "CHINA_BOND_SPECS", cn_specs)
+    monkeypatch.setattr(market_dashboard, "DASHBOARD_DATA", tmp_path)
+    monkeypatch.setattr(market_dashboard, "today_utc", lambda: date(2026, 6, 26))
+    monkeypatch.setattr(
+        market_dashboard,
+        "fetch_chinabond_pbc_history_rows_by_tenor",
+        lambda start, end, tenors, sleep_sec=0: {
+            "3M": [{"date": "2025-01-02", "open": 1.5, "high": 1.5, "low": 1.5, "close": 1.5}],
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(
+        market_dashboard,
+        "fetch_chinamoney_history_rows_by_tenor",
+        lambda start, end, sleep_sec: {
+            "1M": [{"date": "2026-06-26", "open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0}],
+            "3M": [{"date": "2026-06-26", "open": 1.2, "high": 1.2, "low": 1.2, "close": 1.2}],
+        },
+    )
+
+    records = market_dashboard.fetch_all(SimpleNamespace(wscn_count=500, lookback_days=90, sleep_sec=0))
+
+    assert [record["rows"] for record in records] == ["1", "2"]
+    rows = market_dashboard.read_ohlc(tmp_path / "CN_3M.csv")
+    assert [row["date"].isoformat() for row in rows] == ["2025-01-02", "2026-06-26"]
+    assert rows[0]["close"] == 1.5
+    assert rows[1]["close"] == 1.2
 
 
 def test_ohlc_comparison_legend_uses_inline_tspans_to_avoid_overlap() -> None:

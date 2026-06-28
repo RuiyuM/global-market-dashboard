@@ -21,6 +21,8 @@ from fetch_japan_bond_ohlc import row_from_tradingeconomics_quote_html
 CHINAMONEY_CURVE_DATA_URL = "https://www.chinamoney.com.cn/ags/ms/cm-u-bk-currency/ClsYldCurvCurvData"
 CHINAMONEY_CURVE_XML_URL = "https://www.chinamoney.com.cn/ags/ms/cm-u-bk-currency/ClsYldCurvXml"
 CHINAMONEY_REFERER = "https://www.chinamoney.com.cn/english/bmkycvcyc/"
+CHINABOND_PBC_HISTORY_URL = "https://yield.chinabond.com.cn/cbweb-pbc-web/pbc/historyQuery"
+CHINABOND_PBC_REFERER = "https://yield.chinabond.com.cn/cbweb-pbc-web/pbc/showHistory?locale=en_US"
 TRADINGECONOMICS_BASE_URL = "https://tradingeconomics.com"
 BOK_ECOS_BASE_URL = "https://ecos.bok.or.kr/api"
 SMBS_KORIBOR_URL = "http://www.smbs.biz/Eng/Funds/Koribor.jsp"
@@ -36,6 +38,10 @@ CHINAMONEY_TERMS = {
     "7": "7Y",
     "10": "10Y",
     "30": "30Y",
+}
+
+CHINABOND_PBC_TERMS = {
+    "3M": {"param": "0.25", "column": 2},
 }
 
 BOK_ECOS_MARKET_RATE_ITEMS = {
@@ -128,6 +134,69 @@ def fetch_chinamoney_history_rows_by_tenor(start_day: date, end_day: date, sleep
                 time.sleep(sleep_sec)
         current += timedelta(days=1)
     return rows_by_tenor
+
+
+def rows_by_tenor_from_chinabond_pbc_history_html(html: str) -> dict[str, list[dict[str, Any]]]:
+    rows_by_tenor: dict[str, list[dict[str, Any]]] = {tenor: [] for tenor in CHINABOND_PBC_TERMS}
+    for row_html in re.findall(r"<tr[^>]*>(.*?)</tr>", html, flags=re.IGNORECASE | re.DOTALL):
+        cells = [
+            re.sub(r"\s+", " ", re.sub(r"<.*?>", " ", cell)).strip()
+            for cell in re.findall(r"<td[^>]*>(.*?)</td>", row_html, flags=re.IGNORECASE | re.DOTALL)
+        ]
+        if len(cells) < 3 or cells[1] == "Date":
+            continue
+        try:
+            row_date = datetime.strptime(cells[1], "%Y-%m-%d").date().isoformat()
+        except ValueError:
+            continue
+        for tenor, config in CHINABOND_PBC_TERMS.items():
+            value = cells[config["column"]] if config["column"] < len(cells) else ""
+            if not value:
+                continue
+            try:
+                rows_by_tenor[tenor].append(close_only_row(row_date, float(value)))
+            except ValueError:
+                continue
+    return {tenor: sorted(rows, key=lambda row: row["date"]) for tenor, rows in rows_by_tenor.items() if rows}
+
+
+def fetch_chinabond_pbc_history_rows_by_tenor(
+    start_day: date,
+    end_day: date,
+    tenors: tuple[str, ...] = ("3M",),
+    sleep_sec: float = 0.0,
+) -> dict[str, list[dict[str, Any]]]:
+    rows_by_tenor: dict[str, list[dict[str, Any]]] = {}
+    for tenor in tenors:
+        config = CHINABOND_PBC_TERMS.get(tenor)
+        if not config:
+            continue
+        cursor = start_day
+        while cursor <= end_day:
+            segment_end = min(cursor + timedelta(days=360), end_day)
+            params = {
+                "startDate": cursor.isoformat(),
+                "endDate": segment_end.isoformat(),
+                "gjqx": str(config["param"]),
+                "qxId": "hzsylqx",
+                "locale": "en_US",
+            }
+            request = Request(
+                f"{CHINABOND_PBC_HISTORY_URL}?{urlencode(params)}",
+                headers={"User-Agent": "Mozilla/5.0", "Referer": CHINABOND_PBC_REFERER},
+            )
+            html = urlopen(request, timeout=60).read().decode("utf-8", "ignore")
+            for parsed_tenor, rows in rows_by_tenor_from_chinabond_pbc_history_html(html).items():
+                if parsed_tenor == tenor:
+                    rows_by_tenor.setdefault(parsed_tenor, []).extend(rows)
+            if sleep_sec:
+                time.sleep(sleep_sec)
+            cursor = segment_end + timedelta(days=1)
+    return {
+        tenor: [dedup[day] for day in sorted(dedup)]
+        for tenor, rows in rows_by_tenor.items()
+        for dedup in [{str(row["date"]): row for row in rows}]
+    }
 
 
 def decode_smbs_obfuscated_html(html: str) -> str:

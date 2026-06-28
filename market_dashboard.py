@@ -34,6 +34,7 @@ from fetch_global_bond_ohlc import (
     TRADING_ECONOMICS_COUNTRY_SLUGS,
     fetch_bundesbank_rows,
     fetch_bundesbank_term_structure_rows,
+    fetch_chinabond_pbc_history_rows_by_tenor,
     fetch_chinamoney_history_rows_by_tenor,
     fetch_chinamoney_rows_by_tenor,
     fetch_smbs_koribor_rows_by_tenor,
@@ -61,6 +62,8 @@ USER_FX_FLOW_CODE = Path(os.environ.get("FX_FLOW_CODE_PATH", str(DEFAULT_FX_FLOW
 DAILY_MOVE_ALERT_WINDOW = 30
 DAILY_MOVE_ALERT_TOP_PCT = 20.0
 CHART_HISTORY_LIMIT = 1500
+CHINA_SHORT_BOND_BACKFILL_TENORS = {"3M"}
+CHINA_SHORT_BOND_MIN_HISTORY_ROWS = 240
 
 
 @dataclass(frozen=True)
@@ -433,6 +436,17 @@ def merge_ohlc_rows(existing: list[dict[str, Any]], incoming: list[dict[str, Any
     return [merged[key] for key in sorted(merged)]
 
 
+def needs_china_short_bond_backfill() -> bool:
+    for series_spec, _source_kind, source_key in CHINA_BOND_SPECS:
+        if source_key not in CHINA_SHORT_BOND_BACKFILL_TENORS:
+            continue
+        path = DASHBOARD_DATA / series_spec.cache_file
+        existing_rows = read_ohlc(path) if path.exists() else []
+        if len(existing_rows) < CHINA_SHORT_BOND_MIN_HISTORY_ROWS:
+            return True
+    return False
+
+
 def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
     records: list[dict[str, str]] = []
     DASHBOARD_DATA.mkdir(parents=True, exist_ok=True)
@@ -481,6 +495,8 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
 
     chinamoney_rows: dict[str, list[dict[str, Any]]] | None = None
     chinamoney_error = ""
+    chinabond_pbc_rows: dict[str, list[dict[str, Any]]] | None = None
+    chinabond_pbc_error = ""
     for series_spec, source_kind, source_key in CHINA_BOND_SPECS:
         path = DASHBOARD_DATA / series_spec.cache_file
         record = {"key": series_spec.key, "source": series_spec.source, "symbol": series_spec.symbol, "status": "pending", "file": str(path), "error": ""}
@@ -489,7 +505,7 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
                 sample_path = DASHBOARD_DATA / CHINA_BOND_SPECS[0][0].cache_file
                 existing_sample = read_ohlc(sample_path) if sample_path.exists() else []
                 fetch_start = start
-                if len(existing_sample) >= 45:
+                if len(existing_sample) >= 45 and not needs_china_short_bond_backfill():
                     fetch_start = max(start, row_date_key(existing_sample[-1]) - timedelta(days=7))
                 try:
                     chinamoney_rows = fetch_chinamoney_history_rows_by_tenor(fetch_start, end, args.sleep_sec)
@@ -497,15 +513,27 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
                     chinamoney_error = f"ChinaMoney history failed: {exc}"
                     chinamoney_rows = fetch_chinamoney_rows_by_tenor()
             rows = list(chinamoney_rows.get(source_key, []))
+            if source_key in CHINA_SHORT_BOND_BACKFILL_TENORS:
+                if chinabond_pbc_rows is None:
+                    try:
+                        chinabond_pbc_rows = fetch_chinabond_pbc_history_rows_by_tenor(start, end, ("3M",), args.sleep_sec)
+                    except Exception as exc:
+                        chinabond_pbc_error = f"ChinaBond CCDC history failed: {exc}"
+                        chinabond_pbc_rows = {}
+                rows = merge_ohlc_rows(chinabond_pbc_rows.get(source_key, []), rows)
             if path.exists():
                 rows = merge_ohlc_rows(read_ohlc(path), rows)
             for row in rows:
                 row["source_symbol"] = series_spec.symbol
-                row["source"] = "ChinaMoney CFETS closing treasury yield curve"
+                row["source"] = (
+                    "ChinaBond CCDC government bond yield curve history + ChinaMoney CFETS closing treasury yield curve"
+                    if source_key in CHINA_SHORT_BOND_BACKFILL_TENORS
+                    else "ChinaMoney CFETS closing treasury yield curve"
+                )
             write_ohlc(path, rows)
             record.update({"status": "ok" if rows else "empty", "rows": str(len(rows)), "latest": rows[-1]["date"] if rows else ""})
-            if chinamoney_error:
-                record["error"] = chinamoney_error
+            if chinamoney_error or chinabond_pbc_error:
+                record["error"] = "; ".join(error for error in [chinamoney_error, chinabond_pbc_error] if error)
         except Exception as exc:
             record.update({"status": "error", "error": str(exc)})
         records.append(record)
@@ -1686,7 +1714,7 @@ def build_snapshot(fetch_records: list[dict[str, str]], *, fetch_policy_news: bo
             "7D/30D 波动率 = 对应窗口相邻交易观测的平均绝对日变化；债券单位 bp/日，股指和汇率单位 %/日。",
             f"三币种资金流向直接调用用户提供代码：{USER_FX_FLOW_CODE}",
             "derived = 本地公式而非外部供应商：CNY_BASE=1；债券曲线=10Y-2Y；CNYJPY=1/JPYCNY；RUB 交叉汇率优先使用具备历史深度的 Yahoo 直接报价，历史不足才用 USDCNY/USDRUB 或 USDJPY/USDRUB 派生并在 source_audit 里比对最新直接报价。",
-            "美债扩展期限优先使用 WSCN 日线；中国国债使用 ChinaMoney/CFETS 官方收盘收益率曲线并按缺口回填历史；德国2Y/5Y/7Y/10Y/30Y使用 Bundesbank 当前联邦证券官方日频 CSV，德国1Y/3Y使用 Bundesbank 官方 Svensson 期限结构日频 CSV，德国3M/6M暂无稳定官方日频二级市场源，暂用 Trading Economics 最新页；日本1M/3M/6M 使用 Investing.com 历史表并在有更新日期时合并 Trading Economics 最新页；日本1Y/2Y/3Y/5Y/7Y/10Y/30Y 使用日本财务省 MOF 官方收益率曲线作为历史底座并合并 Trading Economics 最新页；韩国1M/3M/6M 使用 SMBS KORIBOR 作为短端资金代理而非政府债，韩国3M/6M可由 BOK ECOS 交叉验证，韩国1Y/2Y/3Y/5Y/10Y/30Y 使用 Investing.com 历史表并在有更新日期时合并 Trading Economics 最新页；俄罗斯2Y/10Y 在 Investing.com 被云服务器拦截时保留历史缓存并合并 Trading Economics 最新页。",
+            "美债扩展期限优先使用 WSCN 日线；中国国债使用 ChinaMoney/CFETS 官方收盘收益率曲线并按缺口回填历史，其中中国3M合并 ChinaBond/CCDC 政府债收益率曲线历史；德国2Y/5Y/7Y/10Y/30Y使用 Bundesbank 当前联邦证券官方日频 CSV，德国1Y/3Y使用 Bundesbank 官方 Svensson 期限结构日频 CSV，德国3M/6M暂无稳定官方日频二级市场源，暂用 Trading Economics 最新页；日本1M/3M/6M 使用 Trading Economics 图表历史、Investing.com 历史表并合并 Trading Economics 最新页；日本1Y/2Y/3Y/5Y/7Y/10Y/30Y 使用日本财务省 MOF 官方收益率曲线作为历史底座并合并 Trading Economics 最新页；韩国1M/3M/6M 使用 SMBS KORIBOR 作为短端资金代理而非政府债，韩国3M/6M可由 BOK ECOS 交叉验证，韩国1Y/2Y/3Y/5Y/10Y/30Y 使用 Investing.com 历史表并在有更新日期时合并 Trading Economics 最新页；俄罗斯2Y/10Y 在 Investing.com 被云服务器拦截时保留历史缓存并合并 Trading Economics 最新页。",
             "宏观指标使用 Yahoo Finance 日线：美元指数 DX-Y.NYB、VIX ^VIX、黄金 GC=F、WTI 原油 CL=F。",
             "政策新闻雷达只做加息、降息、维持利率相关文本筛选；抓取或 AI 分类不可用时退回本地规则解析。",
         ],

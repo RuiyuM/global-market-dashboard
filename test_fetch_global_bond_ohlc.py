@@ -9,6 +9,7 @@ import fetch_global_bond_ohlc
 from fetch_japan_bond_ohlc import close_only_row
 from fetch_global_bond_ohlc import fetch_chinamoney_history_rows_by_tenor
 from fetch_global_bond_ohlc import fetch_bundesbank_term_structure_rows
+from fetch_global_bond_ohlc import rows_by_tenor_from_chinabond_pbc_history_html
 from fetch_global_bond_ohlc import rows_by_tenor_from_chinamoney_payload
 from fetch_global_bond_ohlc import rows_by_tenor_from_smbs_koribor_html
 from fetch_global_bond_ohlc import rows_from_bok_ecos_payload
@@ -38,6 +39,45 @@ def test_rows_by_tenor_from_chinamoney_payload_extracts_key_curve_terms() -> Non
         "low": 2.2196,
         "close": 2.2196,
     }
+
+
+def test_rows_by_tenor_from_chinabond_pbc_history_html_extracts_3m_rows() -> None:
+    html = """
+    <div id="gjqxData">
+      <table>
+        <tr><td>Yield Curve Name</td><td>Date</td><td>3M</td><td>6M</td></tr>
+        <tr>
+          <td style="text-align: left">ChinaBond Government Bond Yield Curve</td>
+          <td>2026-06-26</td><td>1.0873</td><td></td>
+        </tr>
+        <tr>
+          <td style="text-align: left">ChinaBond Government Bond Yield Curve</td>
+          <td>2026-06-25</td><td>1.0881</td><td></td>
+        </tr>
+      </table>
+    </div>
+    """
+
+    rows = rows_by_tenor_from_chinabond_pbc_history_html(html)
+
+    assert rows["3M"] == [
+        {
+            "date": "2026-06-25",
+            "timestamp": 1782345600,
+            "open": 1.0881,
+            "high": 1.0881,
+            "low": 1.0881,
+            "close": 1.0881,
+        },
+        {
+            "date": "2026-06-26",
+            "timestamp": 1782432000,
+            "open": 1.0873,
+            "high": 1.0873,
+            "low": 1.0873,
+            "close": 1.0873,
+        },
+    ]
 
 
 def test_fetch_chinamoney_history_rows_skips_weekends(monkeypatch) -> None:
