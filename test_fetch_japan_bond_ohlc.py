@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from fetch_japan_bond_ohlc import rows_by_tenor_from_mof_csv
 from fetch_japan_bond_ohlc import row_from_tradingeconomics_quote_html
+from fetch_japan_bond_ohlc import rows_from_tradingeconomics_chart_payload
 
 
 def test_rows_by_tenor_from_mof_csv_builds_close_only_ohlc() -> None:
@@ -62,3 +63,32 @@ def test_row_from_tradingeconomics_quote_html_parses_directional_summary() -> No
         "low": 2.31,
         "close": 2.31,
     }
+
+
+def test_rows_from_tradingeconomics_chart_payload_decodes_ohlc_rows() -> None:
+    encoded_payload = (
+        '"a/lpZKEUJw9hkMU5RydOuWFOPtP42iVnKkM7YR/DfaSgJqhVWL9taB1ik+'
+        'kXnSQcH0nn8rPCTSm6ZLefY94QEO3LvaSs4aTT+QZtaZ0uS2ZA3whPW++'
+        'IQKfuxezfcXPE8ceqES1hcA=="'
+    )
+
+    rows = rows_from_tradingeconomics_chart_payload(encoded_payload)
+
+    assert rows == [
+        {
+            "date": "2025-01-01",
+            "timestamp": 1735689600,
+            "open": 0.19,
+            "high": 0.21,
+            "low": 0.18,
+            "close": 0.2,
+        },
+        {
+            "date": "2025-01-02",
+            "timestamp": 1735776000,
+            "open": 0.2,
+            "high": 0.23,
+            "low": 0.19,
+            "close": 0.22,
+        },
+    ]

@@ -41,6 +41,7 @@ from fetch_global_bond_ohlc import (
 )
 from fetch_japan_bond_ohlc import (
     TRADINGECONOMICS_SLUGS,
+    fetch_tradingeconomics_chart_rows,
     fetch_mof_jgb_rows_by_tenor,
     fetch_tradingeconomics_latest_row,
 )
@@ -634,15 +635,20 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
             elif source_kind == "investing+tradingeconomics":
                 investing_spec = INVESTING_BOND_SPECS[f"JP{source_key}"]
                 rows = []
+                try:
+                    chart_rows = fetch_tradingeconomics_chart_rows(TRADINGECONOMICS_SLUGS[source_key], start, end)
+                    rows = merge_ohlc_rows(rows, chart_rows)
+                except Exception as exc:
+                    latest_error = f"Trading Economics chart history failed: {exc}"
                 if series_spec.local_file and (LOCAL_DATA / series_spec.local_file).exists():
-                    rows = read_ohlc(LOCAL_DATA / series_spec.local_file)
+                    rows = merge_ohlc_rows(rows, read_ohlc(LOCAL_DATA / series_spec.local_file))
                 if path.exists():
                     rows = merge_ohlc_rows(rows, read_ohlc(path))
                 try:
                     investing_rows = rows_from_investing_html(fetch_investing_html(investing_spec, start, end))
                     rows = merge_ohlc_rows(rows, investing_rows)
                 except Exception as exc:
-                    latest_error = f"Investing.com history failed: {exc}"
+                    latest_error = f"{latest_error}; Investing.com history failed: {exc}" if latest_error else f"Investing.com history failed: {exc}"
                 try:
                     latest_row = fetch_tradingeconomics_latest_row(TRADINGECONOMICS_SLUGS[source_key])
                     if latest_row and (not rows or row_date_key(latest_row) > row_date_key(rows[-1])):
@@ -664,7 +670,7 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
                 elif source_kind == "mof+tradingeconomics":
                     row["source"] = "Japan MOF official JGB yield curve + Trading Economics latest yield page"
                 elif source_kind == "investing+tradingeconomics":
-                    row["source"] = "Investing.com historical table + Trading Economics latest yield page"
+                    row["source"] = "Trading Economics chart history + Investing.com historical table + Trading Economics latest yield page"
                 else:
                     row["source"] = "Trading Economics latest yield page"
             write_ohlc(path, rows)
