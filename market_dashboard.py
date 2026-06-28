@@ -636,7 +636,8 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
                 investing_spec = INVESTING_BOND_SPECS[f"JP{source_key}"]
                 rows = []
                 try:
-                    chart_rows = fetch_tradingeconomics_chart_rows(TRADINGECONOMICS_SLUGS[source_key], start, end)
+                    chart_start = min(start, end - timedelta(days=CHART_HISTORY_LIMIT * 2))
+                    chart_rows = fetch_tradingeconomics_chart_rows(TRADINGECONOMICS_SLUGS[source_key], chart_start, end)
                     rows = merge_ohlc_rows(rows, chart_rows)
                 except Exception as exc:
                     latest_error = f"Trading Economics chart history failed: {exc}"

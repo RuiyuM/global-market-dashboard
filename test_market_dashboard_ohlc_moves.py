@@ -533,6 +533,47 @@ def test_japan_short_bills_use_te_chart_history_before_investing_window(monkeypa
     assert rows[1]["close"] == 0.54
 
 
+def test_japan_short_bills_request_extra_te_chart_history_for_ohlc_window(monkeypatch, tmp_path) -> None:
+    series_spec = SeriesSpec(
+        "JP_1M",
+        "日本1个月国债",
+        "bond",
+        "investing+tradingeconomics",
+        "JP1MT=XX / GJGB1M",
+        "JP_1M.csv",
+        "JP1M_INVESTING_1D_ohlc.csv",
+    )
+    captured: dict[str, date] = {}
+    for name in [
+        "WSCN_SPECS",
+        "YAHOO_SPECS",
+        "NIKKEI_SPECS",
+        "CHINA_BOND_SPECS",
+        "GERMANY_BOND_SPECS",
+        "KOREA_BOND_SPECS",
+        "INVESTING_SPECS",
+    ]:
+        monkeypatch.setattr(market_dashboard, name, [])
+    monkeypatch.setattr(market_dashboard, "CHART_HISTORY_LIMIT", 10)
+    monkeypatch.setattr(market_dashboard, "JAPAN_BOND_SPECS", [(series_spec, "investing+tradingeconomics", "1M")])
+    monkeypatch.setattr(market_dashboard, "DASHBOARD_DATA", tmp_path)
+    monkeypatch.setattr(market_dashboard, "LOCAL_DATA", tmp_path / "empty-seed")
+
+    def fake_chart_rows(slug, start, end):
+        captured["start"] = start
+        captured["end"] = end
+        return []
+
+    monkeypatch.setattr(market_dashboard, "fetch_tradingeconomics_chart_rows", fake_chart_rows)
+    monkeypatch.setattr(market_dashboard, "fetch_investing_html", lambda spec, start, end: "<html></html>")
+    monkeypatch.setattr(market_dashboard, "rows_from_investing_html", lambda html: [])
+    monkeypatch.setattr(market_dashboard, "fetch_tradingeconomics_latest_row", lambda slug: None)
+
+    market_dashboard.fetch_all(SimpleNamespace(wscn_count=500, lookback_days=7, sleep_sec=0))
+
+    assert (captured["end"] - captured["start"]).days >= 20
+
+
 def test_japan_short_bills_keep_investing_ohlc_when_te_has_same_date(monkeypatch, tmp_path) -> None:
     series_spec = SeriesSpec(
         "JP_3M",
