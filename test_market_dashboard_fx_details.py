@@ -3,9 +3,12 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
 
-from market_dashboard import build_flow_sections, build_fx_cross_details, render_fx_rank_detail, render_html
+import pytest
+
+from market_dashboard import build_flow_sections, build_fx_cross_details, render_fx_rank_detail, render_html, us_close_effective_date
 
 
 def row(day: int, close: float) -> dict[str, object]:
@@ -49,6 +52,40 @@ def test_build_flow_sections_includes_exact_period_date_range() -> None:
 
     assert periods["当日"]["date_range"] == "2026-06-25 → 2026-06-26"
     assert periods["上日"]["date_range"] == "2026-06-24 → 2026-06-25"
+
+
+def test_us_close_effective_date_uses_new_york_time_and_skips_weekends() -> None:
+    ny = ZoneInfo("America/New_York")
+
+    assert us_close_effective_date(datetime(2026, 6, 29, 15, 59, tzinfo=ny)) == date(2026, 6, 26)
+    assert us_close_effective_date(datetime(2026, 6, 29, 16, 0, tzinfo=ny)) == date(2026, 6, 29)
+    assert us_close_effective_date(datetime(2026, 6, 27, 12, 0, tzinfo=ny)) == date(2026, 6, 26)
+    assert us_close_effective_date(datetime(2026, 6, 28, 12, 0, tzinfo=ny)) == date(2026, 6, 26)
+    assert us_close_effective_date(datetime(2026, 6, 29, 19, 59, tzinfo=timezone.utc)) == date(2026, 6, 26)
+    assert us_close_effective_date(datetime(2026, 6, 29, 20, 0, tzinfo=timezone.utc)) == date(2026, 6, 29)
+
+
+def test_us_close_effective_date_rejects_naive_datetime() -> None:
+    with pytest.raises(ValueError, match="timezone-aware"):
+        us_close_effective_date(datetime(2026, 6, 29, 16, 0))
+
+
+def test_build_flow_sections_weekend_daily_periods_use_prior_trading_days() -> None:
+    us_close_date = us_close_effective_date(datetime(2026, 6, 28, 12, 0, tzinfo=ZoneInfo("America/New_York")))
+    sections = build_flow_sections(
+        {
+            "USDCNY": [row(24, 7.0), row(25, 7.1), row(26, 7.2), row(29, 7.3)],
+            "JPYCNY": [row(24, 0.050), row(25, 0.051), row(26, 0.052), row(29, 0.053)],
+            "USDJPY": [row(24, 140.0), row(25, 141.0), row(26, 142.0), row(29, 143.0)],
+        },
+        us_close_date=us_close_date,
+    )
+
+    periods = {item["period"]: item for item in sections[0]["periods"]}
+
+    assert periods["当日"]["date_range"] == "2026-06-25 → 2026-06-26"
+    assert periods["上日"]["date_range"] == "2026-06-24 → 2026-06-25"
+    assert "2026-06-29" not in periods["当日"]["date_range"]
 
 
 def test_render_flow_period_dates_omit_year_in_visible_label() -> None:
