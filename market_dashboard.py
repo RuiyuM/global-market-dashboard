@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
+from zoneinfo import ZoneInfo
 
 from fetch_wscn_ohlc import fetch_ohlc as fetch_wscn_ohlc
 from fetch_investing_bond_ohlc import (
@@ -65,6 +66,7 @@ DAILY_MOVE_ALERT_TOP_PCT = 20.0
 CHART_HISTORY_LIMIT = 1500
 CHINA_SHORT_BOND_BACKFILL_TENORS = {"3M"}
 CHINA_SHORT_BOND_MIN_HISTORY_ROWS = 240
+US_MARKET_CLOSE_HOUR_ET = 16
 
 
 @dataclass(frozen=True)
@@ -983,6 +985,48 @@ def latest_row(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
     return rows[-1] if rows else None
 
 
+def previous_weekday(value: date) -> date:
+    current = value
+    while current.weekday() >= 5:
+        current -= timedelta(days=1)
+    return current
+
+
+def us_close_effective_date(now: datetime | None = None) -> date:
+    now_et = now.astimezone(ZoneInfo("America/New_York")) if now else datetime.now(ZoneInfo("America/New_York"))
+    candidate = now_et.date()
+    if now_et.hour < US_MARKET_CLOSE_HOUR_ET:
+        candidate -= timedelta(days=1)
+    return previous_weekday(candidate)
+
+
+def row_on_date(rows: list[dict[str, Any]], target: date) -> dict[str, Any] | None:
+    row = at_or_before(rows, target)
+    if row and row["date"] == target:
+        return row
+    return None
+
+
+def common_series_dates(series: dict[str, list[dict[str, Any]]], keys: list[str], end_cap: date) -> list[date]:
+    date_sets = []
+    for key in keys:
+        rows = series.get(key, [])
+        if not rows:
+            return []
+        date_sets.append({row["date"] for row in rows if row["date"] <= end_cap})
+    return sorted(set.intersection(*date_sets)) if date_sets else []
+
+
+def common_date_at_or_before(common_dates: list[date], target: date) -> date | None:
+    prior = None
+    for current in common_dates:
+        if current <= target:
+            prior = current
+        else:
+            break
+    return prior
+
+
 def country_bond_tenors(country: dict[str, Any]) -> list[tuple[str, str]]:
     configured = COUNTRY_BOND_TENORS.get(country["code"], [])
     if configured:
@@ -1630,9 +1674,18 @@ def rate_pair_change(
     *,
     offset_days: int = 0,
     offset_observations: int = 0,
+    base_date: date | None = None,
+    end_date: date | None = None,
 ) -> dict[str, Any] | None:
     rows = series.get(key, [])
-    if days is None:
+    if base_date is not None and end_date is not None:
+        if base_date >= end_date:
+            return None
+        base = row_on_date(rows, base_date)
+        end = row_on_date(rows, end_date)
+        if not base or not end:
+            return None
+    elif days is None:
         end_index = len(rows) - 1 - offset_observations
         base_index = end_index - 1
         if base_index < 0 or end_index >= len(rows):
@@ -1672,6 +1725,26 @@ def flow_period_date_range(changes: list[dict[str, Any]]) -> str:
     return base_label if base_label == latest_label else f"{base_label} → {latest_label}"
 
 
+def flow_period_common_dates(common_dates: list[date], period: dict[str, Any]) -> tuple[date, date] | None:
+    if len(common_dates) < 2:
+        return None
+    if period["days"] is None:
+        end_index = len(common_dates) - 1 - int(period["offset_observations"])
+        base_index = end_index - 1
+        if base_index < 0 or end_index >= len(common_dates):
+            return None
+        return common_dates[base_index], common_dates[end_index]
+
+    anchor = common_dates[-1]
+    end_target = anchor - timedelta(days=int(period["offset_days"]))
+    base_target = anchor - timedelta(days=int(period["offset_days"]) + int(period["days"]))
+    end_date = common_date_at_or_before(common_dates, end_target)
+    base_date = common_date_at_or_before(common_dates, base_target)
+    if not base_date or not end_date or base_date >= end_date:
+        return None
+    return base_date, end_date
+
+
 def short_date_range_label(value: str) -> str:
     shortened = re.sub(r"\b\d{4}-(\d{2}-\d{2})\b", r"\1", value)
 
@@ -1684,7 +1757,7 @@ def short_date_range_label(value: str) -> str:
     return re.sub(r"\b(\d{2}-\d{2})…(\d{2}-\d{2})\b", compact_multi_date, shortened)
 
 
-def build_flow_sections(series: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+def build_flow_sections(series: dict[str, list[dict[str, Any]]], *, us_close_date: date | None = None) -> list[dict[str, Any]]:
     triads = [
         {"name": "中日美", "pairs": [("USDCNY", "美中"), ("JPYCNY", "日中"), ("USDJPY", "美日")]},
         {"name": "中德美", "pairs": [("USDCNY", "美中"), ("EURCNY", "德中"), ("EURUSD", "德美")]},
@@ -1699,24 +1772,34 @@ def build_flow_sections(series: dict[str, list[dict[str, Any]]]) -> list[dict[st
         {"label": "上月", "days": 30, "offset_days": 30, "offset_observations": 0},
     ]
     sections = []
+    end_cap = us_close_date or us_close_effective_date()
     for triad in triads:
         period_rows = []
+        triad_keys = [key for key, _ in triad["pairs"]]
+        common_dates = common_series_dates(series, triad_keys, end_cap)
         for period in periods:
+            period_dates = flow_period_common_dates(common_dates, period)
             changes = []
             missing = []
-            for key, pair in triad["pairs"]:
-                item = rate_pair_change(
-                    series,
-                    key,
-                    pair,
-                    period["days"],
-                    offset_days=period["offset_days"],
-                    offset_observations=period["offset_observations"],
-                )
-                if item:
-                    changes.append(item)
-                else:
-                    missing.append(key)
+            if period_dates:
+                base_date, end_date = period_dates
+                for key, pair in triad["pairs"]:
+                    item = rate_pair_change(
+                        series,
+                        key,
+                        pair,
+                        period["days"],
+                        offset_days=period["offset_days"],
+                        offset_observations=period["offset_observations"],
+                        base_date=base_date,
+                        end_date=end_date,
+                    )
+                    if item:
+                        changes.append(item)
+                    else:
+                        missing.append(key)
+            else:
+                missing = triad_keys
             date_range = flow_period_date_range(changes)
             if len(changes) == 3:
                 try:
@@ -1753,6 +1836,7 @@ def build_snapshot(fetch_records: list[dict[str, str]], *, fetch_policy_news: bo
             "一阶速度 = 当前窗口变化 / 实际间隔天数；二阶加速度 = 当前一阶速度相对上一段同长度窗口的速度变化 / 平均间隔天数。",
             "7D/30D 波动率 = 对应窗口相邻交易观测的平均绝对日变化；债券单位 bp/日，股指和汇率单位 %/日。",
             f"三币种资金流向直接调用用户提供代码：{USER_FX_FLOW_CODE}",
+            "三币种资金流向按美国东部时间16:00后的最近美盘收盘日截齐；每组三条汇率只在共同交易日上计算，避免亚洲/欧洲先更新造成跨日期混算。",
             "derived = 本地公式而非外部供应商：CNY_BASE=1；债券曲线=10Y-2Y；CNYJPY=1/JPYCNY；RUB 交叉汇率优先使用具备历史深度的 Yahoo 直接报价，历史不足才用 USDCNY/USDRUB 或 USDJPY/USDRUB 派生并在 source_audit 里比对最新直接报价。",
             "美债扩展期限优先使用 WSCN 日线；中国国债使用 ChinaMoney/CFETS 官方收盘收益率曲线并按缺口回填历史，其中中国3M合并 ChinaBond/CCDC 政府债收益率曲线历史；德国2Y/5Y/7Y/10Y/30Y使用 Bundesbank 当前联邦证券官方日频 CSV，德国1Y/3Y使用 Bundesbank 官方 Svensson 期限结构日频 CSV，德国3M/6M暂无稳定官方日频二级市场源，暂用 Trading Economics 最新页；日本1M/3M/6M 使用 Trading Economics 图表历史、Investing.com 历史表并合并 Trading Economics 最新页；日本1Y/2Y/3Y/5Y/7Y/10Y/30Y 使用日本财务省 MOF 官方收益率曲线作为历史底座并合并 Trading Economics 最新页；韩国1M/3M/6M 使用 SMBS KORIBOR 作为短端资金代理而非政府债，韩国3M/6M可由 BOK ECOS 交叉验证，韩国1Y/2Y/3Y/5Y/10Y/30Y 使用 Investing.com 历史表并在有更新日期时合并 Trading Economics 最新页；俄罗斯2Y/10Y 在 Investing.com 被云服务器拦截时保留历史缓存并合并 Trading Economics 最新页。",
             "宏观指标使用 Yahoo Finance 日线：美元指数 DX-Y.NYB、VIX ^VIX、黄金 GC=F、WTI 原油 CL=F。",

@@ -75,7 +75,7 @@ def test_render_flow_period_dates_omit_year_in_visible_label() -> None:
     assert "<small>2026-06-25 → 2026-06-26</small>" not in html
 
 
-def test_render_flow_period_dates_compacts_mixed_source_dates() -> None:
+def test_render_flow_period_dates_aligns_mixed_source_dates_to_common_close() -> None:
     html = render_html(
         {
             "countries": [],
@@ -85,9 +85,10 @@ def test_render_flow_period_dates_compacts_mixed_source_dates() -> None:
             "fx_flows": build_flow_sections(
                 {
                     "USDCNY": [row(25, 7.1), row(26, 7.2)],
-                    "JPYCNY": [row(26, 0.052), row(29, 0.053)],
-                    "USDJPY": [row(26, 142.0), row(29, 143.0)],
-                }
+                    "JPYCNY": [row(25, 0.051), row(26, 0.052), row(29, 0.053)],
+                    "USDJPY": [row(25, 141.0), row(26, 142.0), row(29, 143.0)],
+                },
+                us_close_date=date(2026, 6, 29),
             ),
             "series_status": [],
             "notes": [],
@@ -95,8 +96,35 @@ def test_render_flow_period_dates_compacts_mixed_source_dates() -> None:
         }
     )
 
-    assert "<small>06-25/26 → 06-26/29</small>" in html
-    assert "<small>06-25…06-26 → 06-26…06-29</small>" not in html
+    assert "<small>06-25 → 06-26</small>" in html
+    assert "06-25/26" not in html
+    assert "06-26/29" not in html
+
+
+def test_render_flow_period_dates_clips_to_us_close_date() -> None:
+    html = render_html(
+        {
+            "countries": [],
+            "volatility_rankings": {"bond": [], "equity": [], "fx": []},
+            "fx_rank_details": {},
+            "second_order_monitor": [],
+            "fx_flows": build_flow_sections(
+                {
+                    "USDCNY": [row(25, 7.1), row(26, 7.2), row(29, 7.3)],
+                    "JPYCNY": [row(25, 0.051), row(26, 0.052), row(29, 0.053)],
+                    "USDJPY": [row(25, 141.0), row(26, 142.0), row(29, 143.0)],
+                },
+                us_close_date=date(2026, 6, 26),
+            ),
+            "series_status": [],
+            "notes": [],
+            "generated_at": "2026-06-29T00:00:00",
+        }
+    )
+
+    assert "<small>06-25 → 06-26</small>" in html
+    assert "<small>06-26 → 06-29</small>" not in html
+    assert "<small>06-25/26 → 06-26/29</small>" not in html
 
 
 def test_build_fx_cross_details_includes_7d_and_30d_moves() -> None:
