@@ -164,6 +164,57 @@ def test_render_flow_period_dates_clips_to_us_close_date() -> None:
     assert "<small>06-25/26 → 06-26/29</small>" not in html
 
 
+def test_render_flow_summary_uses_best_route_path_not_strength_ranking() -> None:
+    html = render_html(
+        {
+            "countries": [],
+            "volatility_rankings": {"bond": [], "equity": [], "fx": []},
+            "fx_rank_details": {},
+            "second_order_monitor": [],
+            "fx_flows": [
+                {
+                    "name": "中日美",
+                    "periods": [
+                        {
+                            "period": "当日",
+                            "date_range": "2026-06-25 → 2026-06-26",
+                            "changes": [],
+                            "missing": [],
+                            "result": {
+                                "best_route": {
+                                    "x": "日",
+                                    "y": "美",
+                                    "z": "中",
+                                    "label": "日通过美多兑换中",
+                                    "score": 0.0389,
+                                    "status": "成立",
+                                },
+                                "ranking": ["日", "中", "美"],
+                                "routes": [
+                                    {
+                                        "x": "日",
+                                        "y": "美",
+                                        "z": "中",
+                                        "label": "日通过美多兑换中",
+                                        "score": 0.0389,
+                                        "status": "成立",
+                                    }
+                                ],
+                            },
+                        }
+                    ],
+                }
+            ],
+            "series_status": [],
+            "notes": [],
+            "generated_at": "2026-06-29T00:00:00",
+        }
+    )
+
+    assert "路径：日 &gt; 美 &gt; 中" in html
+    assert "强弱：日 &gt; 中 &gt; 美" not in html
+
+
 def test_build_fx_cross_details_includes_7d_and_30d_moves() -> None:
     details = build_fx_cross_details(
         {

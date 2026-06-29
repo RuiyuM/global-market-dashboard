@@ -3366,12 +3366,12 @@ def render_html(snapshot: dict[str, Any]) -> str:
             result = period["result"]
             if result and result["best_route"]:
                 best = result["best_route"]
-                ranking = " > ".join(result["ranking"])
+                route_path = " > ".join([best["x"], best["y"], best["z"]])
                 html.append(
                     '<div class="flow-cell">'
                     f'<div><strong>{escape(best["label"])}</strong> '
                     f'<span class="pos">{best["score"]:+.4f}</span></div>'
-                    f'<div class="muted">强弱：{escape(ranking)}</div>'
+                    f'<div class="muted">路径：{escape(route_path)}</div>'
                     f'<button type="button" class="flow-expand" data-flow-section="{section_index}" '
                     f'data-flow-period="{period_index}" aria-expanded="false">'
                     '<span class="toggle-icon">▸</span><span>查看6条路线</span>'
