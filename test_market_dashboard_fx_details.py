@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from market_dashboard import build_fx_cross_details, render_fx_rank_detail
+from market_dashboard import build_flow_sections, build_fx_cross_details, render_fx_rank_detail
 
 
 def row(day: int, close: float) -> dict[str, object]:
@@ -34,6 +34,21 @@ def test_build_fx_cross_details_derives_russia_cny_usd_jpy_pairs() -> None:
     assert rub_rows[2]["latest"] == 0.052 / 0.09
     assert rub_rows[0]["change"] > 0
     assert rub_rows[0]["pct_change"] > 0
+
+
+def test_build_flow_sections_includes_exact_period_date_range() -> None:
+    sections = build_flow_sections(
+        {
+            "USDCNY": [row(24, 7.0), row(25, 7.1), row(26, 7.2)],
+            "JPYCNY": [row(24, 0.050), row(25, 0.051), row(26, 0.052)],
+            "USDJPY": [row(24, 140.0), row(25, 141.0), row(26, 142.0)],
+        }
+    )
+
+    periods = {item["period"]: item for item in sections[0]["periods"]}
+
+    assert periods["当日"]["date_range"] == "2026-06-25 → 2026-06-26"
+    assert periods["上日"]["date_range"] == "2026-06-24 → 2026-06-25"
 
 
 def test_build_fx_cross_details_includes_7d_and_30d_moves() -> None:

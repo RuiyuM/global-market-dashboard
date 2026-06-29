@@ -300,6 +300,22 @@ FX_CNY_SERIES = {
 FX_DETAIL_BASES = ("CNY", "USD", "JPY")
 
 
+def tenor_to_months(tenor: str) -> int | None:
+    value = tenor.strip().upper()
+    if len(value) < 2:
+        return None
+    unit = value[-1]
+    try:
+        number = int(value[:-1])
+    except ValueError:
+        return None
+    if unit == "M":
+        return number
+    if unit == "Y":
+        return number * 12
+    return None
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fetch", dest="fetch", action="store_true", default=True, help="Fetch latest WSCN/Yahoo data before rendering.")
@@ -1645,6 +1661,16 @@ def rate_pair_change(
     }
 
 
+def flow_period_date_range(changes: list[dict[str, Any]]) -> str:
+    base_dates = sorted({str(item.get("base_date", "")) for item in changes if item.get("base_date")})
+    latest_dates = sorted({str(item.get("latest_date", "")) for item in changes if item.get("latest_date")})
+    if not base_dates or not latest_dates:
+        return ""
+    base_label = base_dates[0] if len(base_dates) == 1 else f"{base_dates[0]}…{base_dates[-1]}"
+    latest_label = latest_dates[0] if len(latest_dates) == 1 else f"{latest_dates[0]}…{latest_dates[-1]}"
+    return base_label if base_label == latest_label else f"{base_label} → {latest_label}"
+
+
 def build_flow_sections(series: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
     triads = [
         {"name": "中日美", "pairs": [("USDCNY", "美中"), ("JPYCNY", "日中"), ("USDJPY", "美日")]},
@@ -1678,14 +1704,15 @@ def build_flow_sections(series: dict[str, list[dict[str, Any]]]) -> list[dict[st
                     changes.append(item)
                 else:
                     missing.append(key)
+            date_range = flow_period_date_range(changes)
             if len(changes) == 3:
                 try:
                     result = analyze_fx_logic_with_user_code(changes)
-                    period_rows.append({"period": period["label"], "changes": changes, "result": result, "missing": []})
+                    period_rows.append({"period": period["label"], "date_range": date_range, "changes": changes, "result": result, "missing": []})
                 except Exception as exc:
-                    period_rows.append({"period": period["label"], "changes": changes, "result": None, "missing": [str(exc)]})
+                    period_rows.append({"period": period["label"], "date_range": date_range, "changes": changes, "result": None, "missing": [str(exc)]})
             else:
-                period_rows.append({"period": period["label"], "changes": changes, "result": None, "missing": missing})
+                period_rows.append({"period": period["label"], "date_range": date_range, "changes": changes, "result": None, "missing": missing})
         sections.append({"name": triad["name"], "periods": period_rows})
     return sections
 
@@ -2990,7 +3017,7 @@ def render_html(snapshot: dict[str, Any]) -> str:
         for tenor, key in country_bond_tenors(country):
             item = ohlc_payload.get(key) if key else None
             if item and item.get("ohlc"):
-                bonds.append({"tenor": tenor, "key": key, "label": item["label"]})
+                bonds.append({"tenor": tenor, "tenorMonths": tenor_to_months(tenor), "key": key, "label": item["label"]})
         if len(bonds) >= 2:
             spread_payload.append({"code": country["code"], "name": country["name"], "bonds": bonds})
     ohlc_json = json.dumps(ohlc_payload, ensure_ascii=False).replace("</", "<\\/")
@@ -3234,7 +3261,9 @@ def render_html(snapshot: dict[str, Any]) -> str:
         html.append(f'<h3>{escape(section["name"])}</h3>')
         for period_index, period in enumerate(section["periods"]):
             html.append('<div class="flow-row">')
-            html.append(f'<div class="period">{escape(period["period"])}</div>')
+            date_range = period.get("date_range") or ""
+            date_html = f'<small>{escape(date_range)}</small>' if date_range else ""
+            html.append(f'<div class="period"><strong>{escape(period["period"])}</strong>{date_html}</div>')
             result = period["result"]
             if result and result["best_route"]:
                 best = result["best_route"]
@@ -3721,8 +3750,10 @@ th:first-child, td:first-child { text-align: left; }
 .flow-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
 .flow-grid[hidden] { display: none; }
 .flow-block { padding: 12px; }
-.flow-row { display: grid; grid-template-columns: 52px 1fr; gap: 10px; border-top: 1px solid var(--line); padding: 10px 0 0; margin-top: 10px; }
-.period { color: var(--blue); font-weight: 700; }
+.flow-row { display: grid; grid-template-columns: minmax(118px, 0.42fr) 1fr; gap: 10px; border-top: 1px solid var(--line); padding: 10px 0 0; margin-top: 10px; }
+.period { color: var(--blue); font-weight: 700; min-width: 0; }
+.period strong { display: block; font-size: 14px; line-height: 1.25; }
+.period small { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; line-height: 1.25; font-weight: 650; overflow-wrap: anywhere; }
 .flow-cell { min-width: 0; }
 .flow-expand {
   display: inline-flex;
@@ -4824,6 +4855,42 @@ JS = """
 
   const selectedSpreadCountry = () => spreadData.find((item) => item.code === spreadCountrySelect?.value) || spreadData[0];
 
+  const selectedSpreadBond = (key) => {
+    const country = selectedSpreadCountry();
+    return (country?.bonds || []).find((bond) => bond.key === key) || null;
+  };
+
+  const spreadBondLabel = (bond, item, fallback) => {
+    if (bond?.tenor && bond?.label) return `${bond.tenor} · ${bond.label}`;
+    return item?.label || fallback;
+  };
+
+  const resolveSpreadLegs = () => {
+    const firstKey = spreadLongSelect?.value || "";
+    const secondKey = spreadShortSelect?.value || "";
+    const firstBond = selectedSpreadBond(firstKey);
+    const secondBond = selectedSpreadBond(secondKey);
+    const firstMonths = Number(firstBond?.tenorMonths);
+    const secondMonths = Number(secondBond?.tenorMonths);
+    const canOrder = Number.isFinite(firstMonths) && Number.isFinite(secondMonths) && firstMonths !== secondMonths;
+    if (canOrder && firstMonths < secondMonths) {
+      return {
+        longKey: secondKey,
+        shortKey: firstKey,
+        longBond: secondBond,
+        shortBond: firstBond,
+        swapped: true
+      };
+    }
+    return {
+      longKey: firstKey,
+      shortKey: secondKey,
+      longBond: firstBond,
+      shortBond: secondBond,
+      swapped: false
+    };
+  };
+
   const setSpreadOptions = (select, bonds, preferred) => {
     if (!select) return;
     select.innerHTML = bonds.map((bond) => `<option value="${esc(bond.key)}">${esc(bond.tenor)} · ${esc(bond.label)}</option>`).join("");
@@ -4846,9 +4913,10 @@ JS = """
   };
 
   const buildSpreadRows = () => {
-    const longItem = ohlcData[spreadLongSelect?.value || ""];
-    const shortItem = ohlcData[spreadShortSelect?.value || ""];
-    if (!longItem || !shortItem || spreadLongSelect?.value === spreadShortSelect?.value) return [];
+    const legs = resolveSpreadLegs();
+    const longItem = ohlcData[legs.longKey || ""];
+    const shortItem = ohlcData[legs.shortKey || ""];
+    if (!longItem || !shortItem || legs.longKey === legs.shortKey) return [];
     const dates = [...new Set([...(longItem.ohlc || []).map((row) => row.date), ...(shortItem.ohlc || []).map((row) => row.date)])].sort();
     const longByDate = new Map((longItem.ohlc || []).map((row) => [row.date, Number(row.close)]));
     const shortByDate = new Map((shortItem.ohlc || []).map((row) => [row.date, Number(row.close)]));
@@ -5071,6 +5139,7 @@ JS = """
 
   const renderSpread = () => {
     const country = selectedSpreadCountry();
+    const legs = resolveSpreadLegs();
     const rows = buildSpreadRows();
     const firstDate = rows[0]?.date || "";
     const lastDate = rows[rows.length - 1]?.date || "";
@@ -5080,10 +5149,13 @@ JS = """
       input.max = lastDate;
     });
     const selection = spreadChartRowsForMode(rows);
-    const longLabel = spreadLongSelect?.selectedOptions?.[0]?.textContent || "长端";
-    const shortLabel = spreadShortSelect?.selectedOptions?.[0]?.textContent || "短端";
+    const longItem = ohlcData[legs.longKey || ""];
+    const shortItem = ohlcData[legs.shortKey || ""];
+    const longLabel = spreadBondLabel(legs.longBond, longItem, "长端");
+    const shortLabel = spreadBondLabel(legs.shortBond, shortItem, "短端");
+    const reorderNote = legs.swapped ? "（已按期限自动识别长短端）" : "";
     if (!selection.rows.length || !selection.start || !selection.end) {
-      if (spreadResult) spreadResult.textContent = `${country?.name || ""} ${longLabel} - ${shortLabel}：所选日期没有可计算数据。`;
+      if (spreadResult) spreadResult.textContent = `${country?.name || ""} ${longLabel} - ${shortLabel}${reorderNote}：所选日期没有可计算数据。`;
       renderSpreadChart([]);
       return;
     }
@@ -5092,7 +5164,7 @@ JS = """
     const delta = end.spreadBp - start.spreadBp;
     const direction = delta > 0 ? "走阔" : delta < 0 ? "收窄" : "持平";
     if (spreadResult) {
-      spreadResult.textContent = `${country?.name || ""} ${longLabel} - ${shortLabel}｜${selection.label}｜${start.date} ${signed(start.spreadBp, 1)}bp -> ${end.date} ${signed(end.spreadBp, 1)}bp，变化 ${signed(delta, 1)}bp（${direction}）`;
+      spreadResult.textContent = `${country?.name || ""} ${longLabel} - ${shortLabel}${reorderNote}｜${selection.label}｜${start.date} ${signed(start.spreadBp, 1)}bp -> ${end.date} ${signed(end.spreadBp, 1)}bp，变化 ${signed(delta, 1)}bp（${direction}）`;
     }
     renderSpreadChart(selection.rows, { domainStart: selection.domainStart, domainEnd: selection.domainEnd });
   };

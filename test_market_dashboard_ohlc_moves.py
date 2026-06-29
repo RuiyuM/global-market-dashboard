@@ -230,6 +230,49 @@ def test_spread_calculator_is_separate_interactive_block() -> None:
     assert "spread-short-line" in JS
 
 
+def test_spread_calculator_orders_long_and_short_by_selected_tenor() -> None:
+    html = render_html(
+        {
+            "countries": [],
+            "volatility_rankings": {"bond": [], "equity": [], "fx": []},
+            "fx_rank_details": {},
+            "second_order_monitor": [
+                {
+                    "key": "US_2Y",
+                    "country": "美国",
+                    "group": "债券",
+                    "label": "美国2年国债",
+                    "unit": "bp",
+                    "metrics": {},
+                    "summary": {},
+                    "ohlc": [{"date": "2026-06-25", "open": 4, "high": 4, "low": 4, "close": 4}],
+                },
+                {
+                    "key": "US_10Y",
+                    "country": "美国",
+                    "group": "债券",
+                    "label": "美国10年国债",
+                    "unit": "bp",
+                    "metrics": {},
+                    "summary": {},
+                    "ohlc": [{"date": "2026-06-25", "open": 5, "high": 5, "low": 5, "close": 5}],
+                },
+            ],
+            "fx_flows": [],
+            "series_status": [],
+            "notes": [],
+            "generated_at": "2026-06-26T00:00:00",
+        }
+    )
+
+    assert '"tenorMonths": 24' in html
+    assert '"tenorMonths": 120' in html
+    assert "const resolveSpreadLegs = () =>" in JS
+    assert "firstMonths < secondMonths" in JS
+    assert "longKey: secondKey" in JS
+    assert "shortKey: firstKey" in JS
+
+
 def test_ohlc_and_spread_ranges_can_be_aligned_bidirectionally() -> None:
     assert 'const alignOhlcToSpreadButton = document.getElementById("ohlc-align-spread");' in JS
     assert 'const alignSpreadToOhlcButton = document.getElementById("spread-align-ohlc");' in JS
@@ -366,10 +409,10 @@ def test_expanded_wscn_bond_tenors_feed_second_order_and_spreads() -> None:
     )
     assert 'data-extra-bond-toggle="美国"' in html
     assert 'data-extra-bond-row="true"' in html
-    assert '"tenor": "1M", "key": "US_1M", "label": "美国1个月国债"' in html
-    assert '"tenor": "30Y", "key": "US_30Y", "label": "美国30年国债"' in html
-    assert '"tenor": "7Y", "key": "CN_7Y", "label": "中国7年国债"' in html
-    assert '"tenor": "30Y", "key": "CN_30Y", "label": "中国30年国债"' in html
+    assert '"tenor": "1M", "tenorMonths": 1, "key": "US_1M", "label": "美国1个月国债"' in html
+    assert '"tenor": "30Y", "tenorMonths": 360, "key": "US_30Y", "label": "美国30年国债"' in html
+    assert '"tenor": "7Y", "tenorMonths": 84, "key": "CN_7Y", "label": "中国7年国债"' in html
+    assert '"tenor": "30Y", "tenorMonths": 360, "key": "CN_30Y", "label": "中国30年国债"' in html
 
 
 def test_japan_extra_bond_tenors_use_server_safe_sources_not_stale_wscn() -> None:
