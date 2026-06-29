@@ -1673,7 +1673,15 @@ def flow_period_date_range(changes: list[dict[str, Any]]) -> str:
 
 
 def short_date_range_label(value: str) -> str:
-    return re.sub(r"\b\d{4}-(\d{2}-\d{2})\b", r"\1", value)
+    shortened = re.sub(r"\b\d{4}-(\d{2}-\d{2})\b", r"\1", value)
+
+    def compact_multi_date(match: re.Match[str]) -> str:
+        first = match.group(1)
+        second = match.group(2)
+        second_label = second[-2:] if first[:2] == second[:2] else second
+        return f"{first}/{second_label}"
+
+    return re.sub(r"\b(\d{2}-\d{2})…(\d{2}-\d{2})\b", compact_multi_date, shortened)
 
 
 def build_flow_sections(series: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:

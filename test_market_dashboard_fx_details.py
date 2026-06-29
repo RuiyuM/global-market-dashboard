@@ -75,6 +75,30 @@ def test_render_flow_period_dates_omit_year_in_visible_label() -> None:
     assert "<small>2026-06-25 → 2026-06-26</small>" not in html
 
 
+def test_render_flow_period_dates_compacts_mixed_source_dates() -> None:
+    html = render_html(
+        {
+            "countries": [],
+            "volatility_rankings": {"bond": [], "equity": [], "fx": []},
+            "fx_rank_details": {},
+            "second_order_monitor": [],
+            "fx_flows": build_flow_sections(
+                {
+                    "USDCNY": [row(25, 7.1), row(26, 7.2)],
+                    "JPYCNY": [row(26, 0.052), row(29, 0.053)],
+                    "USDJPY": [row(26, 142.0), row(29, 143.0)],
+                }
+            ),
+            "series_status": [],
+            "notes": [],
+            "generated_at": "2026-06-29T00:00:00",
+        }
+    )
+
+    assert "<small>06-25/26 → 06-26/29</small>" in html
+    assert "<small>06-25…06-26 → 06-26…06-29</small>" not in html
+
+
 def test_build_fx_cross_details_includes_7d_and_30d_moves() -> None:
     details = build_fx_cross_details(
         {
