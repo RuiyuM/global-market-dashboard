@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from market_dashboard import build_flow_sections, build_fx_cross_details, render_fx_rank_detail
+from market_dashboard import build_flow_sections, build_fx_cross_details, render_fx_rank_detail, render_html
 
 
 def row(day: int, close: float) -> dict[str, object]:
@@ -49,6 +49,30 @@ def test_build_flow_sections_includes_exact_period_date_range() -> None:
 
     assert periods["当日"]["date_range"] == "2026-06-25 → 2026-06-26"
     assert periods["上日"]["date_range"] == "2026-06-24 → 2026-06-25"
+
+
+def test_render_flow_period_dates_omit_year_in_visible_label() -> None:
+    html = render_html(
+        {
+            "countries": [],
+            "volatility_rankings": {"bond": [], "equity": [], "fx": []},
+            "fx_rank_details": {},
+            "second_order_monitor": [],
+            "fx_flows": build_flow_sections(
+                {
+                    "USDCNY": [row(25, 7.1), row(26, 7.2)],
+                    "JPYCNY": [row(25, 0.051), row(26, 0.052)],
+                    "USDJPY": [row(25, 141.0), row(26, 142.0)],
+                }
+            ),
+            "series_status": [],
+            "notes": [],
+            "generated_at": "2026-06-26T00:00:00",
+        }
+    )
+
+    assert "<small>06-25 → 06-26</small>" in html
+    assert "<small>2026-06-25 → 2026-06-26</small>" not in html
 
 
 def test_build_fx_cross_details_includes_7d_and_30d_moves() -> None:

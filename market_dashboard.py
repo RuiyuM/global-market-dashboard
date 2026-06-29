@@ -9,6 +9,7 @@ import importlib.util
 import json
 import math
 import os
+import re
 import statistics
 import sys
 import time
@@ -1671,6 +1672,10 @@ def flow_period_date_range(changes: list[dict[str, Any]]) -> str:
     return base_label if base_label == latest_label else f"{base_label} → {latest_label}"
 
 
+def short_date_range_label(value: str) -> str:
+    return re.sub(r"\b\d{4}-(\d{2}-\d{2})\b", r"\1", value)
+
+
 def build_flow_sections(series: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
     triads = [
         {"name": "中日美", "pairs": [("USDCNY", "美中"), ("JPYCNY", "日中"), ("USDJPY", "美日")]},
@@ -3262,7 +3267,7 @@ def render_html(snapshot: dict[str, Any]) -> str:
         for period_index, period in enumerate(section["periods"]):
             html.append('<div class="flow-row">')
             date_range = period.get("date_range") or ""
-            date_html = f'<small>{escape(date_range)}</small>' if date_range else ""
+            date_html = f'<small>{escape(short_date_range_label(str(date_range)))}</small>' if date_range else ""
             html.append(f'<div class="period"><strong>{escape(period["period"])}</strong>{date_html}</div>')
             result = period["result"]
             if result and result["best_route"]:
