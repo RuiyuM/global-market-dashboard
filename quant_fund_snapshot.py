@@ -253,12 +253,7 @@ def upsert_percent_point(points: list[dict[str, Any]], day: date, pct: float) ->
     return rows
 
 
-def merge_percent_points(
-    existing: list[dict[str, Any]],
-    updates: list[dict[str, Any]],
-    *,
-    allow_single_point_anchor: bool = False,
-) -> list[dict[str, Any]]:
+def merge_percent_points(existing: list[dict[str, Any]], updates: list[dict[str, Any]]) -> list[dict[str, Any]]:
     existing_rows = public_points({"points": existing})
     update_rows = public_points({"points": updates})
     if not existing_rows:
@@ -284,8 +279,7 @@ def merge_percent_points(
     baseline_update_previous = float(update_rows[baseline_index - 1]["pct"]) if baseline_index and baseline_index > 0 else 0.0
     existing_overlap_move = latest_existing_pct - previous_existing_pct
     update_overlap_move = baseline_update - baseline_update_previous
-    single_point_anchor = allow_single_point_anchor and baseline_index == 0
-    if abs(existing_overlap_move - update_overlap_move) > 0.5 and not single_point_anchor:
+    if abs(existing_overlap_move - update_overlap_move) > 0.5:
         return existing_rows
 
     merged = list(existing_rows)
@@ -383,7 +377,7 @@ def build_snapshot() -> dict[str, Any]:
             fetch_start = futures_api_fetch_start(start, existing_futures_points)
             trades = fetch_futures_trades(futures_key, futures_secret, symbol, fetch_start, now.date())
             fetched_points = aggregate_futures_trade_curve(trades, base_usd=futures_base, start=start)
-            futures_points = merge_percent_points(existing_futures_points, fetched_points, allow_single_point_anchor=True)
+            futures_points = merge_percent_points(existing_futures_points, fetched_points)
             snapshot["futures"] = {
                 "label": "期货",
                 "status": "ok" if futures_points else "no_trades",
