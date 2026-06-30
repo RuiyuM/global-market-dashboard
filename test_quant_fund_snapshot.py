@@ -13,6 +13,8 @@ from quant_fund_snapshot import (
     built_in_options_seed_points,
     default_quant_fund_snapshot,
     env_float,
+    fetch_futures_trades,
+    futures_api_fetch_start,
     load_futures_trades_csv,
     merge_percent_points,
 )
@@ -56,6 +58,24 @@ def test_futures_trades_csv_is_loaded_without_persisting_raw_trade_fields(tmp_pa
     assert curve == [{"date": "2026-04-23", "pct": -4.2508}]
 
 
+def test_futures_trades_fetch_uses_valid_daily_windows(monkeypatch) -> None:
+    calls = []
+
+    def fake_signed_get(_base, _path, _api_key, _api_secret, params):
+        calls.append((params["startTime"], params["endTime"]))
+        return []
+
+    monkeypatch.setattr(qfs, "signed_get", fake_signed_get)
+
+    fetch_futures_trades("key", "secret", "BTCUSDT", date(2026, 6, 24), date(2026, 6, 26))
+
+    assert calls == [
+        (utc_ms(2026, 6, 24), utc_ms(2026, 6, 25) - 1),
+        (utc_ms(2026, 6, 25), utc_ms(2026, 6, 26) - 1),
+        (utc_ms(2026, 6, 26), utc_ms(2026, 6, 27) - 1000),
+    ]
+
+
 def test_futures_api_update_rejects_mismatched_overlap_without_resetting() -> None:
     existing = [
         {"date": "2026-04-23", "pct": -0.8529},
@@ -71,6 +91,29 @@ def test_futures_api_update_rejects_mismatched_overlap_without_resetting() -> No
     merged = merge_percent_points(existing, api_curve)
 
     assert merged == existing
+
+
+def test_futures_api_update_can_append_from_single_anchor_when_api_history_is_limited() -> None:
+    existing = [
+        {"date": "2026-04-23", "pct": -0.8529},
+        {"date": "2026-06-22", "pct": -0.8969},
+        {"date": "2026-06-24", "pct": 2.9086},
+    ]
+    api_curve = [
+        {"date": "2026-06-24", "pct": -0.1976},
+        {"date": "2026-06-25", "pct": -0.3966},
+        {"date": "2026-06-26", "pct": 7.1930},
+    ]
+
+    merged = merge_percent_points(existing, api_curve, allow_single_point_anchor=True)
+
+    assert merged == [
+        {"date": "2026-04-23", "pct": -0.8529},
+        {"date": "2026-06-22", "pct": -0.8969},
+        {"date": "2026-06-24", "pct": 2.9086},
+        {"date": "2026-06-25", "pct": 2.7096},
+        {"date": "2026-06-26", "pct": 10.2992},
+    ]
 
 
 def test_futures_api_update_appends_when_overlap_matches_existing_curve() -> None:
@@ -94,6 +137,20 @@ def test_futures_api_update_appends_when_overlap_matches_existing_curve() -> Non
         {"date": "2026-06-25", "pct": 2.7095},
         {"date": "2026-06-26", "pct": 10.2992},
     ]
+
+
+def test_futures_api_fetch_start_uses_latest_public_point_for_incremental_update() -> None:
+    existing = [
+        {"date": "2026-04-23", "pct": -0.8529},
+        {"date": "2026-06-22", "pct": -0.8969},
+        {"date": "2026-06-24", "pct": 2.9086},
+    ]
+
+    assert futures_api_fetch_start(date(2026, 4, 1), existing) == date(2026, 6, 22)
+
+
+def test_futures_api_fetch_start_falls_back_to_configured_start_without_history() -> None:
+    assert futures_api_fetch_start(date(2026, 4, 1), []) == date(2026, 4, 1)
 
 
 def test_options_total_is_rendered_as_percent_of_configured_base() -> None:

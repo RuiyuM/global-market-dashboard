@@ -98,7 +98,10 @@ def fetch_futures_trades(api_key: str, api_secret: str, symbol: str, start: date
     trades: list[dict[str, Any]] = []
     chunk_start = datetime(start.year, start.month, start.day, tzinfo=timezone.utc)
     final = datetime(end.year, end.month, end.day, 23, 59, 59, tzinfo=timezone.utc)
-    max_chunk = timedelta(days=6, hours=23, minutes=59)
+    # Binance accepts multi-day windows in principle, but server-side calls have
+    # been less reliable near the 7-day boundary. Daily chunks keep updates small
+    # and avoid storing any raw trades between requests.
+    max_chunk = timedelta(days=1) - timedelta(milliseconds=1)
     while chunk_start <= final:
         chunk_end = min(final, chunk_start + max_chunk)
         page_start_ms = int(chunk_start.timestamp() * 1000)
@@ -250,7 +253,12 @@ def upsert_percent_point(points: list[dict[str, Any]], day: date, pct: float) ->
     return rows
 
 
-def merge_percent_points(existing: list[dict[str, Any]], updates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def merge_percent_points(
+    existing: list[dict[str, Any]],
+    updates: list[dict[str, Any]],
+    *,
+    allow_single_point_anchor: bool = False,
+) -> list[dict[str, Any]]:
     existing_rows = public_points({"points": existing})
     update_rows = public_points({"points": updates})
     if not existing_rows:
@@ -276,7 +284,8 @@ def merge_percent_points(existing: list[dict[str, Any]], updates: list[dict[str,
     baseline_update_previous = float(update_rows[baseline_index - 1]["pct"]) if baseline_index and baseline_index > 0 else 0.0
     existing_overlap_move = latest_existing_pct - previous_existing_pct
     update_overlap_move = baseline_update - baseline_update_previous
-    if abs(existing_overlap_move - update_overlap_move) > 0.5:
+    single_point_anchor = allow_single_point_anchor and baseline_index == 0
+    if abs(existing_overlap_move - update_overlap_move) > 0.5 and not single_point_anchor:
         return existing_rows
 
     merged = list(existing_rows)
@@ -313,6 +322,24 @@ def latest_pct(points: list[dict[str, Any]]) -> float | None:
         return float(points[-1]["pct"])
     except (KeyError, TypeError, ValueError):
         return None
+
+
+def futures_overlap_start_date(points: list[dict[str, Any]]) -> date | None:
+    rows = public_points({"points": points})
+    if not rows:
+        return None
+    index = -2 if len(rows) >= 2 else -1
+    try:
+        return parse_ymd(str(rows[index]["date"]))
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def futures_api_fetch_start(configured_start: date, existing_points: list[dict[str, Any]]) -> date:
+    overlap_start = futures_overlap_start_date(existing_points)
+    if overlap_start is None:
+        return configured_start
+    return max(configured_start, overlap_start)
 
 
 def build_snapshot() -> dict[str, Any]:
@@ -353,9 +380,10 @@ def build_snapshot() -> dict[str, Any]:
         }
     elif futures_key and futures_secret and symbol:
         try:
-            trades = fetch_futures_trades(futures_key, futures_secret, symbol, start, now.date())
+            fetch_start = futures_api_fetch_start(start, existing_futures_points)
+            trades = fetch_futures_trades(futures_key, futures_secret, symbol, fetch_start, now.date())
             fetched_points = aggregate_futures_trade_curve(trades, base_usd=futures_base, start=start)
-            futures_points = merge_percent_points(existing_futures_points, fetched_points)
+            futures_points = merge_percent_points(existing_futures_points, fetched_points, allow_single_point_anchor=True)
             snapshot["futures"] = {
                 "label": "期货",
                 "status": "ok" if futures_points else "no_trades",
