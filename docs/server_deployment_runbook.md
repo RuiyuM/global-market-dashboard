@@ -68,6 +68,63 @@ systemctl list-timers global-market-dashboard-update.timer
 journalctl -u global-market-dashboard-update.service -n 200 --no-pager
 ```
 
+## Manual Post-Close Full Refresh
+
+Use this when the daily server update runs, but some public market sources are blocked from Tencent Cloud.
+
+1. Run the normal server update first:
+
+```bash
+cd /opt/global-market-dashboard
+./update_market_dashboard.sh
+python3 validate_market_dashboard.py
+```
+
+2. Inspect failures in `dashboard/latest_market_snapshot.json`. Common server-side failures seen on 2026-07-01:
+
+```text
+Yahoo 429: US_EQUITY, JP_EQUITY_YAHOO, DE_EQUITY, KR_EQUITY,
+           KRWCNY, RUBCNY_YAHOO, RUBJPY_YAHOO, USDRUB_YAHOO,
+           DXY, VIX, GOLD
+SMBS timeout: KR_1M
+Investing 403 with fallback: Japan short bills, Korea bonds, Russia bonds/equity
+```
+
+3. Locally backfill the failed public series by following [Weekly Local Data Update](weekly_local_data_update.md). The expected local artifacts are:
+
+```text
+dashboard/data/*.csv
+data/*_INVESTING_1D_ohlc.csv
+```
+
+4. Upload only public market data:
+
+```bash
+cd /Users/ruiyuma/Desktop/global-market-dashboard
+rsync -avz -e "ssh -i '/Users/ruiyuma/Desktop/国债汇率/sol.pem' -o StrictHostKeyChecking=no" \
+  dashboard/data/ root@43.133.168.211:/opt/global-market-dashboard/dashboard/data/
+rsync -avz -e "ssh -i '/Users/ruiyuma/Desktop/国债汇率/sol.pem' -o StrictHostKeyChecking=no" \
+  data/*.csv root@43.133.168.211:/opt/global-market-dashboard/data/
+```
+
+5. On the server, refresh quant fund from private env and re-render without another network fetch:
+
+```bash
+cd /opt/global-market-dashboard
+python3 quant_fund_snapshot.py
+python3 market_dashboard.py --no-fetch
+python3 validate_market_dashboard.py
+```
+
+6. Verify the public pages:
+
+```bash
+curl -fsS http://127.0.0.1/ -o /tmp/dashboard_home.html
+curl -fsS http://127.0.0.1/quant_fund.html -o /tmp/quant.html
+```
+
+This procedure intentionally avoids storing private futures trades, API keys, principal amounts, or raw account balances on the server. Quant refresh should still leave only sanitized `{date, pct}` points in `dashboard/quant_fund_snapshot.json`.
+
 ## Quant Fund Privacy Rule
 
 Goal: futures/options curves update automatically, but the server must not keep raw transaction details in public outputs.
