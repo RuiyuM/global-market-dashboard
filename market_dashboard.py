@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import calendar
 import csv
 import importlib.util
 import json
@@ -1029,6 +1030,13 @@ def common_date_at_or_before(common_dates: list[date], target: date) -> date | N
     return prior
 
 
+def common_date_on_or_after(common_dates: list[date], target: date) -> date | None:
+    for current in common_dates:
+        if current >= target:
+            return current
+    return None
+
+
 def country_bond_tenors(country: dict[str, Any]) -> list[tuple[str, str]]:
     configured = COUNTRY_BOND_TENORS.get(country["code"], [])
     if configured:
@@ -1727,24 +1735,61 @@ def flow_period_date_range(changes: list[dict[str, Any]]) -> str:
     return base_label if base_label == latest_label else f"{base_label} → {latest_label}"
 
 
-def flow_period_common_dates(common_dates: list[date], period: dict[str, Any]) -> tuple[date, date] | None:
+def flow_period_label_date_range(start: date, end: date) -> str:
+    return start.isoformat() if start == end else f"{start.isoformat()} → {end.isoformat()}"
+
+
+def flow_week_window(anchor: date, offset_weeks: int) -> tuple[date, date]:
+    start = anchor - timedelta(days=anchor.weekday() + offset_weeks * 7)
+    return start, start + timedelta(days=4)
+
+
+def flow_month_window(anchor: date, offset_months: int) -> tuple[date, date]:
+    month_index = anchor.month - 1 - offset_months
+    year = anchor.year + month_index // 12
+    month = month_index % 12 + 1
+    start = date(year, month, 1)
+    end = date(year, month, calendar.monthrange(year, month)[1])
+    return start, end
+
+
+def flow_period_common_dates(common_dates: list[date], period: dict[str, Any], anchor: date) -> dict[str, date | str] | None:
     if len(common_dates) < 2:
         return None
-    if period["days"] is None:
+    kind = period["kind"]
+    if kind == "daily":
         end_index = len(common_dates) - 1 - int(period["offset_observations"])
         base_index = end_index - 1
         if base_index < 0 or end_index >= len(common_dates):
             return None
-        return common_dates[base_index], common_dates[end_index]
+        base_date = common_dates[base_index]
+        end_date = common_dates[end_index]
+        return {
+            "base_date": base_date,
+            "end_date": end_date,
+            "date_range": flow_period_label_date_range(base_date, end_date),
+        }
 
-    anchor = common_dates[-1]
-    end_target = anchor - timedelta(days=int(period["offset_days"]))
-    base_target = anchor - timedelta(days=int(period["offset_days"]) + int(period["days"]))
-    end_date = common_date_at_or_before(common_dates, end_target)
-    base_date = common_date_at_or_before(common_dates, base_target)
+    if kind == "week":
+        window_start, window_end = flow_week_window(anchor, int(period["offset_weeks"]))
+    elif kind == "month":
+        window_start, window_end = flow_month_window(anchor, int(period["offset_months"]))
+    else:
+        return None
+
+    base_date = common_date_on_or_after(common_dates, window_start)
+    end_date = common_date_at_or_before(common_dates, window_end)
+    if base_date and not (window_start <= base_date <= window_end):
+        base_date = None
+    if end_date and not (window_start <= end_date <= window_end):
+        end_date = None
     if not base_date or not end_date or base_date >= end_date:
         return None
-    return base_date, end_date
+    return {
+        "base_date": base_date,
+        "end_date": end_date,
+        "date_range": flow_period_label_date_range(window_start, window_end),
+    }
 
 
 def short_date_range_label(value: str) -> str:
@@ -1766,12 +1811,12 @@ def build_flow_sections(series: dict[str, list[dict[str, Any]]], *, us_close_dat
         {"name": "中俄美", "pairs": [("USDCNY", "美中"), ("RUBCNY", "俄中"), ("USDRUB", "美俄")]},
     ]
     periods = [
-        {"label": "当日", "days": None, "offset_days": 0, "offset_observations": 0},
-        {"label": "上日", "days": None, "offset_days": 0, "offset_observations": 1},
-        {"label": "当周", "days": 7, "offset_days": 0, "offset_observations": 0},
-        {"label": "上周", "days": 7, "offset_days": 7, "offset_observations": 0},
-        {"label": "当月", "days": 30, "offset_days": 0, "offset_observations": 0},
-        {"label": "上月", "days": 30, "offset_days": 30, "offset_observations": 0},
+        {"label": "当日", "kind": "daily", "days": None, "offset_observations": 0},
+        {"label": "上日", "kind": "daily", "days": None, "offset_observations": 1},
+        {"label": "当周", "kind": "week", "days": None, "offset_weeks": 0},
+        {"label": "上周", "kind": "week", "days": None, "offset_weeks": 1},
+        {"label": "当月", "kind": "month", "days": None, "offset_months": 0},
+        {"label": "上月", "kind": "month", "days": None, "offset_months": 1},
     ]
     sections = []
     end_cap = us_close_date or us_close_effective_date()
@@ -1780,19 +1825,20 @@ def build_flow_sections(series: dict[str, list[dict[str, Any]]], *, us_close_dat
         triad_keys = [key for key, _ in triad["pairs"]]
         common_dates = common_series_dates(series, triad_keys, end_cap)
         for period in periods:
-            period_dates = flow_period_common_dates(common_dates, period)
+            period_dates = flow_period_common_dates(common_dates, period, end_cap)
             changes = []
             missing = []
+            date_range = str(period_dates["date_range"]) if period_dates else ""
             if period_dates:
-                base_date, end_date = period_dates
+                base_date = period_dates["base_date"]
+                end_date = period_dates["end_date"]
                 for key, pair in triad["pairs"]:
                     item = rate_pair_change(
                         series,
                         key,
                         pair,
                         period["days"],
-                        offset_days=period["offset_days"],
-                        offset_observations=period["offset_observations"],
+                        offset_observations=int(period.get("offset_observations", 0)),
                         base_date=base_date,
                         end_date=end_date,
                     )
@@ -1802,15 +1848,15 @@ def build_flow_sections(series: dict[str, list[dict[str, Any]]], *, us_close_dat
                         missing.append(key)
             else:
                 missing = triad_keys
-            date_range = flow_period_date_range(changes)
+            calc_date_range = flow_period_date_range(changes)
             if len(changes) == 3:
                 try:
                     result = analyze_fx_logic_with_user_code(changes)
-                    period_rows.append({"period": period["label"], "date_range": date_range, "changes": changes, "result": result, "missing": []})
+                    period_rows.append({"period": period["label"], "date_range": date_range or calc_date_range, "calc_date_range": calc_date_range, "changes": changes, "result": result, "missing": []})
                 except Exception as exc:
-                    period_rows.append({"period": period["label"], "date_range": date_range, "changes": changes, "result": None, "missing": [str(exc)]})
+                    period_rows.append({"period": period["label"], "date_range": date_range or calc_date_range, "calc_date_range": calc_date_range, "changes": changes, "result": None, "missing": [str(exc)]})
             else:
-                period_rows.append({"period": period["label"], "date_range": date_range, "changes": changes, "result": None, "missing": missing})
+                period_rows.append({"period": period["label"], "date_range": date_range or calc_date_range, "calc_date_range": calc_date_range, "changes": changes, "result": None, "missing": missing})
         sections.append({"name": triad["name"], "periods": period_rows})
     return sections
 

@@ -88,6 +88,66 @@ def test_build_flow_sections_weekend_daily_periods_use_prior_trading_days() -> N
     assert "2026-06-29" not in periods["当日"]["date_range"]
 
 
+def test_build_flow_sections_uses_us_calendar_week_windows() -> None:
+    rows_by_key = {
+        "USDCNY": [
+            row(22, 7.0),
+            row(23, 7.1),
+            row(24, 7.2),
+            row(25, 7.3),
+            row(26, 7.4),
+            row(29, 7.5),
+            row(30, 7.6),
+        ],
+        "JPYCNY": [
+            row(22, 0.050),
+            row(23, 0.051),
+            row(24, 0.052),
+            row(25, 0.053),
+            row(26, 0.054),
+            row(29, 0.055),
+            row(30, 0.056),
+        ],
+        "USDJPY": [
+            row(22, 140.0),
+            row(23, 141.0),
+            row(24, 142.0),
+            row(25, 143.0),
+            row(26, 144.0),
+            row(29, 145.0),
+            row(30, 146.0),
+        ],
+    }
+
+    sections = build_flow_sections(rows_by_key, us_close_date=date(2026, 6, 30))
+    periods = {item["period"]: item for item in sections[0]["periods"]}
+
+    assert periods["当周"]["date_range"] == "2026-06-29 → 2026-07-03"
+    assert periods["上周"]["date_range"] == "2026-06-22 → 2026-06-26"
+    assert {item["base_date"] for item in periods["当周"]["changes"]} == {"2026-06-29"}
+    assert {item["latest_date"] for item in periods["当周"]["changes"]} == {"2026-06-30"}
+    assert {item["base_date"] for item in periods["上周"]["changes"]} == {"2026-06-22"}
+    assert {item["latest_date"] for item in periods["上周"]["changes"]} == {"2026-06-26"}
+
+
+def test_build_flow_sections_uses_us_calendar_month_windows() -> None:
+    rows_by_key = {
+        "USDCNY": [dated(5, 1, 6.9), dated(5, 29, 7.0), dated(6, 1, 7.1), dated(6, 30, 7.2)],
+        "JPYCNY": [dated(5, 1, 0.049), dated(5, 29, 0.050), dated(6, 1, 0.051), dated(6, 30, 0.052)],
+        "USDJPY": [dated(5, 1, 139.0), dated(5, 29, 140.0), dated(6, 1, 141.0), dated(6, 30, 142.0)],
+    }
+
+    sections = build_flow_sections(rows_by_key, us_close_date=date(2026, 6, 30))
+    periods = {item["period"]: item for item in sections[0]["periods"]}
+
+    assert periods["当月"]["date_range"] == "2026-06-01 → 2026-06-30"
+    assert periods["上月"]["date_range"] == "2026-05-01 → 2026-05-31"
+    assert {item["base_date"] for item in periods["当月"]["changes"]} == {"2026-06-01"}
+    assert {item["latest_date"] for item in periods["当月"]["changes"]} == {"2026-06-30"}
+    assert {item["base_date"] for item in periods["上月"]["changes"]} == {"2026-05-01"}
+    assert {item["latest_date"] for item in periods["上月"]["changes"]} == {"2026-05-29"}
+
+
 def test_render_flow_period_dates_omit_year_in_visible_label() -> None:
     html = render_html(
         {
