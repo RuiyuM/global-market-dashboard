@@ -173,8 +173,8 @@ Use environment variables for credentials and principal amounts. Do not commit t
 
 Expected variable categories:
 
-- futures API key and secret
-- option API key and secret
+- futures API key and secret: Binance USD-M futures account used by the BTCUSDT futures trading script.
+- option API key and secret: Binance options account used by the options account-status publisher.
 - futures symbol
 - futures base capital
 - options base capital
@@ -183,11 +183,28 @@ Expected variable categories:
 
 Important: `.private/` and generated snapshots are ignored by `.gitignore`.
 
+Important credential rule:
+
+- Futures API and options API are different credentials. Do not reuse one for the other.
+- `BINANCE_FUTURES_API_KEY` / `BINANCE_FUTURES_API_SECRET` must be the futures trading API, the same account used by the local BTCUSDT futures trading code.
+- `BINANCE_OPTION_API_KEY` / `BINANCE_OPTION_API_SECRET` must be the options account API, the same account used by `account_status_publisher/publish_account_status.py`.
+- The futures curve only reads futures trade/PnL data for `QUANT_FUND_SYMBOL`, normally `BTCUSDT`.
+- The options curve reads option wallet value and only uses futures credentials for the stable futures balance component when calculating the combined options account value.
+- Never paste either API key into Git, public HTML, public JSON, shell history, or this document.
+
+Local futures API reference:
+
+```text
+/Users/ruiyuma/Desktop/ML_TSF/jul_13/private/LTSF/Lorentzian_trading_Mao/2025_order_book_btc_shadow_ws_merge_add_bitget_htx_gate/LorentzianTrading_15_BTC.py
+```
+
+Use that local script only to identify which futures API account should be configured on the server. Do not copy hardcoded key values into tracked files.
+
 ## Futures Curve Logic
 
 `quant_fund_snapshot.py` builds the futures curve from raw trades in memory:
 
-1. Fetch or load raw futures trades.
+1. Fetch or load raw futures trades from the futures API account only.
 2. Compute net daily realized PnL:
 
 ```text
@@ -200,12 +217,14 @@ net = realizedPnl - stable-asset commission
 
 The raw trade list is not written by the dashboard pipeline. It should only exist in memory while `quant_fund_snapshot.py` runs, unless using a one-time private CSV import path outside the public repo.
 
+If the website does not show a closed BTCUSDT trade that is visible in the trading UI, first check that the server's `BINANCE_FUTURES_API_KEY` is the same futures account as the local Lorentzian BTC script. Do not debug this by swapping in the options API.
+
 ## Options Curve Logic
 
 `quant_fund_snapshot.py` builds the options curve from account totals in memory:
 
-1. Fetch option wallet total.
-2. Fetch futures stable balance when needed for combined option account value.
+1. Fetch option wallet total using the options API account.
+2. Fetch futures stable balance using the futures API account when needed for combined option account value.
 3. Compute percent return against the options base capital.
 4. Upsert only today's `{date, pct}` point into the public snapshot.
 
