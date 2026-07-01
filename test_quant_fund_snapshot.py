@@ -255,22 +255,30 @@ def test_api_futures_update_writes_only_public_percent_points(monkeypatch, tmp_p
         assert marker not in text
 
 
-def test_api_options_update_writes_only_public_percent_points(monkeypatch, tmp_path) -> None:
+def test_api_options_update_uses_dedicated_option_futures_credentials(monkeypatch, tmp_path) -> None:
     for name in ["QUANT_FUND_FUTURES_BASE_USD", "QUANT_FUND_FUTURES_TRADES_CSV", "QUANT_FUND_SYMBOL"]:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("QUANT_FUND_START_DATE", "2026-04-01")
     monkeypatch.setenv("QUANT_FUND_OPTIONS_BASE_USD", "1000")
-    monkeypatch.setenv("BINANCE_FUTURES_API_KEY", "test-futures-key")
-    monkeypatch.setenv("BINANCE_FUTURES_API_SECRET", "test-futures-secret")
+    monkeypatch.setenv("BINANCE_FUTURES_API_KEY", "trading-futures-key")
+    monkeypatch.setenv("BINANCE_FUTURES_API_SECRET", "trading-futures-secret")
     monkeypatch.setenv("BINANCE_OPTION_API_KEY", "test-option-key")
     monkeypatch.setenv("BINANCE_OPTION_API_SECRET", "test-option-secret")
+    monkeypatch.setenv("BINANCE_OPTION_FUTURES_API_KEY", "option-futures-key")
+    monkeypatch.setenv("BINANCE_OPTION_FUTURES_API_SECRET", "option-futures-secret")
     monkeypatch.setattr(
         qfs,
         "load_existing_public_snapshot",
         lambda: {"options": {"points": [{"date": "2026-04-01", "pct": -1.0}]}},
     )
     monkeypatch.setattr(qfs, "fetch_option_wallet_total", lambda *_args, **_kwargs: 910.0)
-    monkeypatch.setattr(qfs, "fetch_futures_stable_balance", lambda *_args, **_kwargs: 110.0)
+    balance_calls = []
+
+    def fake_futures_stable_balance(api_key, api_secret):
+        balance_calls.append((api_key, api_secret))
+        return 110.0
+
+    monkeypatch.setattr(qfs, "fetch_futures_stable_balance", fake_futures_stable_balance)
 
     snapshot = qfs.build_snapshot()
     out = tmp_path / "quant_fund_snapshot.json"
@@ -279,6 +287,7 @@ def test_api_options_update_writes_only_public_percent_points(monkeypatch, tmp_p
     text = json.dumps(payload, ensure_ascii=False)
 
     assert payload["options"]["status"] == "ok"
+    assert balance_calls == [("option-futures-key", "option-futures-secret")]
     assert payload["options"]["points"][0] == {"date": "2026-04-01", "pct": -1.0}
     assert payload["options"]["points"][-1]["pct"] == 2.0
     assert payload["options"]["latest_pct"] == 2.0
@@ -290,10 +299,12 @@ def test_api_options_update_writes_only_public_percent_points(monkeypatch, tmp_p
         "total_usdt_usdc",
         "option_positions",
         "futures_positions",
-        "test-futures-key",
-        "test-futures-secret",
+        "trading-futures-key",
+        "trading-futures-secret",
         "test-option-key",
         "test-option-secret",
+        "option-futures-key",
+        "option-futures-secret",
         "910.0",
         "110.0",
         "1020.0",
@@ -302,6 +313,33 @@ def test_api_options_update_writes_only_public_percent_points(monkeypatch, tmp_p
     assert "option_usdt_value" not in text
     assert "futures_usdc" not in text
     assert "total_usdt_usdc" not in text
+
+
+def test_api_options_update_does_not_reuse_trading_futures_credentials(monkeypatch) -> None:
+    for name in ["QUANT_FUND_FUTURES_BASE_USD", "QUANT_FUND_FUTURES_TRADES_CSV", "QUANT_FUND_SYMBOL"]:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.delenv("BINANCE_OPTION_FUTURES_API_KEY", raising=False)
+    monkeypatch.delenv("BINANCE_OPTION_FUTURES_API_SECRET", raising=False)
+    monkeypatch.setenv("QUANT_FUND_OPTIONS_BASE_USD", "1000")
+    monkeypatch.setenv("BINANCE_FUTURES_API_KEY", "trading-futures-key")
+    monkeypatch.setenv("BINANCE_FUTURES_API_SECRET", "trading-futures-secret")
+    monkeypatch.setenv("BINANCE_OPTION_API_KEY", "test-option-key")
+    monkeypatch.setenv("BINANCE_OPTION_API_SECRET", "test-option-secret")
+    monkeypatch.setattr(
+        qfs,
+        "load_existing_public_snapshot",
+        lambda: {"options": {"points": [{"date": "2026-06-26", "pct": -3.5040}]}},
+    )
+
+    def fail_if_trading_futures_credentials_are_reused(*_args, **_kwargs):
+        raise AssertionError("options curve must not reuse trading futures credentials")
+
+    monkeypatch.setattr(qfs, "fetch_futures_stable_balance", fail_if_trading_futures_credentials_are_reused)
+
+    snapshot = qfs.build_snapshot()
+
+    assert snapshot["options"]["status"] == "stale"
+    assert snapshot["options"]["points"] == [{"date": "2026-06-26", "pct": -3.504}]
 
 
 def test_option_wallet_total_uses_sapi_options_wallet(monkeypatch) -> None:

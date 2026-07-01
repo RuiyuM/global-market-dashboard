@@ -350,6 +350,8 @@ def build_snapshot() -> dict[str, Any]:
     futures_secret = os.environ.get("BINANCE_FUTURES_API_SECRET", "")
     option_key = os.environ.get("BINANCE_OPTION_API_KEY", "")
     option_secret = os.environ.get("BINANCE_OPTION_API_SECRET", "")
+    option_futures_key = os.environ.get("BINANCE_OPTION_FUTURES_API_KEY", "")
+    option_futures_secret = os.environ.get("BINANCE_OPTION_FUTURES_API_SECRET", "")
     futures_csv_raw = os.environ.get("QUANT_FUND_FUTURES_TRADES_CSV", "").strip()
     futures_csv = Path(futures_csv_raw).expanduser() if futures_csv_raw else None
     existing = load_existing_public_snapshot()
@@ -405,9 +407,12 @@ def build_snapshot() -> dict[str, Any]:
     if options_base is None:
         option_points = existing_options_points or built_in_options_seed_points()
         option_status = "seeded" if option_points else "missing_base"
-    elif option_key and option_secret and futures_key and futures_secret:
+    elif option_key and option_secret and option_futures_key and option_futures_secret:
         try:
-            total = fetch_option_wallet_total(option_key, option_secret) + fetch_futures_stable_balance(futures_key, futures_secret)
+            total = fetch_option_wallet_total(option_key, option_secret) + fetch_futures_stable_balance(
+                option_futures_key,
+                option_futures_secret,
+            )
             pct = (total - options_base) / options_base * 100
             option_points = upsert_percent_point(existing_options_points, now.date(), pct)
             option_status = "ok" if option_points else "no_history"

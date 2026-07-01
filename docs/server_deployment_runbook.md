@@ -175,6 +175,7 @@ Expected variable categories:
 
 - futures API key and secret: Binance USD-M futures account used by the BTCUSDT futures trading script.
 - option API key and secret: Binance options account used by the options account-status publisher.
+- option-futures API key and secret: Binance USD-M futures account used by the options account-status publisher for its futures USDC component.
 - futures symbol
 - futures base capital
 - options base capital
@@ -185,12 +186,13 @@ Important: `.private/` and generated snapshots are ignored by `.gitignore`.
 
 Important credential rule:
 
-- Futures API and options API are different credentials. Do not reuse one for the other.
+- Futures API, options API, and option-futures API are three separate credential roles. Do not reuse one role for another.
 - `BINANCE_FUTURES_API_KEY` / `BINANCE_FUTURES_API_SECRET` must be the futures trading API, the same account used by the local BTCUSDT futures trading code.
 - `BINANCE_OPTION_API_KEY` / `BINANCE_OPTION_API_SECRET` must be the options account API, the same account used by `account_status_publisher/publish_account_status.py`.
+- `BINANCE_OPTION_FUTURES_API_KEY` / `BINANCE_OPTION_FUTURES_API_SECRET` must be the futures-balance API used by the options account-status publisher. This is not the BTCUSDT futures trading API unless the publisher really uses the same account.
 - The futures curve only reads futures trade/PnL data for `QUANT_FUND_SYMBOL`, normally `BTCUSDT`.
-- The options curve reads option wallet value and only uses futures credentials for the stable futures balance component when calculating the combined options account value.
-- Never paste either API key into Git, public HTML, public JSON, shell history, or this document.
+- The options curve reads option wallet value from `BINANCE_OPTION_API_*` and reads the stable futures balance component from `BINANCE_OPTION_FUTURES_API_*`.
+- Never paste any API key into Git, public HTML, public JSON, shell history, or this document.
 
 Local futures API reference:
 
@@ -224,11 +226,23 @@ If the website does not show a closed BTCUSDT trade that is visible in the tradi
 `quant_fund_snapshot.py` builds the options curve from account totals in memory:
 
 1. Fetch option wallet total using the options API account.
-2. Fetch futures stable balance using the futures API account when needed for combined option account value.
+2. Fetch futures stable balance using the dedicated option-futures API account when needed for combined option account value.
 3. Compute percent return against the options base capital.
 4. Upsert only today's `{date, pct}` point into the public snapshot.
 
 Raw account totals, stablecoin balances, and position strings are not written to public HTML/snapshot.
+
+Reference implementation for the options account-status calculation:
+
+```text
+/Users/ruiyuma/Desktop/ML_TSF/jul_13/private/LTSF/account_status_publisher/publish_account_status.py
+```
+
+The dashboard should match that publisher's account split:
+
+- option wallet value comes from the options account API.
+- futures balance comes from the publisher's futures source, normally `Option_Strategy_mao/OptionTrading_DHSS.py`.
+- Do not let the options curve read the BTCUSDT trading API balance, because that corrupts the options return percentage.
 
 ## One-Time Local Seed
 
