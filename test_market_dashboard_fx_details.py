@@ -148,6 +148,22 @@ def test_build_flow_sections_uses_us_calendar_month_windows() -> None:
     assert {item["latest_date"] for item in periods["上月"]["changes"]} == {"2026-05-29"}
 
 
+def test_build_flow_sections_current_month_first_day_uses_previous_close_as_base() -> None:
+    rows_by_key = {
+        "USDCNY": [dated(6, 30, 7.0), dated(7, 1, 7.1)],
+        "JPYCNY": [dated(6, 30, 0.050), dated(7, 1, 0.051)],
+        "USDJPY": [dated(6, 30, 140.0), dated(7, 1, 141.0)],
+    }
+
+    sections = build_flow_sections(rows_by_key, us_close_date=date(2026, 7, 1))
+    periods = {item["period"]: item for item in sections[0]["periods"]}
+
+    assert periods["当月"]["date_range"] == "2026-07-01 → 2026-07-31"
+    assert {item["base_date"] for item in periods["当月"]["changes"]} == {"2026-06-30"}
+    assert {item["latest_date"] for item in periods["当月"]["changes"]} == {"2026-07-01"}
+    assert periods["当月"]["result"]["best_route"]
+
+
 def test_render_flow_period_dates_omit_year_in_visible_label() -> None:
     html = render_html(
         {
