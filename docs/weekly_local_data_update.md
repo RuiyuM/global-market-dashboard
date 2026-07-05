@@ -8,6 +8,20 @@ The server should update every day from stable server-side sources first. Local 
 
 When doing a post-close refresh, run the server update first, then patch only the symbols that failed or returned stale data from local sources. This avoids replacing a working server pipeline with a local-only workflow.
 
+### Finalized Source Split
+
+Do not overwrite server-generated files for these sources unless validation explicitly says the series is stale:
+
+| Source group | Server-updated symbols | Notes |
+|---|---|---|
+| WSCN | US Treasury tenors, core CN Treasury tenors, `USDCNY`, `JPYCNY`, `USDJPY`, `EURCNY`, `EURJPY`, `EURUSD`, `USDRUB`, `CN_EQUITY` | Server-first daily source. |
+| ChinaMoney / ChinaBond CCDC | `CN_1M`, `CN_3M`, `CN_6M`, `CN_1Y`, `CN_2Y`, `CN_3Y`, `CN_5Y`, `CN_7Y`, `CN_10Y`, `CN_30Y` | Official China yield-curve source; 3M may include CCDC backfill. |
+| Nikkei | `JP_EQUITY` | Preferred Japan equity source. Yahoo Nikkei is backup only. |
+| Japan MOF + Trading Economics latest | `JP_1Y`, `JP_2Y`, `JP_3Y`, `JP_5Y`, `JP_7Y`, `JP_10Y`, `JP_30Y` | MOF is the historical anchor; TE only patches newest point when needed. |
+| Bundesbank / Trading Economics latest | `DE_1Y`, `DE_2Y`, `DE_3Y`, `DE_5Y`, `DE_7Y`, `DE_10Y`, `DE_30Y`; `DE_3M`, `DE_6M` latest close | Bundesbank is preferred for German curve history. |
+| SMBS KORIBOR | `KR_1M`, `KR_3M`, `KR_6M` | Short-end proxy, not a government-bond yield. |
+| Server private env | Quant fund futures/options curves | Writes sanitized percent points only; no raw trades, balances, keys, or principal amounts. |
+
 ### Must Update Locally
 
 | Symbol | Dataset | Reason | Normal cadence |
@@ -38,7 +52,7 @@ Tencent Cloud can occasionally get `429 Too Many Requests` from Yahoo. When that
 
 ```text
 US_EQUITY JP_EQUITY_YAHOO DE_EQUITY KR_EQUITY
-KRWCNY RUBCNY_YAHOO RUBJPY_YAHOO USDRUB_YAHOO
+KRWCNY USDKRW RUBCNY_YAHOO RUBJPY_YAHOO USDRUB_YAHOO
 DXY VIX GOLD USOIL
 ```
 
@@ -53,7 +67,7 @@ from market_dashboard import YAHOO_SPECS, DASHBOARD_DATA, fetch_yahoo_ohlc, writ
 
 keys = {
     "US_EQUITY", "JP_EQUITY_YAHOO", "DE_EQUITY", "KR_EQUITY",
-    "KRWCNY", "RUBCNY_YAHOO", "RUBJPY_YAHOO", "USDRUB_YAHOO",
+    "KRWCNY", "USDKRW", "RUBCNY_YAHOO", "RUBJPY_YAHOO", "USDRUB_YAHOO",
     "DXY", "VIX", "GOLD", "USOIL",
 }
 end = date.today()
@@ -142,16 +156,66 @@ Only commit generated files that are intended public dashboard data. Do not comm
 
 ## Publish To Server
 
-After local validation, upload only public market data and sanitized generated outputs. Do not upload private API files or raw trade/account exports.
+After local validation, upload only the public files that were intentionally refreshed. Do not upload private API files, raw trade/account exports, or the whole `dashboard/data/` directory after a partial patch.
+
+Full-directory rsync is intentionally avoided here. It can overwrite fresher server-generated WSCN/official data with stale local cache, and it can preserve local owner/group metadata that breaks later server writes.
+
+Create an explicit upload list. For the weekly Investing backfill, start with:
 
 ```bash
 cd /Users/ruiyuma/Desktop/global-market-dashboard
-rsync -avz -e "ssh -i '/Users/ruiyuma/Desktop/国债汇率/sol.pem' -o StrictHostKeyChecking=no" \
-  dashboard/data/ root@43.133.168.211:/opt/global-market-dashboard/dashboard/data/
-rsync -avz -e "ssh -i '/Users/ruiyuma/Desktop/国债汇率/sol.pem' -o StrictHostKeyChecking=no" \
-  data/*.csv root@43.133.168.211:/opt/global-market-dashboard/data/
+cat > /tmp/global_market_dashboard_upload_files.txt <<'EOF'
+dashboard/data/JP_1M.csv
+dashboard/data/JP_3M.csv
+dashboard/data/JP_6M.csv
+dashboard/data/KR_1Y.csv
+dashboard/data/KR_2Y.csv
+dashboard/data/KR_3Y.csv
+dashboard/data/KR_5Y.csv
+dashboard/data/KR_10Y.csv
+dashboard/data/KR_30Y.csv
+dashboard/data/RU_2Y.csv
+dashboard/data/RU_10Y.csv
+dashboard/data/RU_EQUITY.csv
+data/JP1M_INVESTING_1D_ohlc.csv
+data/JP3M_INVESTING_1D_ohlc.csv
+data/JP6M_INVESTING_1D_ohlc.csv
+data/KR1YR_INVESTING_1D_ohlc.csv
+data/KR2YR_INVESTING_1D_ohlc.csv
+data/KR3YR_INVESTING_1D_ohlc.csv
+data/KR5YR_INVESTING_1D_ohlc.csv
+data/KR10YR_INVESTING_1D_ohlc.csv
+data/KR30YR_INVESTING_1D_ohlc.csv
+data/RU2YR_INVESTING_1D_ohlc.csv
+data/RU10YR_INVESTING_1D_ohlc.csv
+data/RU_EQUITY_INVESTING_1D_ohlc.csv
+EOF
+```
+
+If the server hit Yahoo 429, append only the failed or stale Yahoo files, for example:
+
+```bash
+cat >> /tmp/global_market_dashboard_upload_files.txt <<'EOF'
+dashboard/data/US_EQUITY.csv
+dashboard/data/DE_EQUITY.csv
+dashboard/data/KRWCNY.csv
+dashboard/data/USDKRW.csv
+dashboard/data/DXY.csv
+dashboard/data/VIX.csv
+dashboard/data/GOLD.csv
+dashboard/data/USOIL.csv
+EOF
+```
+
+Then upload just those files:
+
+```bash
+rsync -avz --no-owner --no-group --chmod=D755,F644 \
+  --files-from=/tmp/global_market_dashboard_upload_files.txt \
+  -e "ssh -i '/Users/ruiyuma/Desktop/国债汇率/sol.pem' -o StrictHostKeyChecking=no" \
+  ./ root@43.133.168.211:/opt/global-market-dashboard/
 ssh -i '/Users/ruiyuma/Desktop/国债汇率/sol.pem' root@43.133.168.211 \
-  'cd /opt/global-market-dashboard && python3 quant_fund_snapshot.py && python3 market_dashboard.py --no-fetch && python3 validate_market_dashboard.py'
+  'cd /opt/global-market-dashboard && chown -R root:root dashboard data && find dashboard data -type d -exec chmod 755 {} + && find dashboard data -type f -exec chmod 644 {} + && python3 quant_fund_snapshot.py && python3 market_dashboard.py --no-fetch && python3 validate_market_dashboard.py'
 ```
 
 The server-side `quant_fund_snapshot.py` step uses the private server env and writes only sanitized percentage points.

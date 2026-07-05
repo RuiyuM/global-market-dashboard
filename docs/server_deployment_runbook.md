@@ -84,8 +84,8 @@ python3 validate_market_dashboard.py
 
 ```text
 Yahoo 429: US_EQUITY, JP_EQUITY_YAHOO, DE_EQUITY, KR_EQUITY,
-           KRWCNY, RUBCNY_YAHOO, RUBJPY_YAHOO, USDRUB_YAHOO,
-           DXY, VIX, GOLD
+           KRWCNY, USDKRW, RUBCNY_YAHOO, RUBJPY_YAHOO, USDRUB_YAHOO,
+           DXY, VIX, GOLD, USOIL
 SMBS timeout: KR_1M
 Investing 403 with fallback: Japan short bills, Korea bonds, Russia bonds/equity
 ```
@@ -93,24 +93,33 @@ Investing 403 with fallback: Japan short bills, Korea bonds, Russia bonds/equity
 3. Locally backfill the failed public series by following [Weekly Local Data Update](weekly_local_data_update.md). The expected local artifacts are:
 
 ```text
-dashboard/data/*.csv
-data/*_INVESTING_1D_ohlc.csv
+dashboard/data/<only failed or local-required symbols>.csv
+data/<only refreshed Investing local files>.csv
 ```
 
-4. Upload only public market data:
+4. Upload only public market data that was intentionally refreshed.
+
+Do not rsync the full `dashboard/data/` directory after a partial local patch. That can overwrite newer server-generated WSCN, ChinaMoney, Nikkei, MOF, Bundesbank, SMBS, or Trading Economics rows with stale local cache.
 
 ```bash
 cd /Users/ruiyuma/Desktop/global-market-dashboard
-rsync -avz -e "ssh -i '/Users/ruiyuma/Desktop/国债汇率/sol.pem' -o StrictHostKeyChecking=no" \
-  dashboard/data/ root@43.133.168.211:/opt/global-market-dashboard/dashboard/data/
-rsync -avz -e "ssh -i '/Users/ruiyuma/Desktop/国债汇率/sol.pem' -o StrictHostKeyChecking=no" \
-  data/*.csv root@43.133.168.211:/opt/global-market-dashboard/data/
+cat > /tmp/global_market_dashboard_upload_files.txt <<'EOF'
+dashboard/data/JP_1M.csv
+dashboard/data/RU_EQUITY.csv
+EOF
+rsync -avz --no-owner --no-group --chmod=D755,F644 \
+  --files-from=/tmp/global_market_dashboard_upload_files.txt \
+  -e "ssh -i '/Users/ruiyuma/Desktop/国债汇率/sol.pem' -o StrictHostKeyChecking=no" \
+  ./ root@43.133.168.211:/opt/global-market-dashboard/
 ```
 
 5. On the server, refresh quant fund from private env and re-render without another network fetch:
 
 ```bash
 cd /opt/global-market-dashboard
+chown -R root:root dashboard data
+find dashboard data -type d -exec chmod 755 {} +
+find dashboard data -type f -exec chmod 644 {} +
 python3 quant_fund_snapshot.py
 python3 market_dashboard.py --no-fetch
 python3 validate_market_dashboard.py
