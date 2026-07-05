@@ -210,7 +210,7 @@ EOF
 Then upload just those files:
 
 ```bash
-rsync -avz --no-owner --no-group --chmod=D755,F644 \
+rsync -avz --no-owner --no-group \
   --files-from=/tmp/global_market_dashboard_upload_files.txt \
   -e "ssh -i '/Users/ruiyuma/Desktop/国债汇率/sol.pem' -o StrictHostKeyChecking=no" \
   ./ root@43.133.168.211:/opt/global-market-dashboard/
