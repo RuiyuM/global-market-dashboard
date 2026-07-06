@@ -1783,6 +1783,12 @@ def flow_period_common_dates(common_dates: list[date], period: dict[str, Any], a
         base_date = None
     if end_date and not (window_start <= end_date <= window_end):
         end_date = None
+    if kind == "week" and int(period.get("offset_weeks", 0)) == 0 and base_date and end_date and base_date >= end_date:
+        # Week-to-date on Monday has only one in-week common observation. Use
+        # the previous close as the base while keeping the visible week window.
+        previous_close = common_date_at_or_before(common_dates, window_start - timedelta(days=1))
+        if previous_close:
+            base_date = previous_close
     if kind == "month" and base_date and end_date and base_date >= end_date:
         # Month-to-date needs a previous close when the current month has only
         # one common observation so the period can still produce old -> new.
