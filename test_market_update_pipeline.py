@@ -85,6 +85,7 @@ def test_source_audit_accepts_expected_investing_degradation() -> None:
     )
 
     assert report["ok"] is True
+    assert report["server_ok"] is True
     assert report["local_patch_candidates"] == []
     assert report["warnings"] == ["JP_1M: expected server degradation; fallback/cache active"]
 
@@ -111,6 +112,7 @@ def test_source_audit_routes_yahoo_failure_to_local_patch() -> None:
     )
 
     assert report["ok"] is False
+    assert report["server_ok"] is True
     assert report["local_patch_candidates"] == ["US_EQUITY"]
     assert "HTTP Error 429" in report["errors"][0]
 
@@ -141,6 +143,7 @@ def test_current_local_patch_remediates_yahoo_server_failure() -> None:
     )
 
     assert report["ok"] is True
+    assert report["server_ok"] is True
     assert report["patched_keys"] == ["US_EQUITY"]
     assert report["local_patch_candidates"] == []
 

@@ -80,7 +80,7 @@ An empty response, exception, or incoming dataset older than the local cache is 
 ## Failure Rules
 
 - `update_market_dashboard.sh` is the single server entry point. It runs quant refresh, market fetch/render, dashboard validation, and source audit.
-- Validation and source-audit failures must make systemd fail. Do not prefix the validation command with `-` in a unit file.
+- Dashboard validation and unhandled source-audit failures must make systemd fail. Allowlisted Yahoo failures are reported as `SOURCE AUDIT FALLBACK` and keep the service successful while the validated cache remains fresh; the local orchestrator still patches those symbols.
 - Runtime files must stay writable by `globaldash`. Never run `chown -R root:root dashboard data`.
 - A no-fetch render must retain `fetch_records` and `last_fetch_at`; otherwise the original 403/429 evidence is lost.
 - Expected Investing degradation may warn but does not fail while its fallback/cache remains usable.

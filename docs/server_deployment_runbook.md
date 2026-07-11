@@ -59,7 +59,7 @@ python3 validate_market_dashboard.py
 python3 audit_market_sources.py
 ```
 
-The service runs as `globaldash`, loads policy-news credentials from the private environment file, and sets `MARKET_SKIP_INVESTING=1` because Investing.com is confirmed blocked from Tencent Cloud. The source audit treats those configured fallbacks as expected degradation and fails on unhandled fetch errors.
+The service runs as `globaldash`, loads policy-news credentials from the private environment file, and sets `MARKET_SKIP_INVESTING=1` because Investing.com is confirmed blocked from Tencent Cloud. The source audit treats those configured fallbacks as expected degradation. Allowlisted Yahoo errors produce `SOURCE AUDIT FALLBACK` while fresh cache continues serving; unhandled errors still fail the service.
 
 Check timer and logs:
 
