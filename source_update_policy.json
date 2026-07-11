@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "server_blocked": {
+    "investing.com": {
+      "observed_status": 403,
+      "keys": [
+        "JP_1M",
+        "JP_3M",
+        "JP_6M",
+        "KR_1Y",
+        "KR_2Y",
+        "KR_3Y",
+        "KR_5Y",
+        "KR_10Y",
+        "KR_30Y",
+        "RU_2Y",
+        "RU_10Y",
+        "RU_EQUITY"
+      ]
+    }
+  },
+  "server_fallbacks": {
+    "JP_1M": "Trading Economics chart history and latest close",
+    "JP_3M": "Trading Economics chart history and latest close",
+    "JP_6M": "Trading Economics chart history and latest close",
+    "KR_1Y": "cached OHLC history and Trading Economics latest close",
+    "KR_2Y": "cached OHLC history and Trading Economics latest close",
+    "KR_3Y": "cached OHLC history and Trading Economics latest close",
+    "KR_5Y": "cached OHLC history and Trading Economics latest close",
+    "KR_10Y": "cached OHLC history and Trading Economics latest close",
+    "KR_30Y": "cached OHLC history and Trading Economics latest close",
+    "RU_2Y": "cached OHLC history and Trading Economics latest close",
+    "RU_10Y": "cached OHLC history and Trading Economics latest close",
+    "RU_EQUITY": "cached OHLC history until a local public-data patch is uploaded"
+  },
+  "yahoo_patch_on_failure": [
+    "US_EQUITY",
+    "JP_EQUITY_YAHOO",
+    "DE_EQUITY",
+    "KR_EQUITY",
+    "KRWCNY",
+    "USDKRW",
+    "RUBCNY_YAHOO",
+    "RUBJPY_YAHOO",
+    "USDRUB_YAHOO",
+    "DXY",
+    "VIX",
+    "GOLD",
+    "USOIL"
+  ],
+  "local_required": [
+    "RU_EQUITY"
+  ],
+  "local_weekly_ohlc": [
+    "JP_1M",
+    "JP_3M",
+    "JP_6M",
+    "KR_1Y",
+    "KR_2Y",
+    "KR_3Y",
+    "KR_5Y",
+    "KR_10Y",
+    "KR_30Y",
+    "RU_2Y",
+    "RU_10Y",
+    "RU_EQUITY"
+  ],
+  "investing_symbol_map": {
+    "JP_1M": "JP1M",
+    "JP_3M": "JP3M",
+    "JP_6M": "JP6M",
+    "KR_1Y": "KR1Y",
+    "KR_2Y": "KR2Y",
+    "KR_3Y": "KR3Y",
+    "KR_5Y": "KR5Y",
+    "KR_10Y": "KR10Y",
+    "KR_30Y": "KR30Y",
+    "RU_2Y": "RU2Y",
+    "RU_10Y": "RU10Y",
+    "RU_EQUITY": "RU_EQUITY"
+  }
+}

@@ -713,7 +713,7 @@ def test_japan_short_bills_fall_back_to_seed_when_investing_is_blocked(monkeypat
 
     records = market_dashboard.fetch_all(SimpleNamespace(wscn_count=500, lookback_days=90, sleep_sec=0))
 
-    assert records[0]["status"] == "ok"
+    assert records[0]["status"] == "degraded"
     assert records[0]["rows"] == "2"
     assert records[0]["latest"] == "2026-06-26"
     assert "Investing.com history failed: HTTP Error 403: Forbidden" in records[0]["error"]
@@ -859,7 +859,7 @@ def test_investing_only_russia_bonds_use_cache_and_te_when_investing_is_blocked(
 
     records = market_dashboard.fetch_all(SimpleNamespace(wscn_count=500, lookback_days=90, sleep_sec=0))
 
-    assert records[0]["status"] == "ok"
+    assert records[0]["status"] == "degraded"
     assert records[0]["rows"] == "2"
     assert records[0]["latest"] == "2026-06-26"
     assert "Investing.com history failed: HTTP Error 403: Forbidden" in records[0]["error"]

@@ -58,6 +58,7 @@ DASHBOARD = ROOT / "dashboard"
 DASHBOARD_DATA = DASHBOARD / "data"
 SNAPSHOT_JSON = DASHBOARD / "latest_market_snapshot.json"
 QUANT_FUND_JSON = DASHBOARD / "quant_fund_snapshot.json"
+LOCAL_PATCH_REPORT_JSON = DASHBOARD / "local_patch_report.json"
 HTML_OUT = DASHBOARD / "index.html"
 QUANT_FUND_HTML_OUT = DASHBOARD / "quant_fund.html"
 DEFAULT_FX_FLOW_CODE = ROOT / "fx_flow_logic.py"
@@ -68,6 +69,16 @@ CHART_HISTORY_LIMIT = 1500
 CHINA_SHORT_BOND_BACKFILL_TENORS = {"3M"}
 CHINA_SHORT_BOND_MIN_HISTORY_ROWS = 240
 US_MARKET_CLOSE_HOUR_ET = 16
+
+
+def env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def fetch_record_status(rows: list[dict[str, Any]], error: str = "") -> str:
+    if rows:
+        return "degraded" if error else "ok"
+    return "error" if error else "empty"
 
 
 @dataclass(frozen=True)
@@ -476,8 +487,9 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
         record = {"key": spec.key, "source": spec.source, "symbol": spec.symbol, "status": "pending", "file": str(path), "error": ""}
         try:
             rows = fetch_wscn_ohlc(spec.symbol, "1D", args.wscn_count, min(args.wscn_count, 1000))
-            write_ohlc(path, rows)
-            record.update({"status": "ok", "rows": str(len(rows)), "latest": rows[-1]["date"] if rows else ""})
+            if rows:
+                write_ohlc(path, rows)
+            record.update({"status": fetch_record_status(rows), "rows": str(len(rows)), "latest": rows[-1]["date"] if rows else ""})
         except Exception as exc:
             record.update({"status": "error", "error": str(exc)})
         records.append(record)
@@ -505,8 +517,9 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
         record = {"key": spec.key, "source": spec.source, "symbol": spec.symbol, "status": "pending", "file": str(path), "error": ""}
         try:
             rows = fetch_nikkei_ohlc(spec.symbol)
-            write_ohlc(path, rows)
-            record.update({"status": "ok" if rows else "empty", "rows": str(len(rows)), "latest": rows[-1]["date"] if rows else ""})
+            if rows:
+                write_ohlc(path, rows)
+            record.update({"status": fetch_record_status(rows), "rows": str(len(rows)), "latest": rows[-1]["date"] if rows else ""})
         except Exception as exc:
             record.update({"status": "error", "error": str(exc)})
         records.append(record)
@@ -551,9 +564,10 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
                     else "ChinaMoney CFETS closing treasury yield curve"
                 )
             write_ohlc(path, rows)
-            record.update({"status": "ok" if rows else "empty", "rows": str(len(rows)), "latest": rows[-1]["date"] if rows else ""})
-            if chinamoney_error or chinabond_pbc_error:
-                record["error"] = "; ".join(error for error in [chinamoney_error, chinabond_pbc_error] if error)
+            source_error = "; ".join(error for error in [chinamoney_error, chinabond_pbc_error] if error)
+            record.update({"status": fetch_record_status(rows, source_error), "rows": str(len(rows)), "latest": rows[-1]["date"] if rows else ""})
+            if source_error:
+                record["error"] = source_error
         except Exception as exc:
             record.update({"status": "error", "error": str(exc)})
         records.append(record)
@@ -567,8 +581,12 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
             latest_error = ""
             if source_kind == "bundesbank":
                 rows = fetch_bundesbank_rows(source_key)
+                if not rows:
+                    latest_error = "Bundesbank daily yield CSV returned no rows"
             elif source_kind == "bundesbank-term":
                 rows = fetch_bundesbank_term_structure_rows(source_key)
+                if not rows:
+                    latest_error = "Bundesbank term-structure CSV returned no rows"
             else:
                 rows = read_ohlc(path) if path.exists() else []
                 country_slug = source_kind.split(":", 1)[1]
@@ -578,6 +596,8 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
                         rows = merge_ohlc_rows(rows, [latest_row])
                 except Exception as exc:
                     latest_error = f"Trading Economics latest failed: {exc}"
+            if path.exists():
+                rows = merge_ohlc_rows(read_ohlc(path), rows)
             for row in rows:
                 row["source_symbol"] = series_spec.symbol
                 if source_kind == "bundesbank":
@@ -586,8 +606,9 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
                     row["source"] = "Deutsche Bundesbank official daily term-structure CSV"
                 else:
                     row["source"] = "Trading Economics latest yield page"
-            write_ohlc(path, rows)
-            record.update({"status": "ok" if rows else "empty", "rows": str(len(rows)), "latest": rows[-1]["date"] if rows else ""})
+            if rows:
+                write_ohlc(path, rows)
+            record.update({"status": fetch_record_status(rows, latest_error), "rows": str(len(rows)), "latest": rows[-1]["date"] if rows else ""})
             if latest_error:
                 record["error"] = latest_error
         except Exception as exc:
@@ -611,11 +632,14 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
                 investing_spec = INVESTING_BOND_SPECS[f"KR{source_key}"]
                 if series_spec.local_file and (LOCAL_DATA / series_spec.local_file).exists():
                     rows = merge_ohlc_rows(rows, read_ohlc(LOCAL_DATA / series_spec.local_file))
-                try:
-                    investing_rows = rows_from_investing_html(fetch_investing_html(investing_spec, start, end))
-                    rows = merge_ohlc_rows(rows, investing_rows)
-                except Exception as exc:
-                    latest_error = f"Investing.com history failed: {exc}"
+                if env_flag("MARKET_SKIP_INVESTING"):
+                    latest_error = "Investing.com history skipped by MARKET_SKIP_INVESTING"
+                else:
+                    try:
+                        investing_rows = rows_from_investing_html(fetch_investing_html(investing_spec, start, end))
+                        rows = merge_ohlc_rows(rows, investing_rows)
+                    except Exception as exc:
+                        latest_error = f"Investing.com history failed: {exc}"
                 try:
                     latest_row = fetch_tradingeconomics_country_latest_row(
                         "south-korea",
@@ -642,7 +666,7 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
                 else:
                     row["source"] = "Trading Economics latest yield page"
             write_ohlc(path, rows)
-            record.update({"status": "ok" if rows else "empty", "rows": str(len(rows)), "latest": rows[-1]["date"] if rows else ""})
+            record.update({"status": fetch_record_status(rows, latest_error), "rows": str(len(rows)), "latest": rows[-1]["date"] if rows else ""})
             if latest_error:
                 record["error"] = latest_error
         except Exception as exc:
@@ -693,11 +717,15 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
                     rows = merge_ohlc_rows(rows, read_ohlc(LOCAL_DATA / series_spec.local_file))
                 if path.exists():
                     rows = merge_ohlc_rows(rows, read_ohlc(path))
-                try:
-                    investing_rows = rows_from_investing_html(fetch_investing_html(investing_spec, start, end))
-                    rows = merge_ohlc_rows(rows, investing_rows)
-                except Exception as exc:
-                    latest_error = f"{latest_error}; Investing.com history failed: {exc}" if latest_error else f"Investing.com history failed: {exc}"
+                if env_flag("MARKET_SKIP_INVESTING"):
+                    skip_error = "Investing.com history skipped by MARKET_SKIP_INVESTING"
+                    latest_error = f"{latest_error}; {skip_error}" if latest_error else skip_error
+                else:
+                    try:
+                        investing_rows = rows_from_investing_html(fetch_investing_html(investing_spec, start, end))
+                        rows = merge_ohlc_rows(rows, investing_rows)
+                    except Exception as exc:
+                        latest_error = f"{latest_error}; Investing.com history failed: {exc}" if latest_error else f"Investing.com history failed: {exc}"
                 try:
                     latest_row = fetch_tradingeconomics_latest_row(TRADINGECONOMICS_SLUGS[source_key])
                     if latest_row and (not rows or row_date_key(latest_row) > row_date_key(rows[-1])):
@@ -723,7 +751,7 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
                 else:
                     row["source"] = "Trading Economics latest yield page"
             write_ohlc(path, rows)
-            record.update({"status": "ok" if rows else "empty", "rows": str(len(rows)), "latest": rows[-1]["date"] if rows else ""})
+            record.update({"status": fetch_record_status(rows, latest_error), "rows": str(len(rows)), "latest": rows[-1]["date"] if rows else ""})
             if latest_error:
                 record["error"] = latest_error
         except Exception as exc:
@@ -745,11 +773,14 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
         try:
             rows = read_ohlc(path) if path.exists() else []
             latest_error = ""
-            try:
-                investing_rows = rows_from_investing_html(fetch_investing_html(investing_spec, start, end))
-                rows = merge_ohlc_rows(rows, investing_rows)
-            except Exception as exc:
-                latest_error = f"Investing.com history failed: {exc}"
+            if env_flag("MARKET_SKIP_INVESTING"):
+                latest_error = "Investing.com history skipped by MARKET_SKIP_INVESTING"
+            else:
+                try:
+                    investing_rows = rows_from_investing_html(fetch_investing_html(investing_spec, start, end))
+                    rows = merge_ohlc_rows(rows, investing_rows)
+                except Exception as exc:
+                    latest_error = f"Investing.com history failed: {exc}"
             fallback = INVESTING_TE_FALLBACKS.get(series_spec.key)
             if fallback:
                 try:
@@ -767,7 +798,7 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
                 )
             if rows:
                 write_ohlc(path, rows)
-            status = "ok" if rows else "error" if latest_error else "empty"
+            status = fetch_record_status(rows, latest_error)
             record.update({"status": status, "rows": str(len(rows)), "latest": rows[-1]["date"] if rows else ""})
             if latest_error:
                 record["error"] = latest_error
@@ -1873,11 +1904,45 @@ def build_flow_sections(series: dict[str, list[dict[str, Any]]], *, us_close_dat
     return sections
 
 
-def build_snapshot(fetch_records: list[dict[str, str]], *, fetch_policy_news: bool = True) -> dict[str, Any]:
+def load_previous_fetch_context() -> tuple[list[dict[str, str]], str]:
+    if not SNAPSHOT_JSON.exists():
+        return [], ""
+    try:
+        previous = json.loads(SNAPSHOT_JSON.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return [], ""
+    records = previous.get("fetch_records")
+    if not isinstance(records, list):
+        records = []
+    last_fetch_at = str(previous.get("last_fetch_at") or previous.get("generated_at") or "")
+    return records, last_fetch_at
+
+
+def load_local_patch_report() -> dict[str, Any]:
+    if not LOCAL_PATCH_REPORT_JSON.exists():
+        return {}
+    try:
+        report = json.loads(LOCAL_PATCH_REPORT_JSON.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return report if isinstance(report, dict) else {}
+
+
+def build_snapshot(
+    fetch_records: list[dict[str, str]],
+    *,
+    fetch_policy_news: bool = True,
+    fetch_mode: str = "network",
+    last_fetch_at: str = "",
+) -> dict[str, Any]:
     series, specs = load_all_series()
     countries = build_country_rows(series, specs)
+    generated_at = datetime.now().astimezone().isoformat(timespec="seconds")
     snapshot = {
-        "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "generated_at": generated_at,
+        "fetch_mode": fetch_mode,
+        "last_fetch_at": last_fetch_at or generated_at,
+        "local_patch_report": load_local_patch_report(),
         "policy_news": build_policy_news_snapshot(fetch_news=fetch_policy_news),
         "countries": countries,
         "asset_class_vol": asset_class_vol(countries),
@@ -5589,8 +5654,20 @@ JS = """
 
 def main() -> int:
     args = parse_args()
-    fetch_records = fetch_all(args) if args.fetch else []
-    snapshot = build_snapshot(fetch_records, fetch_policy_news=args.fetch)
+    if args.fetch:
+        LOCAL_PATCH_REPORT_JSON.unlink(missing_ok=True)
+        fetch_records = fetch_all(args)
+        fetch_mode = "network"
+        last_fetch_at = datetime.now().astimezone().isoformat(timespec="seconds")
+    else:
+        fetch_records, last_fetch_at = load_previous_fetch_context()
+        fetch_mode = "cache"
+    snapshot = build_snapshot(
+        fetch_records,
+        fetch_policy_news=args.fetch,
+        fetch_mode=fetch_mode,
+        last_fetch_at=last_fetch_at,
+    )
     DASHBOARD.mkdir(parents=True, exist_ok=True)
     SNAPSHOT_JSON.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     HTML_OUT.write_text(render_html(snapshot), encoding="utf-8")

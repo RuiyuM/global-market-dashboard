@@ -4,23 +4,30 @@ set -euo pipefail
 REPO_URL="${REPO_URL:-https://github.com/RuiyuM/global-market-dashboard.git}"
 APP_DIR="${APP_DIR:-/opt/global-market-dashboard}"
 SERVICE_USER="${SERVICE_USER:-globaldash}"
-UPDATE_TIME="${UPDATE_TIME:-07:30:00}"
+UPDATE_CALENDAR="${UPDATE_CALENDAR:-Mon..Fri *-*-* 17:30:00 America/New_York}"
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "Run as root: curl -fsSL ... | sudo bash" >&2
   exit 1
 fi
 
+NGINX_CONFIG=""
 if command -v apt-get >/dev/null 2>&1; then
   apt-get update
   DEBIAN_FRONTEND=noninteractive apt-get install -y git python3 curl nginx ca-certificates
+  NGINX_CONFIG="/etc/nginx/sites-available/global-market-dashboard"
+elif command -v dnf >/dev/null 2>&1; then
+  dnf install -y git python3 curl ca-certificates
+  dnf --disableexcludes=all install -y nginx
+  NGINX_CONFIG="/etc/nginx/conf.d/global-market-dashboard.conf"
 else
-  echo "This installer currently supports Debian/Ubuntu systems with apt-get." >&2
+  echo "This installer supports apt or dnf systems." >&2
   exit 1
 fi
 
 if ! id "${SERVICE_USER}" >/dev/null 2>&1; then
-  useradd --system --home "${APP_DIR}" --shell /usr/sbin/nologin "${SERVICE_USER}"
+  NOLOGIN_SHELL="$(command -v nologin || true)"
+  useradd --system --home "${APP_DIR}" --shell "${NOLOGIN_SHELL:-/sbin/nologin}" "${SERVICE_USER}"
 fi
 
 if [[ -d "${APP_DIR}/.git" ]]; then
@@ -32,6 +39,7 @@ fi
 
 chown -R "${SERVICE_USER}:${SERVICE_USER}" "${APP_DIR}"
 chmod +x "${APP_DIR}/update_market_dashboard.sh"
+install -d -o "${SERVICE_USER}" -g "${SERVICE_USER}" -m 700 "${APP_DIR}/.private"
 
 cat >/etc/systemd/system/global-market-dashboard-update.service <<EOF
 [Unit]
@@ -44,8 +52,9 @@ Type=oneshot
 User=${SERVICE_USER}
 Group=${SERVICE_USER}
 WorkingDirectory=${APP_DIR}
+Environment=MARKET_SKIP_INVESTING=1
+EnvironmentFile=-${APP_DIR}/.private/policy_news.env
 ExecStart=${APP_DIR}/update_market_dashboard.sh
-ExecStartPost=/usr/bin/python3 ${APP_DIR}/validate_market_dashboard.py
 EOF
 
 cat >/etc/systemd/system/global-market-dashboard-update.timer <<EOF
@@ -53,7 +62,7 @@ cat >/etc/systemd/system/global-market-dashboard-update.timer <<EOF
 Description=Daily Global Market Dashboard update
 
 [Timer]
-OnCalendar=*-*-* ${UPDATE_TIME}
+OnCalendar=${UPDATE_CALENDAR}
 Persistent=true
 Unit=global-market-dashboard-update.service
 
@@ -61,7 +70,7 @@ Unit=global-market-dashboard-update.service
 WantedBy=timers.target
 EOF
 
-cat >/etc/nginx/sites-available/global-market-dashboard <<EOF
+cat >"${NGINX_CONFIG}" <<EOF
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
@@ -76,13 +85,18 @@ server {
 }
 EOF
 
-rm -f /etc/nginx/sites-enabled/default
-ln -sf /etc/nginx/sites-available/global-market-dashboard /etc/nginx/sites-enabled/global-market-dashboard
+if [[ "${NGINX_CONFIG}" == /etc/nginx/sites-available/* ]]; then
+  rm -f /etc/nginx/sites-enabled/default
+  ln -sf "${NGINX_CONFIG}" /etc/nginx/sites-enabled/global-market-dashboard
+else
+  rm -f /etc/nginx/conf.d/default.conf
+fi
 
 systemctl daemon-reload
 systemctl enable --now global-market-dashboard-update.timer
 systemctl start global-market-dashboard-update.service
 nginx -t
+systemctl enable --now nginx
 systemctl reload nginx
 
 if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then

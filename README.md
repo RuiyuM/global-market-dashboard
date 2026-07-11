@@ -16,9 +16,19 @@ The generated site is a static file under `dashboard/index.html`, so it can be h
 
 ```bash
 ./update_market_dashboard.sh
-python3 validate_market_dashboard.py
 open dashboard/index.html
 ```
+
+`update_market_dashboard.sh` fetches, renders, validates the dashboard, and audits source health.
+
+For the production post-close flow with Tencent Cloud fallbacks:
+
+```bash
+source ~/anaconda3/bin/activate
+python production_update.py
+```
+
+Use `python production_update.py --weekly` for the full local Investing OHLC refresh, or `--audit-only` for a read-only production check. See [Fixed Market Data Update](docs/weekly_local_data_update.md).
 
 ## One-Command Server Deploy
 

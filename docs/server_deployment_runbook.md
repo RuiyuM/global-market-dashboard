@@ -12,32 +12,35 @@ For sources that the server cannot fetch directly, read [Weekly Local Data Updat
 - Main page: `/opt/global-market-dashboard/dashboard/index.html`
 - Quant page: `/opt/global-market-dashboard/dashboard/quant_fund.html`
 - Public quant snapshot: `/opt/global-market-dashboard/dashboard/quant_fund_snapshot.json`
-- Private server config: `/opt/global-market-dashboard/.private/quant_fund.env`
+- Private quant config: `/opt/global-market-dashboard/.private/quant_fund.env`
+- Private policy-news config: `/opt/global-market-dashboard/.private/policy_news.env`
 
 Do not put private API keys, principal amounts, raw trades, positions, or account balances into GitHub, public HTML, or public snapshots.
 
 ## Normal Deployment
 
-On the server:
+Code deployment is separate from market-data refresh. First commit and push only intentional code, tests, policy, and documentation from the local repository. Do not commit runtime cache churn merely to deploy code.
+
+Then on the server:
 
 ```bash
 cd /opt/global-market-dashboard
-git pull --rebase origin main
-python3 -m pytest test_market_dashboard_quant_fund.py test_quant_fund_snapshot.py -q
-python3 market_dashboard.py --no-fetch
-python3 validate_market_dashboard.py
+git pull --ff-only origin main
+chown -R globaldash:globaldash /opt/global-market-dashboard
+runuser -u globaldash -- python3 -m pytest -q
+systemctl daemon-reload
+systemctl start global-market-dashboard-update.service
 ```
 
-If the generated HTML changed:
+If `git pull` reports an overlap with tracked runtime data, stop and inspect the conflicting paths. Do not reset or stash the whole server worktree blindly.
+
+Verify deployment:
 
 ```bash
-git status --short
-git add market_dashboard.py test_market_dashboard_quant_fund.py dashboard/quant_fund.html
-git commit -m "Describe the dashboard change"
-git push origin main
+python3 validate_market_dashboard.py
+python3 audit_market_sources.py
+systemctl status global-market-dashboard-update.service --no-pager
 ```
-
-If `git push` asks for credentials, enter them interactively in OrcaTerm. Do not paste tokens into tracked files or command history when avoidable.
 
 ## Daily Auto Update
 
@@ -52,13 +55,11 @@ That script runs:
 ```bash
 python3 quant_fund_snapshot.py
 python3 market_dashboard.py "$@"
+python3 validate_market_dashboard.py
+python3 audit_market_sources.py
 ```
 
-The systemd service/timer from `install_server.sh` should run the same update flow daily, then run:
-
-```bash
-python3 /opt/global-market-dashboard/validate_market_dashboard.py
-```
+The service runs as `globaldash`, loads policy-news credentials from the private environment file, and sets `MARKET_SKIP_INVESTING=1` because Investing.com is confirmed blocked from Tencent Cloud. The source audit treats those configured fallbacks as expected degradation and fails on unhandled fetch errors.
 
 Check timer and logs:
 
@@ -70,69 +71,28 @@ journalctl -u global-market-dashboard-update.service -n 200 --no-pager
 
 ## Manual Post-Close Full Refresh
 
-Use this when the daily server update runs, but some public market sources are blocked from Tencent Cloud.
-
-1. Run the normal server update first:
-
-```bash
-cd /opt/global-market-dashboard
-./update_market_dashboard.sh
-python3 validate_market_dashboard.py
-```
-
-2. Inspect failures in `dashboard/latest_market_snapshot.json`. Common server-side failures seen on 2026-07-01:
-
-```text
-Yahoo 429: US_EQUITY, JP_EQUITY_YAHOO, DE_EQUITY, KR_EQUITY,
-           KRWCNY, USDKRW, RUBCNY_YAHOO, RUBJPY_YAHOO, USDRUB_YAHOO,
-           DXY, VIX, GOLD, USOIL
-SMBS timeout: KR_1M
-Investing 403 with fallback: Japan short bills, Korea bonds, Russia bonds/equity
-```
-
-3. Locally backfill the failed public series by following [Weekly Local Data Update](weekly_local_data_update.md). The expected local artifacts are:
-
-```text
-dashboard/data/<only failed or local-required symbols>.csv
-data/<only refreshed Investing local files>.csv
-```
-
-4. Upload only public market data that was intentionally refreshed.
-
-Do not rsync the full `dashboard/data/` directory after a partial local patch. That can overwrite newer server-generated WSCN, ChinaMoney, Nikkei, MOF, Bundesbank, SMBS, or Trading Economics rows with stale local cache.
+Use the canonical local orchestrator; do not assemble a new rsync command from memory:
 
 ```bash
 cd /Users/ruiyuma/Desktop/global-market-dashboard
-cat > /tmp/global_market_dashboard_upload_files.txt <<'EOF'
-dashboard/data/JP_1M.csv
-dashboard/data/RU_EQUITY.csv
-EOF
-rsync -avz --no-owner --no-group \
-  --files-from=/tmp/global_market_dashboard_upload_files.txt \
-  -e "ssh -i '/Users/ruiyuma/Desktop/国债汇率/sol.pem' -o StrictHostKeyChecking=no" \
-  ./ root@43.133.168.211:/opt/global-market-dashboard/
+source ~/anaconda3/bin/activate
+python production_update.py
 ```
 
-5. On the server, refresh quant fund from private env and re-render without another network fetch:
+On the weekly OHLC refresh day:
 
 ```bash
-cd /opt/global-market-dashboard
-chown -R root:root dashboard data
-find dashboard data -type d -exec chmod 755 {} +
-find dashboard data -type f -exec chmod 644 {} +
-python3 quant_fund_snapshot.py
-python3 market_dashboard.py --no-fetch
-python3 validate_market_dashboard.py
+python production_update.py --weekly
 ```
 
-6. Verify the public pages:
+The orchestrator runs the server first, reads the machine policy, fetches only failed Yahoo and fixed local-required sources, uploads an allowlisted manifest, restores `globaldash` ownership, renders without another network fetch, and runs both validators. See [Fixed Market Data Update](weekly_local_data_update.md) for the exact source split.
+
+Verify public pages after the command succeeds:
 
 ```bash
-curl -fsS http://127.0.0.1/ -o /tmp/dashboard_home.html
-curl -fsS http://127.0.0.1/quant_fund.html -o /tmp/quant.html
+curl -fsS http://43.133.168.211/ -o /tmp/dashboard_home.html
+curl -fsS http://43.133.168.211/quant_fund.html -o /tmp/quant.html
 ```
-
-This procedure intentionally avoids storing private futures trades, API keys, principal amounts, or raw account balances on the server. Quant refresh should still leave only sanitized `{date, pct}` points in `dashboard/quant_fund_snapshot.json`.
 
 ## Quant Fund Privacy Rule
 
@@ -179,6 +139,15 @@ chmod 600 /opt/global-market-dashboard/.private/quant_fund.env
 ```
 
 Use environment variables for credentials and principal amounts. Do not commit this file.
+
+Policy-news credentials use a separate private file:
+
+```bash
+chown globaldash:globaldash /opt/global-market-dashboard/.private/policy_news.env
+chmod 600 /opt/global-market-dashboard/.private/policy_news.env
+```
+
+The systemd drop-in may contain only `EnvironmentFile=/opt/global-market-dashboard/.private/policy_news.env`; it must not contain the key value itself. Rotate any key that has previously appeared in chat, a world-readable unit, shell history, or logs.
 
 Expected variable categories:
 

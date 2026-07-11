@@ -81,6 +81,11 @@ def main() -> int:
     quant_html = QUANT_HTML.read_text(encoding="utf-8") if QUANT_HTML.exists() else ""
     errors: list[str] = []
 
+    if snapshot.get("fetch_mode") not in {"network", "cache"}:
+        errors.append(f"invalid fetch_mode: {snapshot.get('fetch_mode')}")
+    if not snapshot.get("last_fetch_at"):
+        errors.append("missing last_fetch_at")
+
     country_names = {country["country"] for country in snapshot.get("countries", [])}
     if country_names != COUNTRIES:
         errors.append(f"countries mismatch: {sorted(country_names)}")
