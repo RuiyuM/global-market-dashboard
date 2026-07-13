@@ -69,6 +69,7 @@ CHART_HISTORY_LIMIT = 1500
 CHINA_SHORT_BOND_BACKFILL_TENORS = {"3M"}
 CHINA_SHORT_BOND_MIN_HISTORY_ROWS = 240
 US_MARKET_CLOSE_HOUR_ET = 16
+RUB_DIRECT_MAX_DIVERGENCE_PCT = 2.0
 
 
 def env_flag(name: str) -> bool:
@@ -939,7 +940,7 @@ def load_all_series() -> tuple[dict[str, list[dict[str, Any]]], dict[str, Series
 
     rubcny_direct = series.get("RUBCNY_YAHOO", [])
     rubcny_derived = derived_ratio("RUBCNY", usdcny, usdrub, "USDCNY / USDRUB")
-    if enough_recent_history(rubcny_direct, 30):
+    if reliable_direct_cross(rubcny_direct, rubcny_derived):
         specs["RUBCNY"] = SeriesSpec("RUBCNY", "卢布/人民币", "fx", "yahoo", "RUBCNY=X", "RUBCNY.csv")
         series["RUBCNY"] = rubcny_direct
     else:
@@ -948,7 +949,7 @@ def load_all_series() -> tuple[dict[str, list[dict[str, Any]]], dict[str, Series
 
     rubjpy_direct = series.get("RUBJPY_YAHOO", [])
     rubjpy_derived = derived_ratio("RUBJPY", usd_jpy, usdrub, "USDJPY / USDRUB")
-    if enough_recent_history(rubjpy_direct, 30):
+    if reliable_direct_cross(rubjpy_direct, rubjpy_derived):
         specs["RUBJPY"] = SeriesSpec("RUBJPY", "卢布/日元", "fx", "yahoo", "RUBJPY=X", "RUBJPY.csv")
         series["RUBJPY"] = rubjpy_direct
     else:
@@ -1001,6 +1002,19 @@ def compare_on_latest_common_date(left: list[dict[str, Any]], right: list[dict[s
         "abs_diff": diff,
         "pct_diff": diff / right_row["close"] * 100,
     }
+
+
+def reliable_direct_cross(
+    direct_rows: list[dict[str, Any]],
+    formula_rows: list[dict[str, Any]],
+    *,
+    min_history_days: int = 30,
+    max_divergence_pct: float = RUB_DIRECT_MAX_DIVERGENCE_PCT,
+) -> bool:
+    if not enough_recent_history(direct_rows, min_history_days):
+        return False
+    comparison = compare_on_latest_common_date(formula_rows, direct_rows)
+    return bool(comparison and abs(comparison["pct_diff"]) <= max_divergence_pct)
 
 
 def at_or_before(rows: list[dict[str, Any]], target: date) -> dict[str, Any] | None:
@@ -2011,7 +2025,7 @@ def build_snapshot(
             "7D/30D 波动率 = 对应窗口相邻交易观测的平均绝对日变化；债券单位 bp/日，股指和汇率单位 %/日。",
             f"三币种资金流向直接调用用户提供代码：{USER_FX_FLOW_CODE}",
             "三币种资金流向以纽约时间为统一日期；16:00前仅当每组三条汇率都有纽约当日数据时显示盘中值，否则停在最近共同收盘日，避免亚洲/欧洲先更新造成跨日期混算。",
-            "derived = 本地公式而非外部供应商：CNY_BASE=1；债券曲线=10Y-2Y；CNYJPY=1/JPYCNY；RUB 交叉汇率优先使用具备历史深度的 Yahoo 直接报价，历史不足才用 USDCNY/USDRUB 或 USDJPY/USDRUB 派生并在 source_audit 里比对最新直接报价。",
+            "derived = 本地公式而非外部供应商：CNY_BASE=1；债券曲线=10Y-2Y；CNYJPY=1/JPYCNY；RUB 交叉汇率仅在 Yahoo 直接报价具备历史深度且与同日公式价偏差不超过2%时优先使用，否则用 USDCNY/USDRUB 或 USDJPY/USDRUB 派生并在 source_audit 里保留比对。",
             "美债扩展期限优先使用 WSCN 日线；中国国债使用 ChinaMoney/CFETS 官方收盘收益率曲线并按缺口回填历史，其中中国3M合并 ChinaBond/CCDC 政府债收益率曲线历史；德国2Y/5Y/7Y/10Y/30Y使用 Bundesbank 当前联邦证券官方日频 CSV，德国1Y/3Y使用 Bundesbank 官方 Svensson 期限结构日频 CSV，德国3M/6M暂无稳定官方日频二级市场源，暂用 Trading Economics 最新页；日本1M/3M/6M 使用 Trading Economics 图表历史、Investing.com 历史表并合并 Trading Economics 最新页；日本1Y/2Y/3Y/5Y/7Y/10Y/30Y 使用日本财务省 MOF 官方收益率曲线作为历史底座并合并 Trading Economics 最新页；韩国1M/3M/6M 使用 SMBS KORIBOR 作为短端资金代理而非政府债，韩国3M/6M可由 BOK ECOS 交叉验证，韩国1Y/2Y/3Y/5Y/10Y/30Y 使用 Investing.com 历史表并在有更新日期时合并 Trading Economics 最新页；俄罗斯2Y/10Y 在 Investing.com 被云服务器拦截时保留历史缓存并合并 Trading Economics 最新页。",
             "宏观指标使用 Yahoo Finance 日线：美元指数 DX-Y.NYB、VIX ^VIX、黄金 GC=F、WTI 原油 CL=F。",
             "政策新闻雷达只做加息、降息、维持利率相关文本筛选；抓取或 AI 分类不可用时退回本地规则解析。",

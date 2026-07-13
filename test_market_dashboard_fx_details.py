@@ -8,7 +8,14 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from market_dashboard import build_flow_sections, build_fx_cross_details, render_fx_rank_detail, render_html, us_close_effective_date
+from market_dashboard import (
+    build_flow_sections,
+    build_fx_cross_details,
+    reliable_direct_cross,
+    render_fx_rank_detail,
+    render_html,
+    us_close_effective_date,
+)
 
 
 def row(day: int, close: float) -> dict[str, object]:
@@ -37,6 +44,15 @@ def test_build_fx_cross_details_derives_russia_cny_usd_jpy_pairs() -> None:
     assert rub_rows[2]["latest"] == 0.052 / 0.09
     assert rub_rows[0]["change"] > 0
     assert rub_rows[0]["pct_change"] > 0
+
+
+def test_reliable_direct_cross_rejects_large_latest_divergence() -> None:
+    formula = [dated(5, 1, 2.0), dated(6, 1, 2.0), dated(7, 13, 2.0)]
+    consistent_direct = [dated(5, 1, 2.01), dated(6, 1, 2.01), dated(7, 13, 2.02)]
+    divergent_direct = [dated(5, 1, 2.01), dated(6, 1, 2.01), dated(7, 13, 2.05)]
+
+    assert reliable_direct_cross(consistent_direct, formula) is True
+    assert reliable_direct_cross(divergent_direct, formula) is False
 
 
 def test_build_flow_sections_includes_exact_period_date_range() -> None:

@@ -1,5 +1,19 @@
 {
-  "version": 1,
+  "version": 2,
+  "cross_rate_selection": {
+    "RUBCNY": {
+      "direct": "RUBCNY_YAHOO",
+      "formula": "USDCNY/USDRUB",
+      "min_history_days": 30,
+      "max_divergence_pct": 2.0
+    },
+    "RUBJPY": {
+      "direct": "RUBJPY_YAHOO",
+      "formula": "USDJPY/USDRUB",
+      "min_history_days": 30,
+      "max_divergence_pct": 2.0
+    }
+  },
   "server_blocked": {
     "investing.com": {
       "observed_status": 403,

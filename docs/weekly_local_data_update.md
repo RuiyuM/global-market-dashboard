@@ -41,6 +41,8 @@ The server-only daily timer remains useful when the Mac is offline. It updates e
 | SMBS KORIBOR | Korea 1M/3M/6M | Money-market proxy, not a Korean government-bond yield. |
 | Yahoo | Equity, FX, DXY, VIX, gold, oil series in the policy file | Server first; local only after an actual server error/empty response. |
 
+RUB cross rates use Yahoo direct history only when it spans at least 30 days and the latest same-date quote is within 2% of the corresponding USD-derived formula. A larger divergence is treated as an asynchronous or venue-specific quote and the dashboard selects the formula series while retaining the direct quote in the source audit.
+
 ### Known Tencent Cloud Block
 
 Investing.com returned `HTTP 403` for all 12 configured requests in the verified 2026-07-11 server run. This is not a `404` and is not retried from the server timer.

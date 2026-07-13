@@ -621,19 +621,21 @@ def main() -> int:
     notes = "\n".join(snapshot.get("notes", []))
     if "derived = 本地公式" not in notes:
         errors.append("missing derived source explanation note")
-    if "RUB 交叉汇率优先使用具备历史深度的 Yahoo 直接报价" not in notes:
+    if "RUB 交叉汇率仅在 Yahoo 直接报价具备历史深度" not in notes:
         errors.append("missing RUB direct source policy note")
 
     status_by_key = {item.get("key"): item for item in snapshot.get("series_status", [])}
+    audit = {item.get("key"): item for item in snapshot.get("source_audit", [])}
     if status_by_key.get("JP_EQUITY", {}).get("source") != "nikkei":
         errors.append(f"JP_EQUITY should use official Nikkei source, got {status_by_key.get('JP_EQUITY', {}).get('source')}")
     for key, direct_key in [("RUBCNY", "RUBCNY_YAHOO"), ("RUBJPY", "RUBJPY_YAHOO")]:
         selected = status_by_key.get(key, {})
         direct = status_by_key.get(direct_key, {})
-        if direct and not direct.get("stale") and direct.get("count", 0) >= 30 and selected.get("source") != "yahoo":
-            errors.append(f"{key} should prefer fresh direct Yahoo source, got {selected.get('source')}")
+        comparison = audit.get(key, {}).get("comparison")
+        direct_is_consistent = comparison and abs(comparison.get("pct_diff", 100)) <= 2
+        if direct and not direct.get("stale") and direct.get("count", 0) >= 30 and direct_is_consistent and selected.get("source") != "yahoo":
+            errors.append(f"{key} should prefer consistent direct Yahoo source, got {selected.get('source')}")
 
-    audit = {item.get("key"): item for item in snapshot.get("source_audit", [])}
     for key in ["CNY_BASE", "CNYJPY", "US_10Y2Y", "CN_10Y2Y", "JP_10Y2Y", "DE_10Y2Y", "RU_10Y2Y", "KR_10Y2Y"]:
         if key not in audit:
             errors.append(f"missing source audit row: {key}")
