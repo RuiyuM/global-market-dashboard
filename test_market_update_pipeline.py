@@ -297,7 +297,12 @@ def test_source_policy_keys_match_dashboard_and_investing_specs() -> None:
         policy["investing_symbol_map"][key]
         for key in mapped
     } <= set(production_update.INVESTING_BOND_SPECS)
-    assert "JP_30Y" not in weekly
-    assert "JP_30Y" not in mapped
-    assert "JP_30Y_INVESTING" in policy["ohlc_overlay_policy"]["rejected"]
+    assert {"JP_30Y", "DE_2Y", "DE_10Y"} <= weekly
+    assert {"JP_30Y", "DE_2Y", "DE_10Y"} <= mapped
+    assert "JP_30Y_INVESTING_ID_23903" in policy["ohlc_overlay_policy"]["rejected"]
+    assert "JP_30Y_INVESTING_ID_23904" in policy["ohlc_overlay_policy"]["verified_local_gap_fills"]
     assert policy["ohlc_overlay_policy"]["wscn_daily"] == market_dashboard.WSCN_OHLC_OVERLAY_TARGETS
+    for key in ("JP_30Y", "DE_2Y", "DE_10Y"):
+        dashboard_spec = production_update.dashboard_spec_map()[key]
+        investing_spec = production_update.INVESTING_BOND_SPECS[policy["investing_symbol_map"][key]]
+        assert dashboard_spec.local_file == investing_spec.output_name

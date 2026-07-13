@@ -170,7 +170,7 @@ JAPAN_BOND_SPECS: list[tuple[SeriesSpec, str, str]] = [
     (SeriesSpec("JP_5Y", "日本5年国债", "bond", "mof+tradingeconomics", "JP5YR.OTC / MOF:JGB:5Y / GJGB5Y", "JP_5Y.csv", "JP5YR_INVESTING_1D_ohlc.csv"), "mof+tradingeconomics", "5Y"),
     (SeriesSpec("JP_7Y", "日本7年国债", "bond", "mof+tradingeconomics", "MOF:JGB:7Y / GJGB7Y", "JP_7Y.csv", "JP7YR_INVESTING_1D_ohlc.csv"), "mof+tradingeconomics", "7Y"),
     (SeriesSpec("JP_10Y", "日本10年国债", "bond", "mof+tradingeconomics", "JP10YR.OTC / MOF:JGB:10Y / GJGB10Y", "JP_10Y.csv", "JP10YR_INVESTING_1D_ohlc.csv"), "mof+tradingeconomics", "10Y"),
-    (SeriesSpec("JP_30Y", "日本30年国债", "bond", "mof+tradingeconomics", "JP30YR.OTC / MOF:JGB:30Y / GJGB30Y", "JP_30Y.csv"), "mof+tradingeconomics", "30Y"),
+    (SeriesSpec("JP_30Y", "日本30年国债", "bond", "mof+tradingeconomics", "JP30YR.OTC / MOF:JGB:30Y / GJGB30Y", "JP_30Y.csv", "JP30YR_INVESTING_1D_ohlc.csv"), "mof+tradingeconomics", "30Y"),
 ]
 
 
@@ -192,11 +192,11 @@ GERMANY_BOND_SPECS: list[tuple[SeriesSpec, str, str]] = [
     (SeriesSpec("DE_3M", "德国3个月国债", "bond", "tradingeconomics", "DE:TE:3M", "DE_3M.csv"), "tradingeconomics:germany", TRADING_ECONOMICS_COUNTRY_SLUGS["germany"]["3M"]),
     (SeriesSpec("DE_6M", "德国6个月国债", "bond", "tradingeconomics", "DE:TE:6M", "DE_6M.csv"), "tradingeconomics:germany", TRADING_ECONOMICS_COUNTRY_SLUGS["germany"]["6M"]),
     (SeriesSpec("DE_1Y", "德国1年国债", "bond", "bundesbank-term", BUNDESBANK_TERM_STRUCTURE_CODES["1Y"], "DE_1Y.csv"), "bundesbank-term", BUNDESBANK_TERM_STRUCTURE_CODES["1Y"]),
-    (SeriesSpec("DE_2Y", "德国2年国债", "bond", "bundesbank", f"DE2YR.OTC / {BUNDESBANK_CODES['2Y']}", "DE_2Y.csv"), "bundesbank", BUNDESBANK_CODES["2Y"]),
+    (SeriesSpec("DE_2Y", "德国2年国债", "bond", "bundesbank", f"DE2YR.OTC / {BUNDESBANK_CODES['2Y']}", "DE_2Y.csv", "DE2YR_INVESTING_1D_ohlc.csv"), "bundesbank", BUNDESBANK_CODES["2Y"]),
     (SeriesSpec("DE_3Y", "德国3年国债", "bond", "bundesbank-term", BUNDESBANK_TERM_STRUCTURE_CODES["3Y"], "DE_3Y.csv"), "bundesbank-term", BUNDESBANK_TERM_STRUCTURE_CODES["3Y"]),
     (SeriesSpec("DE_5Y", "德国5年国债", "bond", "bundesbank", BUNDESBANK_CODES["5Y"], "DE_5Y.csv"), "bundesbank", BUNDESBANK_CODES["5Y"]),
     (SeriesSpec("DE_7Y", "德国7年国债", "bond", "bundesbank", BUNDESBANK_CODES["7Y"], "DE_7Y.csv"), "bundesbank", BUNDESBANK_CODES["7Y"]),
-    (SeriesSpec("DE_10Y", "德国10年国债", "bond", "bundesbank", f"DE10YR.OTC / {BUNDESBANK_CODES['10Y']}", "DE_10Y.csv"), "bundesbank", BUNDESBANK_CODES["10Y"]),
+    (SeriesSpec("DE_10Y", "德国10年国债", "bond", "bundesbank", f"DE10YR.OTC / {BUNDESBANK_CODES['10Y']}", "DE_10Y.csv", "DE10YR_INVESTING_1D_ohlc.csv"), "bundesbank", BUNDESBANK_CODES["10Y"]),
     (SeriesSpec("DE_30Y", "德国30年国债", "bond", "bundesbank", BUNDESBANK_CODES["30Y"], "DE_30Y.csv"), "bundesbank", BUNDESBANK_CODES["30Y"]),
 ]
 
@@ -726,13 +726,15 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
                         rows = merge_ohlc_rows(rows, [latest_row])
                 except Exception as exc:
                     latest_error = f"Trading Economics latest failed: {exc}"
+            if series_spec.local_file and (LOCAL_DATA / series_spec.local_file).exists():
+                rows = merge_ohlc_rows(rows, read_ohlc(LOCAL_DATA / series_spec.local_file))
             if path.exists():
-                rows = merge_ohlc_rows(read_ohlc(path), rows)
+                rows = merge_ohlc_rows(rows, read_ohlc(path))
             for row in rows:
                 row["source_symbol"] = series_spec.symbol
                 if source_kind == "bundesbank":
                     row["source"] = (
-                        "WSCN traded-yield OHLC + Deutsche Bundesbank official daily close anchor"
+                        "WSCN traded-yield OHLC + Investing.com gap fill + Deutsche Bundesbank official daily close anchor"
                         if series_spec.key in WSCN_OHLC_TARGET_KEYS
                         else "Deutsche Bundesbank official daily yield CSV"
                     )
@@ -881,9 +883,7 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
                 if source_kind == "mof":
                     row["source"] = "Japan MOF official JGB yield curve"
                 elif source_kind == "mof+tradingeconomics":
-                    if series_spec.key == "JP_30Y":
-                        row["source"] = "WSCN traded-yield OHLC + Japan MOF official close anchor + Trading Economics latest close"
-                    elif series_spec.key in WSCN_OHLC_TARGET_KEYS:
+                    if series_spec.key in WSCN_OHLC_TARGET_KEYS:
                         row["source"] = (
                             "WSCN traded-yield OHLC + Investing.com gap fill + Japan MOF official close anchor + "
                             "Trading Economics latest close"
@@ -2197,7 +2197,7 @@ def build_snapshot(
             f"三币种资金流向直接调用用户提供代码：{USER_FX_FLOW_CODE}",
             "三币种资金流向以纽约时间为统一日期；16:00前仅当每组三条汇率都有纽约当日数据时显示盘中值，否则停在最近共同收盘日，避免亚洲/欧洲先更新造成跨日期混算。",
             "derived = 本地公式而非外部供应商：CNY_BASE=1；债券曲线=10Y-2Y；CNYJPY=1/JPYCNY；RUB/CNY 优先使用 MOEX CNYRUB_TOM 真实直接成交历史的倒数，Yahoo 仅作交叉核验，MOEX 缺失或陈旧时才用 USDCNY/USDRUB 派生；RUB/JPY 仍要求 Yahoo 直接报价具备历史深度且与同日公式价偏差不超过2%。",
-            "美债扩展期限优先使用 WSCN 日线；中国国债使用 ChinaMoney/CFETS 官方收盘收益率曲线并按缺口回填历史，其中中国3M合并 ChinaBond/CCDC 政府债收益率曲线历史；德国2Y/5Y/7Y/10Y/30Y使用 Bundesbank 当前联邦证券官方日频 CSV，德国1Y/3Y使用 Bundesbank 官方 Svensson 期限结构日频 CSV，德国3M/6M暂无稳定官方日频二级市场源，暂用 Trading Economics 最新页；日本1M/3M/6M 使用 Trading Economics 图表历史、Investing.com 历史表并合并 Trading Economics 最新页；日本1Y/2Y/3Y/5Y/7Y/10Y/30Y 使用日本财务省 MOF 官方收益率曲线作为历史底座并合并 Trading Economics 最新页；韩国1M/3M/6M 使用 SMBS KORIBOR 作为短端资金代理而非政府债，韩国3M/6M可由 BOK ECOS 交叉验证，韩国1Y/2Y/3Y/5Y/10Y/30Y 使用 Investing.com 历史表并在有更新日期时合并 Trading Economics 最新页；俄罗斯2Y/10Y 在 Investing.com 被云服务器拦截时保留历史缓存并合并 Trading Economics 最新页。",
+            "美债扩展期限优先使用 WSCN 日线；中国国债使用 ChinaMoney/CFETS 官方收盘收益率曲线并按缺口回填历史，其中中国3M合并 ChinaBond/CCDC 政府债收益率曲线历史；德国2Y/10Y使用 WSCN 日线、Investing.com 周度缺口补档和 Bundesbank 官方收盘锚点，德国5Y/7Y/30Y使用 Bundesbank 当前联邦证券官方日频 CSV，德国1Y/3Y使用 Bundesbank 官方 Svensson 期限结构日频 CSV，德国3M/6M暂无稳定官方日频二级市场源，暂用 Trading Economics 最新页；日本1M/3M/6M 使用 Trading Economics 图表历史、Investing.com 历史表并合并 Trading Economics 最新页；日本1Y/2Y/3Y/5Y/7Y/10Y/30Y 使用日本财务省 MOF 官方收益率曲线作为历史底座，WSCN 提供可用日线 OHLC，Investing.com 周度补齐 OHLC 缺口，并合并 Trading Economics 最新页；韩国1M/3M/6M 使用 SMBS KORIBOR 作为短端资金代理而非政府债，韩国3M/6M可由 BOK ECOS 交叉验证，韩国1Y/2Y/3Y/5Y/10Y/30Y 使用 Investing.com 历史表并在有更新日期时合并 Trading Economics 最新页；俄罗斯2Y/10Y 在 Investing.com 被云服务器拦截时保留历史缓存并合并 Trading Economics 最新页。",
             "宏观指标使用 Yahoo Finance 日线：美元指数 DX-Y.NYB、VIX ^VIX、黄金 GC=F、WTI 原油 CL=F。",
             "政策新闻雷达只做加息、降息、维持利率相关文本筛选；抓取或 AI 分类不可用时退回本地规则解析。",
         ],

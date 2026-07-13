@@ -132,7 +132,7 @@ BOND_SPECS = {
     ),
     "JP30Y": BondSpec(
         key="JP30Y",
-        instrument_id="23903",
+        instrument_id="23904",
         source_symbol="JP30YT=XX",
         slug="japan-30-year-bond-yield-historical-data",
         header="Japan 30-Year Bond Yield Historical Data",

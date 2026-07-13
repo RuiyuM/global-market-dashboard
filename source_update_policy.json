@@ -1,5 +1,5 @@
 {
-  "version": 5,
+  "version": 6,
   "ohlc_overlay_policy": {
     "merge_rule": "complete OHLC always wins over close-only on the same date",
     "wscn_daily": {
@@ -12,8 +12,13 @@
       "DE_2Y_WSCN_OHLC": "DE_2Y",
       "DE_10Y_WSCN_OHLC": "DE_10Y"
     },
+    "verified_local_gap_fills": {
+      "JP_30Y_INVESTING_ID_23904": "cross-checked against Japan MOF and WSCN; replaces rejected instrument ID 23903",
+      "DE_2Y_INVESTING_ID_23685": "cross-checked against WSCN and Deutsche Bundesbank",
+      "DE_10Y_INVESTING_ID_23693": "cross-checked against WSCN and Deutsche Bundesbank"
+    },
     "rejected": {
-      "JP_30Y_INVESTING": "fails tenor cross-check against Japan MOF by roughly 33-37bp; never upload as JP_30Y"
+      "JP_30Y_INVESTING_ID_23903": "wrong tenor mapping; failed the Japan MOF cross-check by roughly 33-37bp"
     }
   },
   "cross_rate_selection": {
@@ -45,6 +50,9 @@
         "JP_5Y",
         "JP_7Y",
         "JP_10Y",
+        "JP_30Y",
+        "DE_2Y",
+        "DE_10Y",
         "KR_1Y",
         "KR_2Y",
         "KR_3Y",
@@ -67,6 +75,9 @@
     "JP_5Y": "WSCN daily OHLC, Japan MOF close anchor, cached Investing gap fill, and Trading Economics latest close",
     "JP_7Y": "Japan MOF close anchor, cached Investing OHLC, and Trading Economics latest close",
     "JP_10Y": "WSCN daily OHLC, Japan MOF close anchor, cached Investing gap fill, and Trading Economics latest close",
+    "JP_30Y": "WSCN daily OHLC, Japan MOF close anchor, verified Investing ID 23904 gap fill, and Trading Economics latest close",
+    "DE_2Y": "WSCN daily OHLC, cached Investing gap fill, and Deutsche Bundesbank official close anchor",
+    "DE_10Y": "WSCN daily OHLC, cached Investing gap fill, and Deutsche Bundesbank official close anchor",
     "KR_1Y": "cached OHLC history and Trading Economics latest close",
     "KR_2Y": "cached OHLC history and Trading Economics latest close",
     "KR_3Y": "cached OHLC history and Trading Economics latest close",
@@ -120,6 +131,9 @@
     "JP_5Y",
     "JP_7Y",
     "JP_10Y",
+    "JP_30Y",
+    "DE_2Y",
+    "DE_10Y",
     "KR_1Y",
     "KR_2Y",
     "KR_3Y",
@@ -140,6 +154,9 @@
     "JP_5Y": "JP5Y",
     "JP_7Y": "JP7Y",
     "JP_10Y": "JP10Y",
+    "JP_30Y": "JP30Y",
+    "DE_2Y": "DE2Y",
+    "DE_10Y": "DE10Y",
     "KR_1Y": "KR1Y",
     "KR_2Y": "KR2Y",
     "KR_3Y": "KR3Y",

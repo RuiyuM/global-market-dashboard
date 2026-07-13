@@ -47,9 +47,9 @@ The jobs are recurring trading-day updates, not weekly backfills. They must not 
 | Moscow Exchange ISS | `CNYRUB_TOM` official traded daily candles, inverted to `RUB/CNY` | Primary direct `RUB/CNY` history. Paginated back to 2019 and refreshed daily on the server. |
 | ChinaMoney / ChinaBond CCDC | China 1M through 30Y curve | Official daily source and historical backfill. |
 | Nikkei | `JP_EQUITY` | Preferred official Nikkei 225 daily CSV. |
-| Japan MOF | Japan 1Y through 30Y | Official close-only historical anchor. WSCN supplies daily OHLC where configured; local Investing supplies weekly gap fills except Japan 30Y. |
+| Japan MOF | Japan 1Y through 30Y | Official close-only historical anchor. WSCN supplies daily OHLC where configured; local Investing supplies weekly gap fills, including Japan 30Y through verified instrument ID `23904`. |
 | Trading Economics | Japan short-bill chart history/latest; Japan, Korea, Russia latest yield closes; Germany 3M/6M latest | Server-safe fallback. Close-only rows are explicit. |
-| Bundesbank | Germany 1Y through 30Y except 3M/6M | Official history. |
+| Bundesbank | Germany 1Y through 30Y except 3M/6M | Official close history. Germany 2Y/10Y additionally use WSCN OHLC and locally refreshed Investing OHLC to fill WSCN gaps. |
 | SMBS KORIBOR | Korea 1M/3M/6M | Money-market proxy, not a Korean government-bond yield. |
 | Yahoo | Equity, FX, DXY, VIX, gold, oil series in the policy file | Server first; local only after an actual server error/empty response. |
 
@@ -63,14 +63,15 @@ The server runs with `MARKET_SKIP_INVESTING=1` and records these rows as `degrad
 
 ```text
 JP_1M JP_3M JP_6M
-JP_1Y JP_2Y JP_3Y JP_5Y JP_7Y JP_10Y
+JP_1Y JP_2Y JP_3Y JP_5Y JP_7Y JP_10Y JP_30Y
+DE_2Y DE_10Y
 KR_1Y KR_2Y KR_3Y KR_5Y KR_10Y KR_30Y
 RU_2Y RU_10Y RU_EQUITY
 ```
 
-Japan 2Y/3Y/5Y/10Y receive daily WSCN OHLC and Japan 30Y receives WSCN OHLC without an Investing fill. Japan 1Y/7Y retain MOF close anchors and cached local Investing OHLC. Japan 1M/3M/6M still receive Trading Economics chart history and latest data. Korea and Russia bonds retain their cached OHLC history and receive a Trading Economics latest close. `RU_EQUITY` has no confirmed server-safe replacement and is the only fixed local-required series.
+Japan 2Y/3Y/5Y/10Y/30Y receive daily WSCN OHLC plus weekly local Investing gap fills. Japan 1Y/7Y retain MOF close anchors and cached local Investing OHLC. Germany 2Y/10Y receive WSCN OHLC plus weekly local Investing gap fills and Bundesbank close anchors. Japan 1M/3M/6M still receive Trading Economics chart history and latest data. Korea and Russia bonds retain their cached OHLC history and receive a Trading Economics latest close. `RU_EQUITY` has no confirmed server-safe replacement and is the only fixed local-required series.
 
-Do not use the configured Investing `JP30Y` response as Japan 30Y. Cross-checking showed it roughly 33-37bp below the same-date Japan MOF 30Y curve while WSCN stayed within roughly 5-8bp; the Investing mapping is therefore rejected for production.
+Japan 30Y must use Investing instrument ID `23904`. The old ID `23903` was a wrong-tenor mapping and ran roughly 33-37bp below the same-date Japan MOF 30Y curve. ID `23904` was cross-checked against MOF and WSCN before admission. Never restore `23903` or infer tenor identity from a filename alone.
 
 ### Local Fallback
 
@@ -79,7 +80,7 @@ Do not use the configured Investing `JP30Y` response as Japan 30Y. Cross-checkin
 - Refresh every Yahoo symbol whose server fetch record is `error`, `empty`, or unexpectedly degraded.
 - Refresh SMBS KORIBOR 1M/3M/6M locally only when the server records an actual timeout, error, or empty response.
 - Refresh `RU_EQUITY` from Investing.com on each local production run.
-- With `--weekly`, refresh the public Investing OHLC list in `local_weekly_ohlc` from the policy file. This includes Japan 1Y/7Y and gap fills for Japan 2Y/3Y/5Y/10Y, but explicitly excludes Japan 30Y.
+- With `--weekly`, refresh the public Investing OHLC list in `local_weekly_ohlc` from the policy file. This includes Japan 1Y/7Y, gap fills for Japan 2Y/3Y/5Y/10Y/30Y, and gap fills for Germany 2Y/10Y.
 - Upload only files produced successfully in that run.
 
 An empty response, exception, or incoming dataset older than the local cache is rejected. A required local failure stops the run before deployment.

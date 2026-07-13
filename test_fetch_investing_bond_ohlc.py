@@ -3,7 +3,11 @@
 
 from __future__ import annotations
 
-from fetch_investing_bond_ohlc import rows_from_html
+from fetch_investing_bond_ohlc import BOND_SPECS, rows_from_html
+
+
+def test_japan_30_year_uses_verified_instrument_id() -> None:
+    assert BOND_SPECS["JP30Y"].instrument_id == "23904"
 
 
 def test_rows_from_html_parses_next_historical_data_store() -> None:
