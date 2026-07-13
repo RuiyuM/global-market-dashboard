@@ -25,6 +25,7 @@ def test_empty_wscn_response_does_not_overwrite_cache(tmp_path, monkeypatch) -> 
     spec = market_dashboard.SeriesSpec("TEST", "Test", "bond", "wscn", "TEST.OTC", "TEST.csv")
     monkeypatch.setattr(market_dashboard, "DASHBOARD_DATA", tmp_path)
     monkeypatch.setattr(market_dashboard, "WSCN_SPECS", [spec])
+    monkeypatch.setattr(market_dashboard, "MOEX_SPECS", [])
     monkeypatch.setattr(market_dashboard, "YAHOO_SPECS", [])
     monkeypatch.setattr(market_dashboard, "NIKKEI_SPECS", [])
     monkeypatch.setattr(market_dashboard, "CHINA_BOND_SPECS", [])
@@ -115,6 +116,37 @@ def test_source_audit_routes_yahoo_failure_to_local_patch() -> None:
     assert report["server_ok"] is True
     assert report["local_patch_candidates"] == ["US_EQUITY"]
     assert "HTTP Error 429" in report["errors"][0]
+
+
+def test_source_audit_treats_optional_rubcny_yahoo_cross_check_as_warning() -> None:
+    snapshot = {
+        "generated_at": "2026-07-13T10:00:00-04:00",
+        "last_fetch_at": "2026-07-13T09:59:00-04:00",
+        "fetch_mode": "network",
+        "fetch_records": [
+            {"key": "RUBCNY_MOEX", "status": "ok", "latest": "2026-07-13", "error": ""},
+            {"key": "RUBCNY_YAHOO", "status": "error", "latest": "", "error": "HTTP Error 429"},
+        ],
+    }
+    policy = {
+        "server_blocked": {},
+        "yahoo_patch_on_failure": [],
+        "smbs_patch_on_failure": [],
+        "optional_sources": ["RUBCNY_YAHOO"],
+        "local_required": [],
+    }
+
+    report = audit_market_sources.audit_sources(
+        snapshot,
+        policy,
+        now=datetime(2026, 7, 13, 14, 1, tzinfo=timezone.utc),
+    )
+
+    assert report["ok"] is True
+    assert report["local_patch_candidates"] == []
+    assert report["warnings"] == [
+        "RUBCNY_YAHOO: optional cross-check unavailable: status=error HTTP Error 429"
+    ]
 
 
 def test_current_local_patch_remediates_yahoo_server_failure() -> None:
@@ -240,6 +272,7 @@ def test_source_policy_keys_match_dashboard_and_investing_specs() -> None:
     assert weekly <= mapped <= dashboard_keys
     assert set(policy["yahoo_patch_on_failure"]) <= dashboard_keys
     assert set(policy["smbs_patch_on_failure"]) <= dashboard_keys
+    assert set(policy["optional_sources"]) <= dashboard_keys
     assert {
         policy["investing_symbol_map"][key]
         for key in mapped

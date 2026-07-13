@@ -46,6 +46,7 @@ def audit_sources(snapshot: dict[str, Any], policy: dict[str, Any], now: datetim
         for key in source.get("keys", [])
     }
     yahoo_keys = set(policy.get("yahoo_patch_on_failure", []))
+    optional_keys = set(policy.get("optional_sources", []))
     recoverable_local_keys = yahoo_keys | set(policy.get("smbs_patch_on_failure", []))
     errors: list[str] = []
     blocking_errors: list[str] = []
@@ -81,6 +82,9 @@ def audit_sources(snapshot: dict[str, Any], policy: dict[str, Any], now: datetim
         status = str(row.get("status") or "")
         error = str(row.get("error") or "")
         if status in {"error", "empty", "pending", ""}:
+            if key in optional_keys:
+                warnings.append(f"{key}: optional cross-check unavailable: status={status or 'missing'} {error}".strip())
+                continue
             if patch_is_current and key in patched_keys:
                 warnings.append(f"{key}: server status={status or 'missing'} remediated by local public-data patch")
             else:

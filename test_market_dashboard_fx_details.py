@@ -12,8 +12,10 @@ from market_dashboard import (
     build_flow_sections,
     build_fx_cross_details,
     reliable_direct_cross,
+    reliable_official_direct_cross,
     render_fx_rank_detail,
     render_html,
+    rows_from_moex_cnyrub_response,
     us_close_effective_date,
 )
 
@@ -53,6 +55,35 @@ def test_reliable_direct_cross_rejects_large_latest_divergence() -> None:
 
     assert reliable_direct_cross(consistent_direct, formula) is True
     assert reliable_direct_cross(divergent_direct, formula) is False
+
+
+def test_moex_cnyrub_candles_are_inverted_to_rubcny_ohlc() -> None:
+    rows = rows_from_moex_cnyrub_response(
+        {
+            "candles": {
+                "columns": ["open", "close", "high", "low", "value", "volume", "begin", "end"],
+                "data": [[11.0, 12.0, 12.5, 10.0, None, 123, "2026-07-13 00:00:00", "2026-07-13 23:59:59"]],
+            }
+        },
+        "CNYRUB_TOM",
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["date"] == "2026-07-13"
+    assert rows[0]["open"] == pytest.approx(1 / 11.0)
+    assert rows[0]["close"] == pytest.approx(1 / 12.0)
+    assert rows[0]["high"] == pytest.approx(1 / 10.0)
+    assert rows[0]["low"] == pytest.approx(1 / 12.5)
+    assert rows[0]["source_symbol"] == "CNYRUB_TOM"
+
+
+def test_official_moex_direct_history_keeps_market_basis_but_rejects_stale_series() -> None:
+    formula = [dated(5, 1, 2.0), dated(6, 1, 2.0), dated(7, 13, 2.0)]
+    current_moex = [dated(5, 1, 2.01), dated(6, 1, 2.01), dated(7, 13, 2.05)]
+    stale_moex = [dated(5, 1, 2.01), dated(6, 1, 2.01), dated(7, 1, 2.05)]
+
+    assert reliable_official_direct_cross(current_moex, formula) is True
+    assert reliable_official_direct_cross(stale_moex, formula) is False
 
 
 def test_build_flow_sections_includes_exact_period_date_range() -> None:

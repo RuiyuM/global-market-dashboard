@@ -1,11 +1,13 @@
 {
-  "version": 3,
+  "version": 4,
   "cross_rate_selection": {
     "RUBCNY": {
-      "direct": "RUBCNY_YAHOO",
+      "direct": "RUBCNY_MOEX",
+      "direct_symbol": "CNYRUB_TOM (inverted)",
       "formula": "USDCNY/USDRUB",
       "min_history_days": 30,
-      "max_divergence_pct": 2.0
+      "max_lag_days": 7,
+      "cross_check": "RUBCNY_YAHOO"
     },
     "RUBJPY": {
       "direct": "RUBJPY_YAHOO",
@@ -54,7 +56,6 @@
     "KR_EQUITY",
     "KRWCNY",
     "USDKRW",
-    "RUBCNY_YAHOO",
     "RUBJPY_YAHOO",
     "USDRUB_YAHOO",
     "DXY",
@@ -66,6 +67,9 @@
     "KR_1M",
     "KR_3M",
     "KR_6M"
+  ],
+  "optional_sources": [
+    "RUBCNY_YAHOO"
   ],
   "local_required": [
     "RU_EQUITY"

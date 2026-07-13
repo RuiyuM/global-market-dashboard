@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from datetime import date
 from pathlib import Path
 
 
@@ -621,20 +622,37 @@ def main() -> int:
     notes = "\n".join(snapshot.get("notes", []))
     if "derived = 本地公式" not in notes:
         errors.append("missing derived source explanation note")
-    if "RUB 交叉汇率仅在 Yahoo 直接报价具备历史深度" not in notes:
+    if "RUB/CNY 优先使用 MOEX CNYRUB_TOM 真实直接成交历史" not in notes:
         errors.append("missing RUB direct source policy note")
 
     status_by_key = {item.get("key"): item for item in snapshot.get("series_status", [])}
     audit = {item.get("key"): item for item in snapshot.get("source_audit", [])}
     if status_by_key.get("JP_EQUITY", {}).get("source") != "nikkei":
         errors.append(f"JP_EQUITY should use official Nikkei source, got {status_by_key.get('JP_EQUITY', {}).get('source')}")
-    for key, direct_key in [("RUBCNY", "RUBCNY_YAHOO"), ("RUBJPY", "RUBJPY_YAHOO")]:
-        selected = status_by_key.get(key, {})
-        direct = status_by_key.get(direct_key, {})
-        comparison = audit.get(key, {}).get("comparison")
-        direct_is_consistent = comparison and abs(comparison.get("pct_diff", 100)) <= 2
-        if direct and not direct.get("stale") and direct.get("count", 0) >= 30 and direct_is_consistent and selected.get("source") != "yahoo":
-            errors.append(f"{key} should prefer consistent direct Yahoo source, got {selected.get('source')}")
+    rubcny_selected = status_by_key.get("RUBCNY", {})
+    rubcny_moex = status_by_key.get("RUBCNY_MOEX", {})
+    rubcny_reference_dates = [
+        status_by_key.get(key, {}).get("latest_date")
+        for key in ("USDCNY", "USDRUB")
+        if status_by_key.get(key, {}).get("latest_date")
+    ]
+    rubcny_reference_date = max(rubcny_reference_dates) if rubcny_reference_dates else ""
+    rubcny_lag_days = (
+        abs((date.fromisoformat(rubcny_moex["latest_date"]) - date.fromisoformat(rubcny_reference_date)).days)
+        if rubcny_moex.get("latest_date") and rubcny_reference_date
+        else 999
+    )
+    if rubcny_moex and not rubcny_moex.get("stale") and rubcny_moex.get("count", 0) >= 30 and rubcny_lag_days <= 7:
+        if rubcny_selected.get("source") != "moex":
+            errors.append(f"RUBCNY should prefer official MOEX direct history, got {rubcny_selected.get('source')}")
+
+    rubjpy_selected = status_by_key.get("RUBJPY", {})
+    rubjpy_direct = status_by_key.get("RUBJPY_YAHOO", {})
+    rubjpy_comparison = audit.get("RUBJPY", {}).get("comparison")
+    rubjpy_is_consistent = rubjpy_comparison and abs(rubjpy_comparison.get("pct_diff", 100)) <= 2
+    if rubjpy_direct and not rubjpy_direct.get("stale") and rubjpy_direct.get("count", 0) >= 30 and rubjpy_is_consistent:
+        if rubjpy_selected.get("source") != "yahoo":
+            errors.append(f"RUBJPY should prefer consistent direct Yahoo source, got {rubjpy_selected.get('source')}")
 
     for key in ["CNY_BASE", "CNYJPY", "US_10Y2Y", "CN_10Y2Y", "JP_10Y2Y", "DE_10Y2Y", "RU_10Y2Y", "KR_10Y2Y"]:
         if key not in audit:

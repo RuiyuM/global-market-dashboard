@@ -44,6 +44,7 @@ The jobs are recurring trading-day updates, not weekly backfills. They must not 
 | Source | Symbols | Policy |
 |---|---|---|
 | WSCN | U.S. Treasury curve, core China Treasury tenors, core FX, Shanghai Composite | Fetch daily; an empty response never replaces cache. |
+| Moscow Exchange ISS | `CNYRUB_TOM` official traded daily candles, inverted to `RUB/CNY` | Primary direct `RUB/CNY` history. Paginated back to 2019 and refreshed daily on the server. |
 | ChinaMoney / ChinaBond CCDC | China 1M through 30Y curve | Official daily source and historical backfill. |
 | Nikkei | `JP_EQUITY` | Preferred official Nikkei 225 daily CSV. |
 | Japan MOF | Japan 1Y through 30Y | Official historical anchor. |
@@ -52,7 +53,7 @@ The jobs are recurring trading-day updates, not weekly backfills. They must not 
 | SMBS KORIBOR | Korea 1M/3M/6M | Money-market proxy, not a Korean government-bond yield. |
 | Yahoo | Equity, FX, DXY, VIX, gold, oil series in the policy file | Server first; local only after an actual server error/empty response. |
 
-RUB cross rates use Yahoo direct history only when it spans at least 30 days and the latest same-date quote is within 2% of the corresponding USD-derived formula. A larger divergence is treated as an asynchronous or venue-specific quote and the dashboard selects the formula series while retaining the direct quote in the source audit.
+`RUB/CNY` uses the inverted Moscow Exchange `CNYRUB_TOM` traded history when it spans at least 30 days and is no more than seven days behind the USD reference series. Yahoo `RUBCNY=X` is retained only as a cross-check. The `USDCNY/USDRUB` formula is a fallback when MOEX is missing or stale; any direct/formula difference remains visible as market basis in `source_audit` instead of automatically invalidating the official direct series. `RUB/JPY` still uses the 30-day-history and 2% formula-consistency guard because no equivalent official direct series is configured.
 
 ### Known Tencent Cloud Block
 

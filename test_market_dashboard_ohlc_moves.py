@@ -475,6 +475,7 @@ def test_japan_short_bills_merge_investing_history_with_tradingeconomics_latest(
     for name in [
         "WSCN_SPECS",
         "YAHOO_SPECS",
+        "MOEX_SPECS",
         "NIKKEI_SPECS",
         "CHINA_BOND_SPECS",
         "GERMANY_BOND_SPECS",
@@ -536,6 +537,7 @@ def test_japan_short_bills_use_te_chart_history_before_investing_window(monkeypa
     for name in [
         "WSCN_SPECS",
         "YAHOO_SPECS",
+        "MOEX_SPECS",
         "NIKKEI_SPECS",
         "CHINA_BOND_SPECS",
         "GERMANY_BOND_SPECS",
@@ -590,6 +592,7 @@ def test_japan_short_bills_request_extra_te_chart_history_for_ohlc_window(monkey
     for name in [
         "WSCN_SPECS",
         "YAHOO_SPECS",
+        "MOEX_SPECS",
         "NIKKEI_SPECS",
         "CHINA_BOND_SPECS",
         "GERMANY_BOND_SPECS",
@@ -630,6 +633,7 @@ def test_japan_short_bills_keep_investing_ohlc_when_te_has_same_date(monkeypatch
     for name in [
         "WSCN_SPECS",
         "YAHOO_SPECS",
+        "MOEX_SPECS",
         "NIKKEI_SPECS",
         "CHINA_BOND_SPECS",
         "GERMANY_BOND_SPECS",
@@ -693,6 +697,7 @@ def test_japan_short_bills_fall_back_to_seed_when_investing_is_blocked(monkeypat
     for name in [
         "WSCN_SPECS",
         "YAHOO_SPECS",
+        "MOEX_SPECS",
         "NIKKEI_SPECS",
         "CHINA_BOND_SPECS",
         "GERMANY_BOND_SPECS",
@@ -732,6 +737,7 @@ def test_korea_short_end_koribor_history_is_shared_across_tenors(monkeypatch, tm
     for name in [
         "WSCN_SPECS",
         "YAHOO_SPECS",
+        "MOEX_SPECS",
         "NIKKEI_SPECS",
         "CHINA_BOND_SPECS",
         "GERMANY_BOND_SPECS",
@@ -774,6 +780,7 @@ def test_korea_government_bonds_merge_investing_history_with_te_latest(monkeypat
     for name in [
         "WSCN_SPECS",
         "YAHOO_SPECS",
+        "MOEX_SPECS",
         "NIKKEI_SPECS",
         "CHINA_BOND_SPECS",
         "GERMANY_BOND_SPECS",
@@ -831,6 +838,7 @@ def test_investing_only_russia_bonds_use_cache_and_te_when_investing_is_blocked(
     for name in [
         "WSCN_SPECS",
         "YAHOO_SPECS",
+        "MOEX_SPECS",
         "NIKKEI_SPECS",
         "CHINA_BOND_SPECS",
         "GERMANY_BOND_SPECS",
@@ -968,6 +976,7 @@ def test_china_short_bills_backfill_from_lookback_when_cache_is_short(monkeypatc
     for name in [
         "WSCN_SPECS",
         "YAHOO_SPECS",
+        "MOEX_SPECS",
         "NIKKEI_SPECS",
         "JAPAN_BOND_SPECS",
         "GERMANY_BOND_SPECS",
@@ -1011,6 +1020,7 @@ def test_china_3m_merges_chinabond_history_with_chinamoney_recent(monkeypatch, t
     for name in [
         "WSCN_SPECS",
         "YAHOO_SPECS",
+        "MOEX_SPECS",
         "NIKKEI_SPECS",
         "JAPAN_BOND_SPECS",
         "GERMANY_BOND_SPECS",

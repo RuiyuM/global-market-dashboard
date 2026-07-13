@@ -29,6 +29,7 @@ from market_dashboard import (
     JAPAN_BOND_SPECS,
     KOREA_BOND_SPECS,
     LOCAL_DATA,
+    MOEX_SPECS,
     NIKKEI_SPECS,
     WSCN_SPECS,
     YAHOO_SPECS,
@@ -57,7 +58,7 @@ LOCK_PATH = Path("/tmp/global-market-dashboard-production-update.lock")
 
 
 def dashboard_spec_map() -> dict[str, SeriesSpec]:
-    values: list[SeriesSpec] = [*WSCN_SPECS, *YAHOO_SPECS, *NIKKEI_SPECS]
+    values: list[SeriesSpec] = [*WSCN_SPECS, *MOEX_SPECS, *YAHOO_SPECS, *NIKKEI_SPECS]
     values.extend(spec for spec, *_ in JAPAN_BOND_SPECS)
     values.extend(spec for spec, *_ in GERMANY_BOND_SPECS)
     values.extend(spec for spec, *_ in KOREA_BOND_SPECS)

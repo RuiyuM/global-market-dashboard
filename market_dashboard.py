@@ -70,6 +70,8 @@ CHINA_SHORT_BOND_BACKFILL_TENORS = {"3M"}
 CHINA_SHORT_BOND_MIN_HISTORY_ROWS = 240
 US_MARKET_CLOSE_HOUR_ET = 16
 RUB_DIRECT_MAX_DIVERGENCE_PCT = 2.0
+MOEX_DIRECT_MAX_LAG_DAYS = 7
+MOEX_CANDLES_URL = "https://iss.moex.com/iss/engines/currency/markets/selt/securities/{symbol}/candles.json"
 
 
 def env_flag(name: str) -> bool:
@@ -119,6 +121,18 @@ WSCN_SPECS = [
     SeriesSpec("EURUSD", "欧元/美元", "fx", "wscn", "EURUSD.OTC", "EURUSD.csv", None),
     SeriesSpec("USDRUB", "美元/卢布", "fx", "wscn", "USDRUB.OTC", "USDRUB.csv", None),
     SeriesSpec("CN_EQUITY", "上证综指", "equity", "wscn", "000001.SS", "CN_EQUITY.csv", "000001_SS_1D_ohlc.csv"),
+]
+
+
+MOEX_SPECS = [
+    SeriesSpec(
+        "RUBCNY_MOEX",
+        "卢布/人民币（MOEX人民币/卢布倒数）",
+        "fx",
+        "moex",
+        "CNYRUB_TOM",
+        "RUBCNY_MOEX.csv",
+    ),
 ]
 
 
@@ -212,7 +226,7 @@ YAHOO_SPECS = [
     SeriesSpec("KR_EQUITY", "韩国KOSPI", "equity", "yahoo", "^KS11", "KR_EQUITY.csv", None),
     SeriesSpec("KRWCNY", "韩元/人民币", "fx", "yahoo", "KRWCNY=X", "KRWCNY.csv", None),
     SeriesSpec("USDKRW", "美元/韩元", "fx", "yahoo", "USDKRW=X", "USDKRW.csv", None),
-    SeriesSpec("RUBCNY_YAHOO", "卢布/人民币", "fx", "yahoo", "RUBCNY=X", "RUBCNY_YAHOO.csv", None),
+    SeriesSpec("RUBCNY_YAHOO", "卢布/人民币（Yahoo核验）", "fx", "yahoo", "RUBCNY=X", "RUBCNY_YAHOO.csv", None),
     SeriesSpec("RUBJPY_YAHOO", "卢布/日元", "fx", "yahoo", "RUBJPY=X", "RUBJPY_YAHOO.csv", None),
     SeriesSpec("USDRUB_YAHOO", "美元/卢布", "fx", "yahoo", "USDRUB=X", "USDRUB_YAHOO.csv", None),
     *MACRO_SPECS,
@@ -405,6 +419,66 @@ def fetch_yahoo_ohlc(symbol: str, start: date, end: date) -> list[dict[str, Any]
     return rows
 
 
+def rows_from_moex_cnyrub_response(payload: dict[str, Any], symbol: str) -> list[dict[str, Any]]:
+    candles = payload.get("candles") or {}
+    columns = candles.get("columns") or []
+    rows: list[dict[str, Any]] = []
+    for values in candles.get("data") or []:
+        item = dict(zip(columns, values))
+        try:
+            parsed_date = datetime.strptime(str(item["begin"])[:10], "%Y-%m-%d").date()
+            cnyrub_open = float(item["open"])
+            cnyrub_close = float(item["close"])
+            cnyrub_high = float(item["high"])
+            cnyrub_low = float(item["low"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if min(cnyrub_open, cnyrub_close, cnyrub_high, cnyrub_low) <= 0:
+            continue
+        rows.append(
+            {
+                "date": parsed_date.isoformat(),
+                "timestamp": date_to_epoch(parsed_date),
+                "open": 1.0 / cnyrub_open,
+                "high": 1.0 / cnyrub_low,
+                "low": 1.0 / cnyrub_high,
+                "close": 1.0 / cnyrub_close,
+                "volume": item.get("volume") if item.get("volume") is not None else "",
+                "source_symbol": symbol,
+                "source": "Moscow Exchange ISS CNY/RUB TOM daily candles; inverted to RUB/CNY",
+            }
+        )
+    return rows
+
+
+def fetch_moex_rubcny_ohlc(symbol: str, start: date, end: date) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    offset = 0
+    page_size = 500
+    while True:
+        query = urlencode(
+            {
+                "from": start.isoformat(),
+                "till": end.isoformat(),
+                "interval": 24,
+                "start": offset,
+                "iss.meta": "off",
+            }
+        )
+        url = f"{MOEX_CANDLES_URL.format(symbol=quote(symbol, safe=''))}?{query}"
+        request = Request(url, headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json,*/*"})
+        with urlopen(request, timeout=30) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        page = rows_from_moex_cnyrub_response(payload, symbol)
+        rows.extend(page)
+        raw_count = len(((payload.get("candles") or {}).get("data") or []))
+        if raw_count < page_size:
+            break
+        offset += raw_count
+        time.sleep(0.1)
+    return merge_ohlc_rows([], rows)
+
+
 def fetch_nikkei_ohlc(symbol: str) -> list[dict[str, Any]]:
     url = f"https://indexes.nikkei.co.jp/nkave/historical/{quote(symbol, safe='')}"
     request = Request(url, headers={"User-Agent": "Mozilla/5.0", "Accept": "text/csv,*/*"})
@@ -499,6 +573,23 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
 
     end = today_utc()
     start = end - timedelta(days=args.lookback_days)
+    for spec in MOEX_SPECS:
+        path = DASHBOARD_DATA / spec.cache_file
+        record = {"key": spec.key, "source": spec.source, "symbol": spec.symbol, "status": "pending", "file": str(path), "error": ""}
+        try:
+            existing = read_ohlc(path) if path.exists() else []
+            fetch_start = max(start, row_date_key(existing[-1]) - timedelta(days=7)) if existing else date(2019, 1, 1)
+            incoming = fetch_moex_rubcny_ohlc(spec.symbol, fetch_start, end)
+            rows = merge_ohlc_rows(existing, incoming)
+            if rows:
+                write_ohlc(path, rows)
+            record.update({"status": fetch_record_status(rows), "rows": str(len(rows)), "latest": rows[-1]["date"] if rows else ""})
+        except Exception as exc:
+            record.update({"status": "error", "error": str(exc)})
+        records.append(record)
+        if args.sleep_sec:
+            time.sleep(args.sleep_sec)
+
     for spec in YAHOO_SPECS:
         path = DASHBOARD_DATA / spec.cache_file
         record = {"key": spec.key, "source": spec.source, "symbol": spec.symbol, "status": "pending", "file": str(path), "error": ""}
@@ -914,6 +1005,7 @@ def load_all_series() -> tuple[dict[str, list[dict[str, Any]]], dict[str, Series
         spec.key: spec
         for spec in [
             *WSCN_SPECS,
+            *MOEX_SPECS,
             *YAHOO_SPECS,
             *NIKKEI_SPECS,
             *japan_bond_series_specs,
@@ -938,11 +1030,22 @@ def load_all_series() -> tuple[dict[str, list[dict[str, Any]]], dict[str, Series
     usd_jpy = series.get("USDJPY", [])
     usdrub = series.get("USDRUB") or series.get("USDRUB_YAHOO", [])
 
-    rubcny_direct = series.get("RUBCNY_YAHOO", [])
+    rubcny_moex = series.get("RUBCNY_MOEX", [])
+    rubcny_yahoo = series.get("RUBCNY_YAHOO", [])
     rubcny_derived = derived_ratio("RUBCNY", usdcny, usdrub, "USDCNY / USDRUB")
-    if reliable_direct_cross(rubcny_direct, rubcny_derived):
+    if reliable_official_direct_cross(rubcny_moex, rubcny_derived):
+        specs["RUBCNY"] = SeriesSpec(
+            "RUBCNY",
+            "卢布/人民币",
+            "fx",
+            "moex",
+            "CNYRUB_TOM (inverted)",
+            "RUBCNY.csv",
+        )
+        series["RUBCNY"] = rubcny_moex
+    elif reliable_direct_cross(rubcny_yahoo, rubcny_derived):
         specs["RUBCNY"] = SeriesSpec("RUBCNY", "卢布/人民币", "fx", "yahoo", "RUBCNY=X", "RUBCNY.csv")
-        series["RUBCNY"] = rubcny_direct
+        series["RUBCNY"] = rubcny_yahoo
     else:
         specs["RUBCNY"] = SeriesSpec("RUBCNY", "卢布/人民币", "fx", "derived", "USDCNY/USDRUB", "RUBCNY.csv")
         series["RUBCNY"] = rubcny_derived
@@ -1015,6 +1118,22 @@ def reliable_direct_cross(
         return False
     comparison = compare_on_latest_common_date(formula_rows, direct_rows)
     return bool(comparison and abs(comparison["pct_diff"]) <= max_divergence_pct)
+
+
+def reliable_official_direct_cross(
+    direct_rows: list[dict[str, Any]],
+    reference_rows: list[dict[str, Any]],
+    *,
+    min_history_days: int = 30,
+    max_lag_days: int = MOEX_DIRECT_MAX_LAG_DAYS,
+) -> bool:
+    if not enough_recent_history(direct_rows, min_history_days):
+        return False
+    direct_latest = latest_row(direct_rows)
+    reference_latest = latest_row(reference_rows)
+    if not direct_latest or not reference_latest:
+        return False
+    return abs((direct_latest["date"] - reference_latest["date"]).days) <= max_lag_days
 
 
 def at_or_before(rows: list[dict[str, Any]], target: date) -> dict[str, Any] | None:
@@ -2025,7 +2144,7 @@ def build_snapshot(
             "7D/30D 波动率 = 对应窗口相邻交易观测的平均绝对日变化；债券单位 bp/日，股指和汇率单位 %/日。",
             f"三币种资金流向直接调用用户提供代码：{USER_FX_FLOW_CODE}",
             "三币种资金流向以纽约时间为统一日期；16:00前仅当每组三条汇率都有纽约当日数据时显示盘中值，否则停在最近共同收盘日，避免亚洲/欧洲先更新造成跨日期混算。",
-            "derived = 本地公式而非外部供应商：CNY_BASE=1；债券曲线=10Y-2Y；CNYJPY=1/JPYCNY；RUB 交叉汇率仅在 Yahoo 直接报价具备历史深度且与同日公式价偏差不超过2%时优先使用，否则用 USDCNY/USDRUB 或 USDJPY/USDRUB 派生并在 source_audit 里保留比对。",
+            "derived = 本地公式而非外部供应商：CNY_BASE=1；债券曲线=10Y-2Y；CNYJPY=1/JPYCNY；RUB/CNY 优先使用 MOEX CNYRUB_TOM 真实直接成交历史的倒数，Yahoo 仅作交叉核验，MOEX 缺失或陈旧时才用 USDCNY/USDRUB 派生；RUB/JPY 仍要求 Yahoo 直接报价具备历史深度且与同日公式价偏差不超过2%。",
             "美债扩展期限优先使用 WSCN 日线；中国国债使用 ChinaMoney/CFETS 官方收盘收益率曲线并按缺口回填历史，其中中国3M合并 ChinaBond/CCDC 政府债收益率曲线历史；德国2Y/5Y/7Y/10Y/30Y使用 Bundesbank 当前联邦证券官方日频 CSV，德国1Y/3Y使用 Bundesbank 官方 Svensson 期限结构日频 CSV，德国3M/6M暂无稳定官方日频二级市场源，暂用 Trading Economics 最新页；日本1M/3M/6M 使用 Trading Economics 图表历史、Investing.com 历史表并合并 Trading Economics 最新页；日本1Y/2Y/3Y/5Y/7Y/10Y/30Y 使用日本财务省 MOF 官方收益率曲线作为历史底座并合并 Trading Economics 最新页；韩国1M/3M/6M 使用 SMBS KORIBOR 作为短端资金代理而非政府债，韩国3M/6M可由 BOK ECOS 交叉验证，韩国1Y/2Y/3Y/5Y/10Y/30Y 使用 Investing.com 历史表并在有更新日期时合并 Trading Economics 最新页；俄罗斯2Y/10Y 在 Investing.com 被云服务器拦截时保留历史缓存并合并 Trading Economics 最新页。",
             "宏观指标使用 Yahoo Finance 日线：美元指数 DX-Y.NYB、VIX ^VIX、黄金 GC=F、WTI 原油 CL=F。",
             "政策新闻雷达只做加息、降息、维持利率相关文本筛选；抓取或 AI 分类不可用时退回本地规则解析。",
@@ -2308,23 +2427,50 @@ def build_source_audit(series: dict[str, list[dict[str, Any]]], specs: dict[str,
     rubcny_formula = derived_ratio("RUBCNY_AUDIT", series.get("USDCNY", []), usdrub, "USDCNY / USDRUB")
     rubjpy_formula = derived_ratio("RUBJPY_AUDIT", series.get("USDJPY", []), usdrub, "USDJPY / USDRUB")
     formula_checks = [
-        ("RUBCNY", "卢布/人民币", "USDCNY/USDRUB", rubcny_formula, series.get("RUBCNY_YAHOO", [])),
-        ("RUBJPY", "卢布/日元", "USDJPY/USDRUB", rubjpy_formula, series.get("RUBJPY_YAHOO", [])),
+        {
+            "key": "RUBCNY",
+            "label": "卢布/人民币",
+            "formula": "USDCNY/USDRUB",
+            "formula_rows": rubcny_formula,
+            "direct_rows": series.get("RUBCNY_MOEX", []),
+            "direct_source": "moex",
+            "direct_symbol": "CNYRUB_TOM (inverted)",
+            "cross_check_rows": series.get("RUBCNY_YAHOO", []),
+            "cross_check_source": "yahoo",
+            "cross_check_symbol": "RUBCNY=X",
+        },
+        {
+            "key": "RUBJPY",
+            "label": "卢布/日元",
+            "formula": "USDJPY/USDRUB",
+            "formula_rows": rubjpy_formula,
+            "direct_rows": series.get("RUBJPY_YAHOO", []),
+            "direct_source": "yahoo",
+            "direct_symbol": "RUBJPY=X",
+            "cross_check_rows": [],
+            "cross_check_source": "",
+            "cross_check_symbol": "",
+        },
     ]
 
     rows: list[dict[str, Any]] = []
-    for key, label, formula, formula_rows, direct_rows in formula_checks:
-        comparison = compare_on_latest_common_date(formula_rows, direct_rows)
+    for item in formula_checks:
+        comparison = compare_on_latest_common_date(item["formula_rows"], item["direct_rows"])
         rows.append(
             {
-                "key": key,
-                "label": label,
-                "selected_source": specs[key].source,
-                "selected_symbol": specs[key].symbol,
-                "formula": formula,
-                "direct_source": "yahoo",
-                "direct_symbol": f"{key}=X",
+                "key": item["key"],
+                "label": item["label"],
+                "selected_source": specs[item["key"]].source,
+                "selected_symbol": specs[item["key"]].symbol,
+                "formula": item["formula"],
+                "direct_source": item["direct_source"],
+                "direct_symbol": item["direct_symbol"],
                 "comparison": comparison,
+                "cross_check_source": item["cross_check_source"],
+                "cross_check_symbol": item["cross_check_symbol"],
+                "cross_check_comparison": compare_on_latest_common_date(
+                    item["direct_rows"], item["cross_check_rows"]
+                ),
             }
         )
 
