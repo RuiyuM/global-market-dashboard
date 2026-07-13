@@ -9,6 +9,8 @@ import sys
 from datetime import date
 from pathlib import Path
 
+from market_dashboard import WSCN_OHLC_OVERLAY_TARGETS, has_complete_ohlc
+
 
 SNAPSHOT = Path(__file__).resolve().parent / "dashboard" / "latest_market_snapshot.json"
 HTML = Path(__file__).resolve().parent / "dashboard" / "index.html"
@@ -393,6 +395,24 @@ def main() -> int:
     if len(second_order) != SECOND_ORDER_ROWS:
         errors.append(f"second order row count mismatch: {len(second_order)}")
     row_by_key = {row.get("key"): row for row in second_order}
+    fetch_by_key = {
+        row.get("key"): row
+        for row in snapshot.get("fetch_records", [])
+        if isinstance(row, dict) and row.get("key")
+    }
+    for overlay_key, target_key in WSCN_OHLC_OVERLAY_TARGETS.items():
+        fetch_record = fetch_by_key.get(overlay_key, {})
+        if fetch_record.get("status") != "ok" or not fetch_record.get("latest"):
+            continue
+        target_row = row_by_key.get(target_key, {})
+        latest_bar = next(
+            (bar for bar in target_row.get("ohlc", []) if bar.get("date") == fetch_record["latest"]),
+            None,
+        )
+        if latest_bar is None:
+            errors.append(f"{overlay_key} latest OHLC missing from {target_key}: {fetch_record['latest']}")
+        elif not has_complete_ohlc(latest_bar):
+            errors.append(f"{overlay_key} complete OHLC was overwritten by close-only data on {fetch_record['latest']}")
     for key, country in ONE_YEAR_BOND_KEYS.items():
         row = row_by_key.get(key)
         if not row:

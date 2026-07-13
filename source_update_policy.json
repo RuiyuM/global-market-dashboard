@@ -1,5 +1,21 @@
 {
-  "version": 4,
+  "version": 5,
+  "ohlc_overlay_policy": {
+    "merge_rule": "complete OHLC always wins over close-only on the same date",
+    "wscn_daily": {
+      "CN_30Y_WSCN_OHLC": "CN_30Y",
+      "JP_2Y_WSCN_OHLC": "JP_2Y",
+      "JP_3Y_WSCN_OHLC": "JP_3Y",
+      "JP_5Y_WSCN_OHLC": "JP_5Y",
+      "JP_10Y_WSCN_OHLC": "JP_10Y",
+      "JP_30Y_WSCN_OHLC": "JP_30Y",
+      "DE_2Y_WSCN_OHLC": "DE_2Y",
+      "DE_10Y_WSCN_OHLC": "DE_10Y"
+    },
+    "rejected": {
+      "JP_30Y_INVESTING": "fails tenor cross-check against Japan MOF by roughly 33-37bp; never upload as JP_30Y"
+    }
+  },
   "cross_rate_selection": {
     "RUBCNY": {
       "direct": "RUBCNY_MOEX",
@@ -23,6 +39,12 @@
         "JP_1M",
         "JP_3M",
         "JP_6M",
+        "JP_1Y",
+        "JP_2Y",
+        "JP_3Y",
+        "JP_5Y",
+        "JP_7Y",
+        "JP_10Y",
         "KR_1Y",
         "KR_2Y",
         "KR_3Y",
@@ -39,6 +61,12 @@
     "JP_1M": "Trading Economics chart history and latest close",
     "JP_3M": "Trading Economics chart history and latest close",
     "JP_6M": "Trading Economics chart history and latest close",
+    "JP_1Y": "Japan MOF close anchor, cached Investing OHLC, and Trading Economics latest close",
+    "JP_2Y": "WSCN daily OHLC, Japan MOF close anchor, cached Investing gap fill, and Trading Economics latest close",
+    "JP_3Y": "WSCN daily OHLC, Japan MOF close anchor, cached Investing gap fill, and Trading Economics latest close",
+    "JP_5Y": "WSCN daily OHLC, Japan MOF close anchor, cached Investing gap fill, and Trading Economics latest close",
+    "JP_7Y": "Japan MOF close anchor, cached Investing OHLC, and Trading Economics latest close",
+    "JP_10Y": "WSCN daily OHLC, Japan MOF close anchor, cached Investing gap fill, and Trading Economics latest close",
     "KR_1Y": "cached OHLC history and Trading Economics latest close",
     "KR_2Y": "cached OHLC history and Trading Economics latest close",
     "KR_3Y": "cached OHLC history and Trading Economics latest close",
@@ -69,7 +97,15 @@
     "KR_6M"
   ],
   "optional_sources": [
-    "RUBCNY_YAHOO"
+    "RUBCNY_YAHOO",
+    "CN_30Y_WSCN_OHLC",
+    "JP_2Y_WSCN_OHLC",
+    "JP_3Y_WSCN_OHLC",
+    "JP_5Y_WSCN_OHLC",
+    "JP_10Y_WSCN_OHLC",
+    "JP_30Y_WSCN_OHLC",
+    "DE_2Y_WSCN_OHLC",
+    "DE_10Y_WSCN_OHLC"
   ],
   "local_required": [
     "RU_EQUITY"
@@ -78,6 +114,12 @@
     "JP_1M",
     "JP_3M",
     "JP_6M",
+    "JP_1Y",
+    "JP_2Y",
+    "JP_3Y",
+    "JP_5Y",
+    "JP_7Y",
+    "JP_10Y",
     "KR_1Y",
     "KR_2Y",
     "KR_3Y",
@@ -92,6 +134,12 @@
     "JP_1M": "JP1M",
     "JP_3M": "JP3M",
     "JP_6M": "JP6M",
+    "JP_1Y": "JP1Y",
+    "JP_2Y": "JP2Y",
+    "JP_3Y": "JP3Y",
+    "JP_5Y": "JP5Y",
+    "JP_7Y": "JP7Y",
+    "JP_10Y": "JP10Y",
     "KR_1Y": "KR1Y",
     "KR_2Y": "KR2Y",
     "KR_3Y": "KR3Y",

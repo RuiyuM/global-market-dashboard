@@ -113,6 +113,14 @@ WSCN_SPECS = [
     SeriesSpec("CN_5Y", "中国5年国债", "bond", "wscn", "CN5YR.OTC", "CN_5Y.csv", "CN5YR_OTC_1D_ohlc.csv"),
     SeriesSpec("CN_7Y", "中国7年国债", "bond", "wscn", "CN7YR.OTC", "CN_7Y.csv", "CN7YR_OTC_1D_ohlc.csv"),
     SeriesSpec("CN_10Y", "中国10年国债", "bond", "wscn", "CN10YR.OTC", "CN_10Y.csv", "CN10YR_OTC_1D_ohlc.csv"),
+    SeriesSpec("CN_30Y_WSCN_OHLC", "中国30年国债OHLC覆盖", "bond", "wscn-overlay", "CN30YR.OTC", "CN_30Y.csv"),
+    SeriesSpec("JP_2Y_WSCN_OHLC", "日本2年国债OHLC覆盖", "bond", "wscn-overlay", "JP2YR.OTC", "JP_2Y.csv"),
+    SeriesSpec("JP_3Y_WSCN_OHLC", "日本3年国债OHLC覆盖", "bond", "wscn-overlay", "JP3YR.OTC", "JP_3Y.csv"),
+    SeriesSpec("JP_5Y_WSCN_OHLC", "日本5年国债OHLC覆盖", "bond", "wscn-overlay", "JP5YR.OTC", "JP_5Y.csv"),
+    SeriesSpec("JP_10Y_WSCN_OHLC", "日本10年国债OHLC覆盖", "bond", "wscn-overlay", "JP10YR.OTC", "JP_10Y.csv"),
+    SeriesSpec("JP_30Y_WSCN_OHLC", "日本30年国债OHLC覆盖", "bond", "wscn-overlay", "JP30YR.OTC", "JP_30Y.csv"),
+    SeriesSpec("DE_2Y_WSCN_OHLC", "德国2年国债OHLC覆盖", "bond", "wscn-overlay", "DE2YR.OTC", "DE_2Y.csv"),
+    SeriesSpec("DE_10Y_WSCN_OHLC", "德国10年国债OHLC覆盖", "bond", "wscn-overlay", "DE10YR.OTC", "DE_10Y.csv"),
     SeriesSpec("USDCNY", "美元/人民币", "fx", "wscn", "USDCNY.OTC", "USDCNY.csv", "USDCNY_OTC_1D_ohlc.csv"),
     SeriesSpec("JPYCNY", "日元/人民币", "fx", "wscn", "JPYCNY.OTC", "JPYCNY.csv", "JPYCNY_OTC_1D_ohlc.csv"),
     SeriesSpec("USDJPY", "美元/日元", "fx", "wscn", "USDJPY.OTC", "USDJPY.csv", "USDJPY_OTC_1D_ohlc.csv"),
@@ -122,6 +130,22 @@ WSCN_SPECS = [
     SeriesSpec("USDRUB", "美元/卢布", "fx", "wscn", "USDRUB.OTC", "USDRUB.csv", None),
     SeriesSpec("CN_EQUITY", "上证综指", "equity", "wscn", "000001.SS", "CN_EQUITY.csv", "000001_SS_1D_ohlc.csv"),
 ]
+
+
+WSCN_OHLC_OVERLAY_TARGETS = {
+    "CN_30Y_WSCN_OHLC": "CN_30Y",
+    "JP_2Y_WSCN_OHLC": "JP_2Y",
+    "JP_3Y_WSCN_OHLC": "JP_3Y",
+    "JP_5Y_WSCN_OHLC": "JP_5Y",
+    "JP_10Y_WSCN_OHLC": "JP_10Y",
+    "JP_30Y_WSCN_OHLC": "JP_30Y",
+    "DE_2Y_WSCN_OHLC": "DE_2Y",
+    "DE_10Y_WSCN_OHLC": "DE_10Y",
+}
+WSCN_OHLC_TARGET_KEYS = frozenset(WSCN_OHLC_OVERLAY_TARGETS.values())
+WSCN_VISIBLE_OHLC_KEYS = frozenset(
+    spec.key for spec in WSCN_SPECS if spec.asset_class == "bond" and spec.source == "wscn"
+) | WSCN_OHLC_TARGET_KEYS
 
 
 MOEX_SPECS = [
@@ -140,13 +164,13 @@ JAPAN_BOND_SPECS: list[tuple[SeriesSpec, str, str]] = [
     (SeriesSpec("JP_1M", "日本1个月国债", "bond", "investing+tradingeconomics", "JP1MT=XX / GJGB1M", "JP_1M.csv", "JP1M_INVESTING_1D_ohlc.csv"), "investing+tradingeconomics", "1M"),
     (SeriesSpec("JP_3M", "日本3个月国债", "bond", "investing+tradingeconomics", "JP3MT=XX / GJGB3M", "JP_3M.csv", "JP3M_INVESTING_1D_ohlc.csv"), "investing+tradingeconomics", "3M"),
     (SeriesSpec("JP_6M", "日本6个月国债", "bond", "investing+tradingeconomics", "JP6MT=XX / GJGB6M", "JP_6M.csv", "JP6M_INVESTING_1D_ohlc.csv"), "investing+tradingeconomics", "6M"),
-    (SeriesSpec("JP_1Y", "日本1年国债", "bond", "mof+tradingeconomics", "MOF:JGB:1Y / GJGB1Y", "JP_1Y.csv", "JP1YR_MOF_1D_ohlc.csv"), "mof+tradingeconomics", "1Y"),
-    (SeriesSpec("JP_2Y", "日本2年国债", "bond", "mof+tradingeconomics", "MOF:JGB:2Y / GJGB2Y", "JP_2Y.csv", "JP2YR_MOF_1D_ohlc.csv"), "mof+tradingeconomics", "2Y"),
-    (SeriesSpec("JP_3Y", "日本3年国债", "bond", "mof+tradingeconomics", "MOF:JGB:3Y / GJGB3Y", "JP_3Y.csv", "JP3YR_MOF_1D_ohlc.csv"), "mof+tradingeconomics", "3Y"),
-    (SeriesSpec("JP_5Y", "日本5年国债", "bond", "mof+tradingeconomics", "MOF:JGB:5Y / GJGB5Y", "JP_5Y.csv", "JP5YR_MOF_1D_ohlc.csv"), "mof+tradingeconomics", "5Y"),
-    (SeriesSpec("JP_7Y", "日本7年国债", "bond", "mof+tradingeconomics", "MOF:JGB:7Y / GJGB7Y", "JP_7Y.csv", "JP7YR_MOF_1D_ohlc.csv"), "mof+tradingeconomics", "7Y"),
-    (SeriesSpec("JP_10Y", "日本10年国债", "bond", "mof+tradingeconomics", "MOF:JGB:10Y / GJGB10Y", "JP_10Y.csv", "JP10YR_MOF_1D_ohlc.csv"), "mof+tradingeconomics", "10Y"),
-    (SeriesSpec("JP_30Y", "日本30年国债", "bond", "mof+tradingeconomics", "MOF:JGB:30Y / GJGB30Y", "JP_30Y.csv", "JP30YR_MOF_1D_ohlc.csv"), "mof+tradingeconomics", "30Y"),
+    (SeriesSpec("JP_1Y", "日本1年国债", "bond", "mof+tradingeconomics", "MOF:JGB:1Y / GJGB1Y", "JP_1Y.csv", "JP1YR_INVESTING_1D_ohlc.csv"), "mof+tradingeconomics", "1Y"),
+    (SeriesSpec("JP_2Y", "日本2年国债", "bond", "mof+tradingeconomics", "JP2YR.OTC / MOF:JGB:2Y / GJGB2Y", "JP_2Y.csv", "JP2YR_INVESTING_1D_ohlc.csv"), "mof+tradingeconomics", "2Y"),
+    (SeriesSpec("JP_3Y", "日本3年国债", "bond", "mof+tradingeconomics", "JP3YR.OTC / MOF:JGB:3Y / GJGB3Y", "JP_3Y.csv", "JP3YR_INVESTING_1D_ohlc.csv"), "mof+tradingeconomics", "3Y"),
+    (SeriesSpec("JP_5Y", "日本5年国债", "bond", "mof+tradingeconomics", "JP5YR.OTC / MOF:JGB:5Y / GJGB5Y", "JP_5Y.csv", "JP5YR_INVESTING_1D_ohlc.csv"), "mof+tradingeconomics", "5Y"),
+    (SeriesSpec("JP_7Y", "日本7年国债", "bond", "mof+tradingeconomics", "MOF:JGB:7Y / GJGB7Y", "JP_7Y.csv", "JP7YR_INVESTING_1D_ohlc.csv"), "mof+tradingeconomics", "7Y"),
+    (SeriesSpec("JP_10Y", "日本10年国债", "bond", "mof+tradingeconomics", "JP10YR.OTC / MOF:JGB:10Y / GJGB10Y", "JP_10Y.csv", "JP10YR_INVESTING_1D_ohlc.csv"), "mof+tradingeconomics", "10Y"),
+    (SeriesSpec("JP_30Y", "日本30年国债", "bond", "mof+tradingeconomics", "JP30YR.OTC / MOF:JGB:30Y / GJGB30Y", "JP_30Y.csv"), "mof+tradingeconomics", "30Y"),
 ]
 
 
@@ -154,13 +178,13 @@ CHINA_BOND_SPECS: list[tuple[SeriesSpec, str, str]] = [
     (SeriesSpec("CN_1M", "中国1个月国债", "bond", "chinamoney", "CFETS:CYCC000:1M", "CN_1M.csv", "CN1MR_CHINAMONEY_1D_ohlc.csv"), "chinamoney", "1M"),
     (SeriesSpec("CN_3M", "中国3个月国债", "bond", "chinamoney", "CFETS:CYCC000:3M", "CN_3M.csv", "CN3MR_CHINAMONEY_1D_ohlc.csv"), "chinamoney", "3M"),
     (SeriesSpec("CN_6M", "中国6个月国债", "bond", "chinamoney", "CFETS:CYCC000:6M", "CN_6M.csv", "CN6MR_CHINAMONEY_1D_ohlc.csv"), "chinamoney", "6M"),
-    (SeriesSpec("CN_1Y", "中国1年国债", "bond", "chinamoney", "CFETS:CYCC000:1Y", "CN_1Y.csv", "CN1YR_CHINAMONEY_1D_ohlc.csv"), "chinamoney", "1Y"),
-    (SeriesSpec("CN_2Y", "中国2年国债", "bond", "chinamoney", "CFETS:CYCC000:2Y", "CN_2Y.csv", "CN2YR_CHINAMONEY_1D_ohlc.csv"), "chinamoney", "2Y"),
-    (SeriesSpec("CN_3Y", "中国3年国债", "bond", "chinamoney", "CFETS:CYCC000:3Y", "CN_3Y.csv", "CN3YR_CHINAMONEY_1D_ohlc.csv"), "chinamoney", "3Y"),
-    (SeriesSpec("CN_5Y", "中国5年国债", "bond", "chinamoney", "CFETS:CYCC000:5Y", "CN_5Y.csv", "CN5YR_CHINAMONEY_1D_ohlc.csv"), "chinamoney", "5Y"),
-    (SeriesSpec("CN_7Y", "中国7年国债", "bond", "chinamoney", "CFETS:CYCC000:7Y", "CN_7Y.csv", "CN7YR_CHINAMONEY_1D_ohlc.csv"), "chinamoney", "7Y"),
-    (SeriesSpec("CN_10Y", "中国10年国债", "bond", "chinamoney", "CFETS:CYCC000:10Y", "CN_10Y.csv", "CN10YR_CHINAMONEY_1D_ohlc.csv"), "chinamoney", "10Y"),
-    (SeriesSpec("CN_30Y", "中国30年国债", "bond", "chinamoney", "CFETS:CYCC000:30Y", "CN_30Y.csv", "CN30YR_CHINAMONEY_1D_ohlc.csv"), "chinamoney", "30Y"),
+    (SeriesSpec("CN_1Y", "中国1年国债", "bond", "chinamoney", "CN1YR.OTC / CFETS:CYCC000:1Y", "CN_1Y.csv", "CN1YR_CHINAMONEY_1D_ohlc.csv"), "chinamoney", "1Y"),
+    (SeriesSpec("CN_2Y", "中国2年国债", "bond", "chinamoney", "CN2YR.OTC / CFETS:CYCC000:2Y", "CN_2Y.csv", "CN2YR_CHINAMONEY_1D_ohlc.csv"), "chinamoney", "2Y"),
+    (SeriesSpec("CN_3Y", "中国3年国债", "bond", "chinamoney", "CN3YR.OTC / CFETS:CYCC000:3Y", "CN_3Y.csv", "CN3YR_CHINAMONEY_1D_ohlc.csv"), "chinamoney", "3Y"),
+    (SeriesSpec("CN_5Y", "中国5年国债", "bond", "chinamoney", "CN5YR.OTC / CFETS:CYCC000:5Y", "CN_5Y.csv", "CN5YR_CHINAMONEY_1D_ohlc.csv"), "chinamoney", "5Y"),
+    (SeriesSpec("CN_7Y", "中国7年国债", "bond", "chinamoney", "CN7YR.OTC / CFETS:CYCC000:7Y", "CN_7Y.csv", "CN7YR_CHINAMONEY_1D_ohlc.csv"), "chinamoney", "7Y"),
+    (SeriesSpec("CN_10Y", "中国10年国债", "bond", "chinamoney", "CN10YR.OTC / CFETS:CYCC000:10Y", "CN_10Y.csv", "CN10YR_CHINAMONEY_1D_ohlc.csv"), "chinamoney", "10Y"),
+    (SeriesSpec("CN_30Y", "中国30年国债", "bond", "chinamoney", "CN30YR.OTC / CFETS:CYCC000:30Y", "CN_30Y.csv", "CN30YR_CHINAMONEY_1D_ohlc.csv"), "chinamoney", "30Y"),
 ]
 
 
@@ -168,11 +192,11 @@ GERMANY_BOND_SPECS: list[tuple[SeriesSpec, str, str]] = [
     (SeriesSpec("DE_3M", "德国3个月国债", "bond", "tradingeconomics", "DE:TE:3M", "DE_3M.csv"), "tradingeconomics:germany", TRADING_ECONOMICS_COUNTRY_SLUGS["germany"]["3M"]),
     (SeriesSpec("DE_6M", "德国6个月国债", "bond", "tradingeconomics", "DE:TE:6M", "DE_6M.csv"), "tradingeconomics:germany", TRADING_ECONOMICS_COUNTRY_SLUGS["germany"]["6M"]),
     (SeriesSpec("DE_1Y", "德国1年国债", "bond", "bundesbank-term", BUNDESBANK_TERM_STRUCTURE_CODES["1Y"], "DE_1Y.csv"), "bundesbank-term", BUNDESBANK_TERM_STRUCTURE_CODES["1Y"]),
-    (SeriesSpec("DE_2Y", "德国2年国债", "bond", "bundesbank", BUNDESBANK_CODES["2Y"], "DE_2Y.csv"), "bundesbank", BUNDESBANK_CODES["2Y"]),
+    (SeriesSpec("DE_2Y", "德国2年国债", "bond", "bundesbank", f"DE2YR.OTC / {BUNDESBANK_CODES['2Y']}", "DE_2Y.csv"), "bundesbank", BUNDESBANK_CODES["2Y"]),
     (SeriesSpec("DE_3Y", "德国3年国债", "bond", "bundesbank-term", BUNDESBANK_TERM_STRUCTURE_CODES["3Y"], "DE_3Y.csv"), "bundesbank-term", BUNDESBANK_TERM_STRUCTURE_CODES["3Y"]),
     (SeriesSpec("DE_5Y", "德国5年国债", "bond", "bundesbank", BUNDESBANK_CODES["5Y"], "DE_5Y.csv"), "bundesbank", BUNDESBANK_CODES["5Y"]),
     (SeriesSpec("DE_7Y", "德国7年国债", "bond", "bundesbank", BUNDESBANK_CODES["7Y"], "DE_7Y.csv"), "bundesbank", BUNDESBANK_CODES["7Y"]),
-    (SeriesSpec("DE_10Y", "德国10年国债", "bond", "bundesbank", BUNDESBANK_CODES["10Y"], "DE_10Y.csv"), "bundesbank", BUNDESBANK_CODES["10Y"]),
+    (SeriesSpec("DE_10Y", "德国10年国债", "bond", "bundesbank", f"DE10YR.OTC / {BUNDESBANK_CODES['10Y']}", "DE_10Y.csv"), "bundesbank", BUNDESBANK_CODES["10Y"]),
     (SeriesSpec("DE_30Y", "德国30年国债", "bond", "bundesbank", BUNDESBANK_CODES["30Y"], "DE_30Y.csv"), "bundesbank", BUNDESBANK_CODES["30Y"]),
 ]
 
@@ -534,11 +558,24 @@ def row_date_key(row: dict[str, Any]) -> date:
     return datetime.strptime(str(value), "%Y-%m-%d").date()
 
 
+def has_complete_ohlc(row: dict[str, Any]) -> bool:
+    try:
+        values = [float(row[key]) for key in ("open", "high", "low", "close")]
+    except (KeyError, TypeError, ValueError):
+        return False
+    scale = max(1.0, *(abs(value) for value in values))
+    return max(values) - min(values) > scale * 1e-10
+
+
 def merge_ohlc_rows(existing: list[dict[str, Any]], incoming: list[dict[str, Any]]) -> list[dict[str, Any]]:
     merged: dict[date, dict[str, Any]] = {}
     for row in [*existing, *incoming]:
         key = row_date_key(row)
-        merged[key] = {**row, "date": key.isoformat()}
+        candidate = {**row, "date": key.isoformat()}
+        current = merged.get(key)
+        if current is not None and has_complete_ohlc(current) and not has_complete_ohlc(candidate):
+            continue
+        merged[key] = candidate
     return [merged[key] for key in sorted(merged)]
 
 
@@ -650,11 +687,12 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
                 rows = merge_ohlc_rows(read_ohlc(path), rows)
             for row in rows:
                 row["source_symbol"] = series_spec.symbol
-                row["source"] = (
-                    "ChinaBond CCDC government bond yield curve history + ChinaMoney CFETS closing treasury yield curve"
-                    if source_key in CHINA_SHORT_BOND_BACKFILL_TENORS
-                    else "ChinaMoney CFETS closing treasury yield curve"
-                )
+                if series_spec.key in WSCN_VISIBLE_OHLC_KEYS:
+                    row["source"] = "WSCN traded-yield OHLC + ChinaMoney CFETS official close anchor"
+                elif source_key in CHINA_SHORT_BOND_BACKFILL_TENORS:
+                    row["source"] = "ChinaBond CCDC government bond yield curve history + ChinaMoney CFETS closing treasury yield curve"
+                else:
+                    row["source"] = "ChinaMoney CFETS closing treasury yield curve"
             write_ohlc(path, rows)
             source_error = "; ".join(error for error in [chinamoney_error, chinabond_pbc_error] if error)
             record.update({"status": fetch_record_status(rows, source_error), "rows": str(len(rows)), "latest": rows[-1]["date"] if rows else ""})
@@ -693,7 +731,11 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
             for row in rows:
                 row["source_symbol"] = series_spec.symbol
                 if source_kind == "bundesbank":
-                    row["source"] = "Deutsche Bundesbank official daily yield CSV"
+                    row["source"] = (
+                        "WSCN traded-yield OHLC + Deutsche Bundesbank official daily close anchor"
+                        if series_spec.key in WSCN_OHLC_TARGET_KEYS
+                        else "Deutsche Bundesbank official daily yield CSV"
+                    )
                 elif source_kind == "bundesbank-term":
                     row["source"] = "Deutsche Bundesbank official daily term-structure CSV"
                 else:
@@ -788,6 +830,8 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
                 if japan_mof_rows is None:
                     japan_mof_rows = fetch_mof_jgb_rows_by_tenor()
                 rows = list(japan_mof_rows.get(source_key, []))
+                if series_spec.local_file and (LOCAL_DATA / series_spec.local_file).exists():
+                    rows = merge_ohlc_rows(rows, read_ohlc(LOCAL_DATA / series_spec.local_file))
                 if path.exists():
                     rows = merge_ohlc_rows(rows, read_ohlc(path))
                 try:
@@ -837,7 +881,15 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
                 if source_kind == "mof":
                     row["source"] = "Japan MOF official JGB yield curve"
                 elif source_kind == "mof+tradingeconomics":
-                    row["source"] = "Japan MOF official JGB yield curve + Trading Economics latest yield page"
+                    if series_spec.key == "JP_30Y":
+                        row["source"] = "WSCN traded-yield OHLC + Japan MOF official close anchor + Trading Economics latest close"
+                    elif series_spec.key in WSCN_OHLC_TARGET_KEYS:
+                        row["source"] = (
+                            "WSCN traded-yield OHLC + Investing.com gap fill + Japan MOF official close anchor + "
+                            "Trading Economics latest close"
+                        )
+                    else:
+                        row["source"] = "Investing.com traded-yield OHLC + Japan MOF official close anchor + Trading Economics latest close"
                 elif source_kind == "investing+tradingeconomics":
                     row["source"] = "Trading Economics chart history + Investing.com historical table + Trading Economics latest yield page"
                 else:
@@ -1004,7 +1056,7 @@ def load_all_series() -> tuple[dict[str, list[dict[str, Any]]], dict[str, Series
     specs = {
         spec.key: spec
         for spec in [
-            *WSCN_SPECS,
+            *(spec for spec in WSCN_SPECS if spec.key not in WSCN_OHLC_OVERLAY_TARGETS),
             *MOEX_SPECS,
             *YAHOO_SPECS,
             *NIKKEI_SPECS,

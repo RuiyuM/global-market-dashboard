@@ -43,11 +43,11 @@ The jobs are recurring trading-day updates, not weekly backfills. They must not 
 
 | Source | Symbols | Policy |
 |---|---|---|
-| WSCN | U.S. Treasury curve, core China Treasury tenors, core FX, Shanghai Composite | Fetch daily; an empty response never replaces cache. |
+| WSCN | U.S. Treasury curve, core China Treasury tenors, core FX, Shanghai Composite; OHLC overlays for China 30Y, Japan 2Y/3Y/5Y/10Y/30Y, and Germany 2Y/10Y | Fetch daily; an empty response never replaces cache. A complete OHLC bar always wins over a same-date close-only observation. |
 | Moscow Exchange ISS | `CNYRUB_TOM` official traded daily candles, inverted to `RUB/CNY` | Primary direct `RUB/CNY` history. Paginated back to 2019 and refreshed daily on the server. |
 | ChinaMoney / ChinaBond CCDC | China 1M through 30Y curve | Official daily source and historical backfill. |
 | Nikkei | `JP_EQUITY` | Preferred official Nikkei 225 daily CSV. |
-| Japan MOF | Japan 1Y through 30Y | Official historical anchor. |
+| Japan MOF | Japan 1Y through 30Y | Official close-only historical anchor. WSCN supplies daily OHLC where configured; local Investing supplies weekly gap fills except Japan 30Y. |
 | Trading Economics | Japan short-bill chart history/latest; Japan, Korea, Russia latest yield closes; Germany 3M/6M latest | Server-safe fallback. Close-only rows are explicit. |
 | Bundesbank | Germany 1Y through 30Y except 3M/6M | Official history. |
 | SMBS KORIBOR | Korea 1M/3M/6M | Money-market proxy, not a Korean government-bond yield. |
@@ -57,17 +57,20 @@ The jobs are recurring trading-day updates, not weekly backfills. They must not 
 
 ### Known Tencent Cloud Block
 
-Investing.com returned `HTTP 403` for all 12 configured requests in the verified 2026-07-11 server run. This is not a `404` and is not retried from the server timer.
+Investing.com returns `HTTP 403` from Tencent Cloud. This is not a `404` and is not retried from the server timer.
 
 The server runs with `MARKET_SKIP_INVESTING=1` and records these rows as `degraded`, never as `ok`:
 
 ```text
 JP_1M JP_3M JP_6M
+JP_1Y JP_2Y JP_3Y JP_5Y JP_7Y JP_10Y
 KR_1Y KR_2Y KR_3Y KR_5Y KR_10Y KR_30Y
 RU_2Y RU_10Y RU_EQUITY
 ```
 
-Japan 1M/3M/6M still receive Trading Economics chart history and latest data. Korea and Russia bonds retain their cached OHLC history and receive a Trading Economics latest close. `RU_EQUITY` has no confirmed server-safe replacement and is the only fixed local-required series.
+Japan 2Y/3Y/5Y/10Y receive daily WSCN OHLC and Japan 30Y receives WSCN OHLC without an Investing fill. Japan 1Y/7Y retain MOF close anchors and cached local Investing OHLC. Japan 1M/3M/6M still receive Trading Economics chart history and latest data. Korea and Russia bonds retain their cached OHLC history and receive a Trading Economics latest close. `RU_EQUITY` has no confirmed server-safe replacement and is the only fixed local-required series.
+
+Do not use the configured Investing `JP30Y` response as Japan 30Y. Cross-checking showed it roughly 33-37bp below the same-date Japan MOF 30Y curve while WSCN stayed within roughly 5-8bp; the Investing mapping is therefore rejected for production.
 
 ### Local Fallback
 
@@ -76,7 +79,7 @@ Japan 1M/3M/6M still receive Trading Economics chart history and latest data. Ko
 - Refresh every Yahoo symbol whose server fetch record is `error`, `empty`, or unexpectedly degraded.
 - Refresh SMBS KORIBOR 1M/3M/6M locally only when the server records an actual timeout, error, or empty response.
 - Refresh `RU_EQUITY` from Investing.com on each local production run.
-- With `--weekly`, refresh the public Investing OHLC list in `local_weekly_ohlc` from the policy file.
+- With `--weekly`, refresh the public Investing OHLC list in `local_weekly_ohlc` from the policy file. This includes Japan 1Y/7Y and gap fills for Japan 2Y/3Y/5Y/10Y, but explicitly excludes Japan 30Y.
 - Upload only files produced successfully in that run.
 
 An empty response, exception, or incoming dataset older than the local cache is rejected. A required local failure stops the run before deployment.

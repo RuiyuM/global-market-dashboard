@@ -21,6 +21,26 @@ def test_fetch_record_status_distinguishes_degraded_from_success() -> None:
     assert market_dashboard.fetch_record_status([]) == "empty"
 
 
+def test_merge_ohlc_rows_never_replaces_complete_bar_with_close_only() -> None:
+    complete = {
+        "date": "2026-07-13",
+        "open": 2.737,
+        "high": 2.802,
+        "low": 2.733,
+        "close": 2.780,
+    }
+    close_only = {
+        "date": "2026-07-13",
+        "open": 2.790,
+        "high": 2.790,
+        "low": 2.790,
+        "close": 2.790,
+    }
+
+    assert market_dashboard.merge_ohlc_rows([complete], [close_only]) == [complete]
+    assert market_dashboard.merge_ohlc_rows([close_only], [complete]) == [complete]
+
+
 def test_empty_wscn_response_does_not_overwrite_cache(tmp_path, monkeypatch) -> None:
     spec = market_dashboard.SeriesSpec("TEST", "Test", "bond", "wscn", "TEST.OTC", "TEST.csv")
     monkeypatch.setattr(market_dashboard, "DASHBOARD_DATA", tmp_path)
@@ -277,3 +297,7 @@ def test_source_policy_keys_match_dashboard_and_investing_specs() -> None:
         policy["investing_symbol_map"][key]
         for key in mapped
     } <= set(production_update.INVESTING_BOND_SPECS)
+    assert "JP_30Y" not in weekly
+    assert "JP_30Y" not in mapped
+    assert "JP_30Y_INVESTING" in policy["ohlc_overlay_policy"]["rejected"]
+    assert policy["ohlc_overlay_policy"]["wscn_daily"] == market_dashboard.WSCN_OHLC_OVERLAY_TARGETS
