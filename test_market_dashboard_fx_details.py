@@ -88,6 +88,61 @@ def test_build_flow_sections_weekend_daily_periods_use_prior_trading_days() -> N
     assert "2026-06-29" not in periods["当日"]["date_range"]
 
 
+def test_build_flow_sections_can_include_same_date_intraday_quotes() -> None:
+    ny = ZoneInfo("America/New_York")
+    rows_by_key = {
+        "USDCNY": [row(26, 7.0), row(29, 7.1)],
+        "JPYCNY": [row(26, 0.050), row(29, 0.051)],
+        "USDJPY": [row(26, 140.0), row(29, 141.0)],
+    }
+
+    sections = build_flow_sections(
+        rows_by_key,
+        include_intraday=True,
+        now=datetime(2026, 6, 29, 10, 0, tzinfo=ny),
+    )
+    periods = {item["period"]: item for item in sections[0]["periods"]}
+
+    assert periods["当日"]["date_range"] == "2026-06-26 → 2026-06-29"
+    assert periods["当日"]["is_intraday"] is True
+    assert periods["上日"]["date_range"] == ""
+    assert periods["当周"]["is_intraday"] is True
+
+
+def test_build_flow_sections_intraday_requires_all_three_same_date_quotes() -> None:
+    ny = ZoneInfo("America/New_York")
+    sections = build_flow_sections(
+        {
+            "USDCNY": [row(25, 6.9), row(26, 7.0), row(29, 7.1)],
+            "JPYCNY": [row(25, 0.049), row(26, 0.050), row(29, 0.051)],
+            "USDJPY": [row(25, 139.0), row(26, 140.0)],
+        },
+        include_intraday=True,
+        now=datetime(2026, 6, 29, 10, 0, tzinfo=ny),
+    )
+    periods = {item["period"]: item for item in sections[0]["periods"]}
+
+    assert periods["当日"]["date_range"] == "2026-06-25 → 2026-06-26"
+    assert periods["当日"]["is_intraday"] is False
+
+
+def test_build_flow_sections_does_not_mark_closed_session_as_intraday() -> None:
+    ny = ZoneInfo("America/New_York")
+    sections = build_flow_sections(
+        {
+            "USDCNY": [row(26, 7.0), row(29, 7.1)],
+            "JPYCNY": [row(26, 0.050), row(29, 0.051)],
+            "USDJPY": [row(26, 140.0), row(29, 141.0)],
+        },
+        include_intraday=True,
+        now=datetime(2026, 6, 29, 16, 1, tzinfo=ny),
+    )
+    periods = {item["period"]: item for item in sections[0]["periods"]}
+
+    assert periods["当日"]["date_range"] == "2026-06-26 → 2026-06-29"
+    assert periods["当日"]["is_intraday"] is False
+
+
 def test_build_flow_sections_uses_us_calendar_week_windows() -> None:
     rows_by_key = {
         "USDCNY": [

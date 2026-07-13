@@ -1847,7 +1847,15 @@ def short_date_range_label(value: str) -> str:
     return re.sub(r"\b(\d{2}-\d{2})…(\d{2}-\d{2})\b", compact_multi_date, shortened)
 
 
-def build_flow_sections(series: dict[str, list[dict[str, Any]]], *, us_close_date: date | None = None) -> list[dict[str, Any]]:
+def build_flow_sections(
+    series: dict[str, list[dict[str, Any]]],
+    *,
+    us_close_date: date | None = None,
+    include_intraday: bool = False,
+    now: datetime | None = None,
+) -> list[dict[str, Any]]:
+    if now is not None and (now.tzinfo is None or now.utcoffset() is None):
+        raise ValueError("now must be timezone-aware")
     triads = [
         {"name": "中日美", "pairs": [("USDCNY", "美中"), ("JPYCNY", "日中"), ("USDJPY", "美日")]},
         {"name": "中德美", "pairs": [("USDCNY", "美中"), ("EURCNY", "德中"), ("EURUSD", "德美")]},
@@ -1862,16 +1870,27 @@ def build_flow_sections(series: dict[str, list[dict[str, Any]]], *, us_close_dat
         {"label": "上月", "kind": "month", "days": None, "offset_months": 1},
     ]
     sections = []
-    end_cap = us_close_date or us_close_effective_date()
+    closed_end_cap = us_close_date or us_close_effective_date(now)
+    now_et = now.astimezone(ZoneInfo("America/New_York")) if now else datetime.now(ZoneInfo("America/New_York"))
+    intraday_cap = now_et.date()
     for triad in triads:
         period_rows = []
         triad_keys = [key for key, _ in triad["pairs"]]
-        common_dates = common_series_dates(series, triad_keys, end_cap)
+        common_dates = common_series_dates(series, triad_keys, closed_end_cap)
+        anchor = closed_end_cap
+        intraday_date = None
+        if include_intraday and intraday_cap.weekday() < 5:
+            available_common_dates = common_series_dates(series, triad_keys, intraday_cap)
+            if available_common_dates and available_common_dates[-1] > closed_end_cap:
+                common_dates = available_common_dates
+                anchor = available_common_dates[-1]
+                intraday_date = anchor
         for period in periods:
-            period_dates = flow_period_common_dates(common_dates, period, end_cap)
+            period_dates = flow_period_common_dates(common_dates, period, anchor)
             changes = []
             missing = []
             date_range = str(period_dates["date_range"]) if period_dates else ""
+            is_intraday = bool(period_dates and intraday_date and period_dates["end_date"] == intraday_date)
             if period_dates:
                 base_date = period_dates["base_date"]
                 end_date = period_dates["end_date"]
@@ -1895,11 +1914,41 @@ def build_flow_sections(series: dict[str, list[dict[str, Any]]], *, us_close_dat
             if len(changes) == 3:
                 try:
                     result = analyze_fx_logic_with_user_code(changes)
-                    period_rows.append({"period": period["label"], "date_range": date_range or calc_date_range, "calc_date_range": calc_date_range, "changes": changes, "result": result, "missing": []})
+                    period_rows.append(
+                        {
+                            "period": period["label"],
+                            "date_range": date_range or calc_date_range,
+                            "calc_date_range": calc_date_range,
+                            "changes": changes,
+                            "result": result,
+                            "missing": [],
+                            "is_intraday": is_intraday,
+                        }
+                    )
                 except Exception as exc:
-                    period_rows.append({"period": period["label"], "date_range": date_range or calc_date_range, "calc_date_range": calc_date_range, "changes": changes, "result": None, "missing": [str(exc)]})
+                    period_rows.append(
+                        {
+                            "period": period["label"],
+                            "date_range": date_range or calc_date_range,
+                            "calc_date_range": calc_date_range,
+                            "changes": changes,
+                            "result": None,
+                            "missing": [str(exc)],
+                            "is_intraday": is_intraday,
+                        }
+                    )
             else:
-                period_rows.append({"period": period["label"], "date_range": date_range or calc_date_range, "calc_date_range": calc_date_range, "changes": changes, "result": None, "missing": missing})
+                period_rows.append(
+                    {
+                        "period": period["label"],
+                        "date_range": date_range or calc_date_range,
+                        "calc_date_range": calc_date_range,
+                        "changes": changes,
+                        "result": None,
+                        "missing": missing,
+                        "is_intraday": is_intraday,
+                    }
+                )
         sections.append({"name": triad["name"], "periods": period_rows})
     return sections
 
@@ -1951,7 +2000,7 @@ def build_snapshot(
         "volatility_rankings": volatility_rankings(countries),
         "fx_rank_details": build_fx_cross_details(series),
         "second_order_monitor": build_second_order_monitor(series, specs),
-        "fx_flows": build_flow_sections(series),
+        "fx_flows": build_flow_sections(series, include_intraday=True),
         "hike_cycle_example": build_hike_cycle_example(series),
         "series_status": build_series_status(series, specs),
         "source_audit": build_source_audit(series, specs),
@@ -1961,7 +2010,7 @@ def build_snapshot(
             "一阶速度 = 当前窗口变化 / 实际间隔天数；二阶加速度 = 当前一阶速度相对上一段同长度窗口的速度变化 / 平均间隔天数。",
             "7D/30D 波动率 = 对应窗口相邻交易观测的平均绝对日变化；债券单位 bp/日，股指和汇率单位 %/日。",
             f"三币种资金流向直接调用用户提供代码：{USER_FX_FLOW_CODE}",
-            "三币种资金流向按纽约时间16:00收盘口径截齐；每组三条汇率只在共同交易日上计算，避免亚洲/欧洲先更新造成跨日期混算。",
+            "三币种资金流向以纽约时间为统一日期；16:00前仅当每组三条汇率都有纽约当日数据时显示盘中值，否则停在最近共同收盘日，避免亚洲/欧洲先更新造成跨日期混算。",
             "derived = 本地公式而非外部供应商：CNY_BASE=1；债券曲线=10Y-2Y；CNYJPY=1/JPYCNY；RUB 交叉汇率优先使用具备历史深度的 Yahoo 直接报价，历史不足才用 USDCNY/USDRUB 或 USDJPY/USDRUB 派生并在 source_audit 里比对最新直接报价。",
             "美债扩展期限优先使用 WSCN 日线；中国国债使用 ChinaMoney/CFETS 官方收盘收益率曲线并按缺口回填历史，其中中国3M合并 ChinaBond/CCDC 政府债收益率曲线历史；德国2Y/5Y/7Y/10Y/30Y使用 Bundesbank 当前联邦证券官方日频 CSV，德国1Y/3Y使用 Bundesbank 官方 Svensson 期限结构日频 CSV，德国3M/6M暂无稳定官方日频二级市场源，暂用 Trading Economics 最新页；日本1M/3M/6M 使用 Trading Economics 图表历史、Investing.com 历史表并合并 Trading Economics 最新页；日本1Y/2Y/3Y/5Y/7Y/10Y/30Y 使用日本财务省 MOF 官方收益率曲线作为历史底座并合并 Trading Economics 最新页；韩国1M/3M/6M 使用 SMBS KORIBOR 作为短端资金代理而非政府债，韩国3M/6M可由 BOK ECOS 交叉验证，韩国1Y/2Y/3Y/5Y/10Y/30Y 使用 Investing.com 历史表并在有更新日期时合并 Trading Economics 最新页；俄罗斯2Y/10Y 在 Investing.com 被云服务器拦截时保留历史缓存并合并 Trading Economics 最新页。",
             "宏观指标使用 Yahoo Finance 日线：美元指数 DX-Y.NYB、VIX ^VIX、黄金 GC=F、WTI 原油 CL=F。",
@@ -3485,7 +3534,8 @@ def render_html(snapshot: dict[str, Any]) -> str:
             html.append('<div class="flow-row">')
             date_range = period.get("date_range") or ""
             date_html = f'<small>{escape(short_date_range_label(str(date_range)))}</small>' if date_range else ""
-            html.append(f'<div class="period"><strong>{escape(period["period"])}</strong>{date_html}</div>')
+            live_html = '<span class="flow-live-tag">盘中</span>' if period.get("is_intraday") else ""
+            html.append(f'<div class="period"><strong>{escape(period["period"])}{live_html}</strong>{date_html}</div>')
             result = period["result"]
             if result and result["best_route"]:
                 best = result["best_route"]
@@ -3976,6 +4026,7 @@ th:first-child, td:first-child { text-align: left; }
 .period { color: var(--blue); font-weight: 700; min-width: 0; }
 .period strong { display: block; font-size: 14px; line-height: 1.25; }
 .period small { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; line-height: 1.25; font-weight: 650; overflow-wrap: anywhere; }
+.flow-live-tag { display: inline-block; margin-left: 5px; padding: 1px 5px; border-radius: 999px; color: #075e3f; background: #dcfce7; font-size: 9px; line-height: 1.35; vertical-align: 1px; }
 .flow-cell { min-width: 0; }
 .flow-expand {
   display: inline-flex;
