@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "cross_rate_selection": {
     "RUBCNY": {
       "direct": "RUBCNY_YAHOO",
@@ -61,6 +61,11 @@
     "VIX",
     "GOLD",
     "USOIL"
+  ],
+  "smbs_patch_on_failure": [
+    "KR_1M",
+    "KR_3M",
+    "KR_6M"
   ],
   "local_required": [
     "RU_EQUITY"

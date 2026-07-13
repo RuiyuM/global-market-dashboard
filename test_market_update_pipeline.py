@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
 
 import audit_market_sources
@@ -148,6 +148,67 @@ def test_current_local_patch_remediates_yahoo_server_failure() -> None:
     assert report["local_patch_candidates"] == []
 
 
+def test_source_audit_routes_smbs_timeout_to_local_patch() -> None:
+    snapshot = {
+        "generated_at": "2026-07-13T10:00:00-04:00",
+        "last_fetch_at": "2026-07-13T09:59:00-04:00",
+        "fetch_mode": "network",
+        "fetch_records": [
+            {"key": "KR_1M", "status": "error", "latest": "", "error": "timed out"},
+        ],
+    }
+    policy = {
+        "server_blocked": {},
+        "yahoo_patch_on_failure": [],
+        "smbs_patch_on_failure": ["KR_1M"],
+        "local_required": [],
+    }
+
+    report = audit_market_sources.audit_sources(
+        snapshot,
+        policy,
+        now=datetime(2026, 7, 13, 14, 1, tzinfo=timezone.utc),
+    )
+
+    assert report["ok"] is False
+    assert report["server_ok"] is True
+    assert report["local_patch_candidates"] == ["KR_1M"]
+
+
+def test_patch_smbs_koribor_writes_only_requested_public_series(tmp_path, monkeypatch) -> None:
+    dashboard_data = tmp_path / "dashboard" / "data"
+    monkeypatch.setattr(production_update, "ROOT", tmp_path)
+    monkeypatch.setattr(production_update, "DASHBOARD_DATA", dashboard_data)
+    monkeypatch.setattr(
+        production_update,
+        "fetch_smbs_koribor_rows_by_tenor",
+        lambda *_args: {
+            "1M": [
+                {
+                    "date": "2026-07-13",
+                    "open": 2.68,
+                    "high": 2.68,
+                    "low": 2.68,
+                    "close": 2.68,
+                }
+            ]
+        },
+    )
+
+    patched, failures = production_update.patch_smbs_koribor(
+        ["KR_1M"],
+        date(2026, 7, 1),
+        date(2026, 7, 13),
+    )
+
+    assert failures == []
+    assert patched[0]["key"] == "KR_1M"
+    assert patched[0]["files"] == ["dashboard/data/KR_1M.csv"]
+    rows = market_dashboard.read_ohlc(dashboard_data / "KR_1M.csv")
+    assert rows[-1]["date"] == date(2026, 7, 13)
+    assert rows[-1]["close"] == 2.68
+
+
 def test_upload_allowlist_rejects_private_or_unrelated_files() -> None:
     assert production_update.validate_public_upload_paths(
         ["dashboard/data/US_EQUITY.csv", "data/RU_EQUITY_INVESTING_1D_ohlc.csv", "dashboard/local_patch_report.json"]
@@ -178,6 +239,7 @@ def test_source_policy_keys_match_dashboard_and_investing_specs() -> None:
     assert required <= weekly <= blocked
     assert weekly <= mapped <= dashboard_keys
     assert set(policy["yahoo_patch_on_failure"]) <= dashboard_keys
+    assert set(policy["smbs_patch_on_failure"]) <= dashboard_keys
     assert {
         policy["investing_symbol_map"][key]
         for key in mapped

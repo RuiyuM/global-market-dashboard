@@ -33,9 +33,11 @@ from market_dashboard import (
     WSCN_SPECS,
     YAHOO_SPECS,
     SeriesSpec,
+    fetch_smbs_koribor_rows_by_tenor,
     fetch_yahoo_ohlc,
     merge_ohlc_rows,
     read_ohlc,
+    row_date_key,
     write_ohlc,
 )
 
@@ -168,6 +170,55 @@ def patch_yahoo(keys: Iterable[str], start: date, end: date) -> tuple[list[dict[
             }
         )
         print(f"PATCH Yahoo {key} {rows[0]['date']} -> {rows[-1]['date']} ({len(rows)} rows)")
+    return patched, failures
+
+
+def patch_smbs_koribor(keys: Iterable[str], start: date, end: date) -> tuple[list[dict[str, Any]], list[str]]:
+    requested = sorted(set(keys))
+    if not requested:
+        return [], []
+    specs = {
+        spec.key: (spec, source_key)
+        for spec, source_kind, source_key in KOREA_BOND_SPECS
+        if source_kind == "smbs-koribor"
+    }
+    unsupported = [key for key in requested if key not in specs]
+    failures = [f"{key}: not an SMBS KORIBOR series" for key in unsupported]
+    supported = [key for key in requested if key in specs]
+    if not supported:
+        return [], failures
+    try:
+        rows_by_tenor = fetch_smbs_koribor_rows_by_tenor(start, end)
+    except Exception as exc:
+        failures.extend(f"{key}: {type(exc).__name__}: {exc}" for key in supported)
+        return [], failures
+
+    patched: list[dict[str, Any]] = []
+    for key in supported:
+        spec, tenor = specs[key]
+        incoming = rows_by_tenor.get(tenor, [])
+        if not incoming:
+            failures.append(f"{key}: empty SMBS KORIBOR response")
+            continue
+        for row in incoming:
+            row["source_symbol"] = spec.symbol
+            row["source"] = "SMBS KORIBOR money-market fixing; local public-data patch"
+        path = DASHBOARD_DATA / spec.cache_file
+        existing = read_ohlc(path) if path.exists() else []
+        if existing and row_date_key(incoming[-1]) < row_date_key(existing[-1]):
+            failures.append(f"{key}: incoming SMBS data is older than local cache")
+            continue
+        merged = merge_ohlc_rows(existing, incoming)
+        write_ohlc(path, merged)
+        patched.append(
+            {
+                "key": key,
+                "latest": str(merged[-1]["date"]),
+                "rows": len(incoming),
+                "files": [str(path.relative_to(ROOT))],
+            }
+        )
+        print(f"PATCH SMBS {key} {incoming[0]['date']} -> {incoming[-1]['date']} ({len(incoming)} rows)")
     return patched, failures
 
 
@@ -343,6 +394,7 @@ def main() -> int:
             return 1
 
         yahoo_keys = set(source_report["local_patch_candidates"]) & set(policy.get("yahoo_patch_on_failure", []))
+        smbs_keys = set(source_report["local_patch_candidates"]) & set(policy.get("smbs_patch_on_failure", []))
         investing_keys: set[str] = set()
         if not args.skip_required_local:
             investing_keys.update(policy.get("local_required", []))
@@ -352,18 +404,20 @@ def main() -> int:
         end = date.today()
         start = end - timedelta(days=args.lookback_days)
         yahoo_patched, yahoo_failures = patch_yahoo(yahoo_keys, start, end)
+        smbs_patched, smbs_failures = patch_smbs_koribor(smbs_keys, start, end)
         investing_patched, investing_failures = patch_investing(investing_keys, policy, start, end)
-        patched = [*yahoo_patched, *investing_patched]
-        failures = [*yahoo_failures, *investing_failures]
+        patched = [*yahoo_patched, *smbs_patched, *investing_patched]
+        failures = [*yahoo_failures, *smbs_failures, *investing_failures]
         for failure in failures:
             print("PATCH ERROR", failure)
 
         required_failures = set(policy.get("local_required", [])) & investing_keys - {item["key"] for item in investing_patched}
         unresolved_yahoo = yahoo_keys - {item["key"] for item in yahoo_patched}
-        if required_failures or unresolved_yahoo:
+        unresolved_smbs = smbs_keys - {item["key"] for item in smbs_patched}
+        if required_failures or unresolved_yahoo or unresolved_smbs:
             print(
                 "ERROR unresolved local patches:",
-                " ".join(sorted(required_failures | unresolved_yahoo)),
+                " ".join(sorted(required_failures | unresolved_yahoo | unresolved_smbs)),
                 file=sys.stderr,
             )
             return 1

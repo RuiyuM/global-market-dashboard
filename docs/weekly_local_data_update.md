@@ -62,6 +62,7 @@ Japan 1M/3M/6M still receive Trading Economics chart history and latest data. Ko
 `production_update.py` performs only these local actions:
 
 - Refresh every Yahoo symbol whose server fetch record is `error`, `empty`, or unexpectedly degraded.
+- Refresh SMBS KORIBOR 1M/3M/6M locally only when the server records an actual timeout, error, or empty response.
 - Refresh `RU_EQUITY` from Investing.com on each local production run.
 - With `--weekly`, refresh the public Investing OHLC list in `local_weekly_ohlc` from the policy file.
 - Upload only files produced successfully in that run.

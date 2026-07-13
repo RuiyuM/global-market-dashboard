@@ -46,6 +46,7 @@ def audit_sources(snapshot: dict[str, Any], policy: dict[str, Any], now: datetim
         for key in source.get("keys", [])
     }
     yahoo_keys = set(policy.get("yahoo_patch_on_failure", []))
+    recoverable_local_keys = yahoo_keys | set(policy.get("smbs_patch_on_failure", []))
     errors: list[str] = []
     blocking_errors: list[str] = []
     local_fallback_errors: list[str] = []
@@ -85,22 +86,22 @@ def audit_sources(snapshot: dict[str, Any], policy: dict[str, Any], now: datetim
             else:
                 message = f"{key}: status={status or 'missing'} {error}".strip()
                 errors.append(message)
-                if key in yahoo_keys:
+                if key in recoverable_local_keys:
                     local_fallback_errors.append(message)
                 else:
                     blocking_errors.append(message)
-            if key in yahoo_keys and (not patch_is_current or key not in patched_keys):
+            if key in recoverable_local_keys and (not patch_is_current or key not in patched_keys):
                 local_patch.add(key)
         elif status == "degraded":
             if key in expected_degraded:
                 warnings.append(f"{key}: expected server degradation; fallback/cache active")
             else:
                 warnings.append(f"{key}: degraded source {error}".strip())
-            if key in yahoo_keys and (not patch_is_current or key not in patched_keys):
+            if key in recoverable_local_keys and (not patch_is_current or key not in patched_keys):
                 local_patch.add(key)
         elif error:
             warnings.append(f"{key}: status={status} with source error {error}".strip())
-            if key in yahoo_keys and (not patch_is_current or key not in patched_keys):
+            if key in recoverable_local_keys and (not patch_is_current or key not in patched_keys):
                 local_patch.add(key)
 
     for key in yahoo_keys:
@@ -109,6 +110,16 @@ def audit_sources(snapshot: dict[str, Any], policy: dict[str, Any], now: datetim
                 warnings.append(f"{key}: missing Yahoo fetch record remediated by local public-data patch")
             else:
                 message = f"{key}: missing Yahoo fetch record"
+                errors.append(message)
+                local_fallback_errors.append(message)
+                local_patch.add(key)
+
+    for key in set(policy.get("smbs_patch_on_failure", [])):
+        if key not in by_key:
+            if patch_is_current and key in patched_keys:
+                warnings.append(f"{key}: missing SMBS fetch record remediated by local public-data patch")
+            else:
+                message = f"{key}: missing SMBS fetch record"
                 errors.append(message)
                 local_fallback_errors.append(message)
                 local_patch.add(key)
@@ -143,7 +154,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--allow-local-fallback",
         action="store_true",
-        help="Exit successfully when every error is an allowlisted Yahoo local-fallback candidate.",
+        help="Exit successfully when every error is an allowlisted local-fallback candidate.",
     )
     return parser.parse_args()
 
