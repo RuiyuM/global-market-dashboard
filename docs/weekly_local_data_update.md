@@ -26,6 +26,17 @@ python production_update.py --audit-only
 
 The server-only daily timer remains useful when the Mac is offline. It updates every source reachable from Tencent Cloud, updates the sanitized quant curves, validates the rendered site, and performs a source audit.
 
+## Codex Scheduled Windows
+
+Both recurring jobs use the `America/Chicago` timezone and run Monday through Friday. They invoke the same canonical local command, `python production_update.py`, so source routing, privacy controls, local public-data fallbacks, validation, and auditing remain identical.
+
+| Dallas time | Purpose | Required result checks |
+|---|---|---|
+| 06:00 | Asia-close refresh | Report China, Japan, and Korea equity latest dates; core FX latest dates; and the three tri-currency flow summaries. Before New York 16:00, a flow may be marked intraday only when all three legs share the same New York date. |
+| 15:30 | U.S.-close refresh | Report the latest U.S. market date and the tri-currency daily summaries. At or after New York 16:00, the current common date is treated as a completed daily observation rather than intraday. |
+
+The jobs are recurring trading-day updates, not weekly backfills. They must not run `git pull`, use `--weekly`, upload an entire cache directory, or weaken validation. On a market holiday, retaining the most recent common trading date is correct and must be stated in the result rather than relabeled as current.
+
 ## Source Split
 
 ### Server Daily
@@ -83,7 +94,7 @@ An empty response, exception, or incoming dataset older than the local cache is 
 ## Failure Rules
 
 - `update_market_dashboard.sh` is the single server entry point. It runs quant refresh, market fetch/render, dashboard validation, and source audit.
-- Dashboard validation and unhandled source-audit failures must make systemd fail. Allowlisted Yahoo failures are reported as `SOURCE AUDIT FALLBACK` and keep the service successful while the validated cache remains fresh; the local orchestrator still patches those symbols.
+- Dashboard validation and unhandled source-audit failures must make systemd fail. Allowlisted Yahoo or SMBS KORIBOR failures are reported as `SOURCE AUDIT FALLBACK` and keep the service successful while the validated cache remains fresh; the local orchestrator still patches those symbols.
 - Runtime files must stay writable by `globaldash`. Never run `chown -R root:root dashboard data`.
 - A no-fetch render must retain `fetch_records` and `last_fetch_at`; otherwise the original 403/429 evidence is lost.
 - Expected Investing degradation may warn but does not fail while its fallback/cache remains usable.
