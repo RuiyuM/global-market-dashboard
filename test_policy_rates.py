@@ -117,17 +117,21 @@ def test_parse_russia_key_rate_rows_from_official_snippet() -> None:
 
 def test_parse_korea_base_rate_chart_rows_from_official_page() -> None:
     html = (
-        'var chartObj2_s = [["2024/10/11", 3.25],["2024/11/28", 3.00],'
-        '["2025/02/25", 2.75],["2025/05/29", 2.50],["2026/06/26", 2.50]];'
+        'var chartObj2_s = [["2024/10/11 ", 3.25],["2024/11/28 ", 3.00],'
+        '["2025/02/25 ", 2.75],["2025/05/29 ", 2.50],["2026/07/16 10", 2.75],'
+        '["2026/07/16", 2.75]];'
     )
     points = parse_korea_base_rate_points(html)
     assert [(point.date.isoformat(), point.display_rate) for point in points[-4:]] == [
         ("2024-11-28", "3.00%"),
         ("2025-02-25", "2.75%"),
         ("2025-05-29", "2.50%"),
-        ("2026-06-26", "2.50%"),
+        ("2026-07-16", "2.75%"),
     ]
-    assert actions_from_rate_points(points, policy_tool="Bank of Korea Base Rate")[0]["date"] == "2025-05-29"
+    latest_action = actions_from_rate_points(points, policy_tool="Bank of Korea Base Rate")[0]
+    assert latest_action["date"] == "2026-07-16"
+    assert latest_action["type"] == "加息"
+    assert latest_action["change_bp"] == 25
 
 
 def test_parse_korea_drops_stale_history_before_large_gap() -> None:

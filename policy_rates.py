@@ -360,7 +360,7 @@ def parse_korea_base_rate_points(html: str) -> list[PolicyRatePoint]:
     chart_match = re.search(r"chartObj2_s\s*=\s*(\[[\s\S]*?\])\s*;", html)
     if chart_match:
         for year_text, month_text, day_text, rate_text in re.findall(
-            r'\[\s*"(\d{4})/(\d{1,2})/(\d{1,2})"\s*,\s*(-?\d+(?:\.\d+)?)\s*\]',
+            r'\[\s*"(\d{4})/(\d{1,2})/(\d{1,2})(?:\s+\d{1,2})?\s*"\s*,\s*(-?\d+(?:\.\d+)?)\s*\]',
             chart_match.group(1),
         ):
             rate_date = date(int(year_text), int(month_text), int(day_text))
