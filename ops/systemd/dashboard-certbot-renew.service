@@ -1,0 +1,8 @@
+[Unit]
+Description=Renew the dashboard IP certificate
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/certbot/bin/certbot renew --quiet --no-random-sleep-on-renew --deploy-hook /usr/local/sbin/dashboard-certbot-reload-nginx

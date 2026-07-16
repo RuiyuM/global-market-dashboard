@@ -6,7 +6,7 @@ For sources that the server cannot fetch directly, read [Weekly Local Data Updat
 
 ## Server And Repo
 
-- Public site: `http://43.133.168.211/`
+- Public site: `https://43.133.168.211/`
 - Server app path: `/opt/global-market-dashboard`
 - Static web root: `/opt/global-market-dashboard/dashboard`
 - Main page: `/opt/global-market-dashboard/dashboard/index.html`
@@ -90,8 +90,8 @@ The orchestrator runs the server first, reads the machine policy, fetches only f
 Verify public pages after the command succeeds:
 
 ```bash
-curl -fsS http://43.133.168.211/ -o /tmp/dashboard_home.html
-curl -fsS http://43.133.168.211/quant_fund.html -o /tmp/quant.html
+curl -fsS https://43.133.168.211/ -o /tmp/dashboard_home.html
+curl -fsS https://43.133.168.211/quant_fund.html -o /tmp/quant.html
 ```
 
 ## Quant Fund Privacy Rule
@@ -252,7 +252,7 @@ When using Tencent Cloud OrcaTerm:
 After deployment, refresh:
 
 ```text
-http://43.133.168.211/quant_fund.html
+https://43.133.168.211/quant_fund.html
 ```
 
 Check page behavior:
@@ -282,7 +282,50 @@ PY
 
 All marker lines should be `False`; `axis_date_count` should be greater than zero when the large quant curve has data.
 
-## Nginx Performance And Abuse Guard
+## SSH, Firewall, HTTPS, And Abuse Guard
+
+The existing `root + sol.pem` workflow remains available, but root accepts public-key authentication only. The same authorized keys are installed for `lighthouse`, which has passwordless sudo and acts as the backup administrative path. The tracked SSH drop-in is `ops/ssh/00-dashboard-hardening.conf`; its early filename is intentional because OpenSSH uses the first value it reads.
+
+Install and verify SSH hardening without closing the active session:
+
+```bash
+install -m 600 -o root -g root \
+  /opt/global-market-dashboard/ops/ssh/00-dashboard-hardening.conf \
+  /etc/ssh/sshd_config.d/00-dashboard-hardening.conf
+sshd -t
+systemctl reload sshd
+sshd -T | grep -E '^(permitrootlogin|passwordauthentication|pubkeyauthentication|maxauthtries|logingracetime|x11forwarding) '
+```
+
+Expected effective SSH state: root key login remains enabled as `without-password`, password login is disabled, `MaxAuthTries` is 3, and X11 forwarding is disabled. Always test fresh `root` and `lighthouse` key sessions before ending the current session.
+
+Firewalld is enabled and its public zone permits only `ssh`, `http`, `https`, and the platform's `dhcpv6-client` helper. There must be no explicit FTP, `8888`, or `39000-40000` port ranges and forwarding must remain disabled:
+
+```bash
+firewall-cmd --zone=public --list-all
+systemctl is-enabled firewalld
+systemctl is-active firewalld
+```
+
+The server uses a publicly trusted Let's Encrypt IP-address certificate. IP certificates use the `shortlived` profile and expire after roughly six days, so the tracked `dashboard-certbot-renew.timer` checks twice daily. Certbot lives in `/opt/certbot`, the certificate lineage is `/etc/letsencrypt/live/43.133.168.211`, and the deploy hook validates and reloads Nginx.
+
+Install the tracked renewal units and hook:
+
+```bash
+install -m 755 ops/certbot/reload-nginx.sh /usr/local/sbin/dashboard-certbot-reload-nginx
+install -m 644 ops/systemd/dashboard-certbot-renew.service /etc/systemd/system/dashboard-certbot-renew.service
+install -m 644 ops/systemd/dashboard-certbot-renew.timer /etc/systemd/system/dashboard-certbot-renew.timer
+systemctl daemon-reload
+systemctl enable --now dashboard-certbot-renew.timer
+```
+
+Test the complete ACME renewal path after any certificate or Nginx change:
+
+```bash
+/opt/certbot/bin/certbot renew --dry-run --no-random-sleep-on-renew \
+  --cert-name 43.133.168.211 \
+  --deploy-hook /usr/local/sbin/dashboard-certbot-reload-nginx
+```
 
 The production config is tracked at `ops/nginx/global-market-dashboard.conf`. Render `__APP_DIR__` to the actual app path before installing it. Do not restore the old static-site fallback `try_files $uri $uri/ /index.html`; unknown scanner paths must return a small `404` instead of the multi-megabyte dashboard.
 
@@ -292,21 +335,25 @@ The tracked config provides:
 - per-IP request and connection limits with HTTP `429` on excess;
 - GET/HEAD-only public access;
 - hidden-file denial and browser security headers;
+- TLS 1.2/1.3 with a trusted IP certificate and HSTS;
 - conservative timeouts without blocking ordinary dashboard use.
 
 Deploy and verify on OpenCloudOS:
 
 ```bash
-sed 's|__APP_DIR__|/opt/global-market-dashboard|g' \
+sed \
+  -e 's|__APP_DIR__|/opt/global-market-dashboard|g' \
+  -e 's|__PUBLIC_IP__|43.133.168.211|g' \
   /opt/global-market-dashboard/ops/nginx/global-market-dashboard.conf \
   >/etc/nginx/conf.d/global-market-dashboard.conf
 nginx -t
 systemctl reload nginx
-curl -sSI -H 'Accept-Encoding: gzip' http://127.0.0.1/
-curl -sSI http://127.0.0.1/admin
+curl -sSI http://43.133.168.211/
+curl -sSI -H 'Accept-Encoding: gzip' https://43.133.168.211/
+curl -sSI https://43.133.168.211/admin
 ```
 
-The first response must include `Content-Encoding: gzip` and the security headers. The unknown path must return `404`, not `200` and not the dashboard body. A few scanner requests in the access log are normal; only call it an active attack when request/concurrency/error rates materially rise, not merely because probe paths appear.
+HTTP `/` must redirect to HTTPS, the HTTPS response must include `Content-Encoding: gzip` and the security headers, and the HTTPS unknown path must return `404`, not `200` and not the dashboard body. A few scanner requests in the access log are normal; only call it an active attack when request/concurrency/error rates materially rise, not merely because probe paths appear.
 
 ## Policy News Refresh
 
