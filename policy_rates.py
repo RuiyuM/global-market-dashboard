@@ -169,14 +169,13 @@ def parse_fed_points(html: str, *, year: int) -> list[PolicyRatePoint]:
 def parse_fed_all_points(html: str, *, years: list[int]) -> list[PolicyRatePoint]:
     text = normalize_text(re.sub(r"<[^>]+>", " ", html))
     rows: list[PolicyRatePoint] = []
+    header_pattern = re.compile(r"\b(?:19|20)\d{2}\s+Date Increase Decrease Level(?: \(%\))?")
     for year in years:
         start = text.find(f"{year} Date Increase Decrease Level")
         if start == -1:
-            start = text.find(f"{year} ")
-        if start == -1:
             continue
-        next_year_positions = [pos for candidate in years if candidate != year and (pos := text.find(f"{candidate} ", start + 4)) != -1]
-        end = min(next_year_positions) if next_year_positions else len(text)
+        next_header = header_pattern.search(text, start + 4)
+        end = next_header.start() if next_header else len(text)
         rows.extend(parse_fed_points(text[start:end], year=year))
     return sorted({(row.date, row.display_rate): row for row in rows}.values(), key=lambda row: row.date)
 

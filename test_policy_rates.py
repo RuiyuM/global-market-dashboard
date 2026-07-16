@@ -18,6 +18,7 @@ from policy_rates import (
     parse_boj_statement_points,
     parse_china_lpr_points,
     parse_fed_points,
+    parse_fed_all_points,
     parse_korea_base_rate_points,
     parse_russia_points,
     split_default_and_recent_year,
@@ -73,6 +74,26 @@ def test_parse_fed_rows_skips_ellipsis_change_columns() -> None:
         ("2008-10-29", "1.00%"),
         ("2008-12-16", "0-0.25%"),
     ]
+
+
+def test_parse_fed_year_stops_at_the_next_table_heading() -> None:
+    html = (
+        "2025 Date Increase Decrease Level (%) "
+        "December 11 0 25 3.50-3.75 September 18 0 25 4.00-4.25 "
+        "2024 Date Increase Decrease Level (%) "
+        "December 19 0 25 4.25-4.50 September 19 0 50 4.75-5.00 "
+        "2018 Date Increase Decrease Level (%) December 20 25 0 2.25-2.50"
+    )
+    points = parse_fed_all_points(html, years=[2024, 2025, 2026])
+    actions = actions_from_rate_points(points, policy_tool="联邦基金目标区间")
+    assert [(point.date.isoformat(), point.display_rate) for point in points] == [
+        ("2024-09-19", "4.75-5.00%"),
+        ("2024-12-19", "4.25-4.50%"),
+        ("2025-09-18", "4.00-4.25%"),
+        ("2025-12-11", "3.50-3.75%"),
+    ]
+    assert all(action["type"] == "降息" for action in actions)
+    assert all(action["change_bp"] < 0 for action in actions)
 
 
 def test_parse_ecb_rows_from_official_snippet() -> None:

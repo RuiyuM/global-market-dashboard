@@ -8,7 +8,14 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from policy_news import DEFAULT_MODEL, POLICY_REGIONS, build_policy_news_snapshot, classify_policy_news_heuristic
+from policy_news import (
+    DEFAULT_MODEL,
+    POLICY_REGIONS,
+    build_policy_news_snapshot,
+    classify_policy_news_heuristic,
+    is_region_relevant_policy_item,
+    normalize_policy_analysis_item,
+)
 
 
 def test_hike_language_is_hawkish() -> None:
@@ -38,6 +45,29 @@ def test_cut_language_is_dovish() -> None:
     )
     assert result["policy_direction"] == "降息预期升温"
     assert result["stance"] == "偏鸽"
+
+
+def test_wrong_region_news_is_rejected() -> None:
+    assert not is_region_relevant_policy_item(
+        {
+            "region": "RU",
+            "headline": "Bank of England says rate cuts are not back on the table",
+        }
+    )
+
+
+def test_negated_cut_is_not_reported_as_cut_expectation() -> None:
+    result = normalize_policy_analysis_item(
+        {
+            "region": "US",
+            "headline": "Fed likely won't cut interest rates this year",
+            "policy_direction": "降息预期升温",
+            "stance": "偏鸽",
+            "summary_cn": "美国：降息预期升温。",
+        }
+    )
+    assert result["policy_direction"] == "维持观望"
+    assert result["stance"] == "偏鹰"
 
 
 def test_snapshot_has_six_regions_and_no_secret_material() -> None:
@@ -285,6 +315,47 @@ def test_weekly_cache_refreshes_after_max_age() -> None:
         )
         assert refreshed["cache_status"] == "refreshed"
         assert refreshed["regions"]["EU"]["items"][0]["summary_cn"] == "欧元区：欧洲央行更偏向等待。"
+
+
+def test_no_fetch_render_reuses_cached_policy_news() -> None:
+    now = datetime(2026, 6, 26, 12, 0, tzinfo=timezone.utc)
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        cache_path = Path(tmp_dir) / "policy_news_cache.json"
+        cache_path.write_text(
+            json.dumps(
+                {
+                    "generated_at": now.isoformat(timespec="seconds"),
+                    "model": DEFAULT_MODEL,
+                    "analysis_source": "OpenAI",
+                    "news_source": "Google News RSS",
+                    "items": [
+                        {
+                            "region": "US",
+                            "headline": "Federal Reserve officials keep rates unchanged",
+                            "source": "sample",
+                            "url": "https://example.com/fed",
+                            "published_at": "Fri, 26 Jun 2026 11:00:00 GMT",
+                            "policy_direction": "维持观望",
+                            "stance": "中性",
+                            "confidence": 0.9,
+                            "summary_cn": "美国：美联储维持利率不变。",
+                            "analysis": "OpenAI",
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        snapshot = build_policy_news_snapshot(
+            fetch_news=False,
+            cache_path=cache_path,
+            now=now + timedelta(days=2),
+            action_builder=lambda: {},
+        )
+    assert snapshot["cache_status"] == "cached"
+    assert snapshot["analysis_source"] == "OpenAI"
+    assert snapshot["regions"]["US"]["items"][0]["summary_cn"] == "美国：美联储维持利率不变。"
 
 
 if __name__ == "__main__":

@@ -377,6 +377,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lookback-days", type=int, default=540, help="Yahoo fetch lookback window.")
     parser.add_argument("--wscn-count", type=int, default=1800, help="WSCN rows per series.")
     parser.add_argument("--sleep-sec", type=float, default=0.15)
+    parser.add_argument(
+        "--force-policy-news-refresh",
+        action="store_true",
+        help="Refresh policy-rate news now while leaving market CSV fetch behavior unchanged.",
+    )
     return parser.parse_args()
 
 
@@ -2166,6 +2171,7 @@ def build_snapshot(
     fetch_records: list[dict[str, str]],
     *,
     fetch_policy_news: bool = True,
+    force_policy_news_refresh: bool = False,
     fetch_mode: str = "network",
     last_fetch_at: str = "",
 ) -> dict[str, Any]:
@@ -2177,7 +2183,10 @@ def build_snapshot(
         "fetch_mode": fetch_mode,
         "last_fetch_at": last_fetch_at or generated_at,
         "local_patch_report": load_local_patch_report(),
-        "policy_news": build_policy_news_snapshot(fetch_news=fetch_policy_news),
+        "policy_news": build_policy_news_snapshot(
+            fetch_news=fetch_policy_news,
+            force_refresh=force_policy_news_refresh,
+        ),
         "countries": countries,
         "asset_class_vol": asset_class_vol(countries),
         "daily_move_alert": build_daily_move_alert(series, specs),
@@ -5927,7 +5936,8 @@ def main() -> int:
         fetch_mode = "cache"
     snapshot = build_snapshot(
         fetch_records,
-        fetch_policy_news=args.fetch,
+        fetch_policy_news=args.fetch or args.force_policy_news_refresh,
+        force_policy_news_refresh=args.force_policy_news_refresh,
         fetch_mode=fetch_mode,
         last_fetch_at=last_fetch_at,
     )

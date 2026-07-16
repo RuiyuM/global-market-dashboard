@@ -7,6 +7,7 @@ import json
 import math
 import os
 from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from html import unescape
 from pathlib import Path
 from typing import Any
@@ -62,6 +63,44 @@ POLICY_REGIONS = [
 ]
 
 _REGION_BY_CODE = {region["code"]: region for region in POLICY_REGIONS}
+
+_REGION_ENTITY_TERMS = {
+    "US": ("federal reserve", " fed ", "fed's", "fomc", "u.s. central bank"),
+    "EU": ("ecb", "european central bank", "euro zone", "eurozone"),
+    "JP": ("bank of japan", "boj", "japan", "japanese"),
+    "CN": ("pboc", "people's bank of china", "china central bank", "chinese central bank", "china's central bank"),
+    "KR": ("bank of korea", "south korea", "south korean", "korean central bank"),
+    "RU": ("bank of russia", "russian central bank", "russia", "russian", "sberbank"),
+}
+
+_NEGATED_CUT_TERMS = (
+    "won't cut",
+    "will not cut",
+    "not cut rates",
+    "no rate cut",
+    "no rate cuts",
+    "cuts are not",
+    "cut is unlikely",
+    "cuts unlikely",
+    "delay rate cuts",
+    "delays rate cuts",
+    "降息无望",
+    "不会降息",
+    "推迟降息",
+)
+
+_NEGATED_HIKE_TERMS = (
+    "won't hike",
+    "will not hike",
+    "not hike rates",
+    "no rate hike",
+    "no rate hikes",
+    "hike is unlikely",
+    "hikes unlikely",
+    "doubt over long-term rate-hike",
+    "不会加息",
+    "推迟加息",
+)
 
 POLICY_ACTIONS = {
     "US": {
@@ -379,6 +418,31 @@ def classify_policy_news_heuristic(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def is_region_relevant_policy_item(item: dict[str, Any]) -> bool:
+    code = str(item.get("region", ""))
+    terms = _REGION_ENTITY_TERMS.get(code)
+    if not terms:
+        return False
+    text = f" {item.get('headline', '')} {item.get('summary', '')} ".lower()
+    return any(term in text for term in terms)
+
+
+def normalize_policy_analysis_item(item: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(item)
+    text = f"{normalized.get('headline', '')} {normalized.get('summary_cn', '')}".lower()
+    region = _REGION_BY_CODE.get(str(normalized.get("region", "")), {})
+    region_name = region.get("name", normalized.get("region", ""))
+    if any(term in text for term in _NEGATED_CUT_TERMS):
+        normalized["policy_direction"] = "维持观望"
+        normalized["stance"] = "偏鹰"
+        normalized["summary_cn"] = f"{region_name}：降息预期被推迟或否定，政策立场偏鹰。"
+    elif any(term in text for term in _NEGATED_HIKE_TERMS):
+        normalized["policy_direction"] = "维持观望"
+        normalized["stance"] = "偏鸽"
+        normalized["summary_cn"] = f"{region_name}：加息预期被推迟或否定，政策立场偏鸽。"
+    return normalized
+
+
 def _google_news_rss_url(query: str) -> str:
     encoded = quote_plus(f"({query}) when:14d")
     return f"https://news.google.com/rss/search?q={encoded}&hl=en-US&gl=US&ceid=US:en"
@@ -467,7 +531,9 @@ def analyze_policy_items_with_openai(
     instructions = (
         "你是宏观新闻分类器。只保留与央行加息、降息、维持利率、政策利率预期直接相关的条目。"
         "对每条新闻输出中文 summary_cn，policy_direction 只能表达加息预期升温、降息预期升温、维持观望或不明确，"
-        "stance 使用偏鹰、偏鸽、中性或待确认。不要输出任何密钥、环境变量名或多余字段。"
+        "stance 使用偏鹰、偏鸽、中性或待确认。region 必须与输入保持一致；若新闻主体不是该 region 的央行或经济体，省略该条。"
+        "‘不会降息/降息推迟’不能标成降息预期升温，‘不会加息/加息推迟’不能标成加息预期升温。"
+        "不要输出任何密钥、环境变量名或多余字段。"
     )
     request_payload = {
         "model": model,
@@ -500,15 +566,30 @@ def analyze_policy_items_with_openai(
     result = parsed.get("items", [])
     if not isinstance(result, list):
         raise ValueError("OpenAI policy-news response did not contain an items list")
-    return result
+    return [normalize_policy_analysis_item(item) for item in result if is_region_relevant_policy_item(item)]
+
+
+def _published_sort_key(item: dict[str, Any]) -> float:
+    value = str(item.get("published_at", ""))
+    try:
+        parsed = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        parsed = parse_utc_timestamp(value)
+    if parsed is None:
+        return 0.0
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
 
 
 def _first_item_per_region(items: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     grouped: dict[str, list[dict[str, Any]]] = {region["code"]: [] for region in POLICY_REGIONS}
     for item in items:
         code = str(item.get("region", ""))
-        if code in grouped and len(grouped[code]) < 3:
+        if code in grouped:
             grouped[code].append(item)
+    for code, rows in grouped.items():
+        grouped[code] = sorted(rows, key=_published_sort_key, reverse=True)[:3]
     return grouped
 
 
@@ -568,7 +649,7 @@ def build_policy_news_snapshot(
     news_analyzer = analyzer or analyze_policy_items_with_openai
     selected_api_key = api_key if api_key is not None else os.environ.get("OPENAI_API_KEY", "")
 
-    cached_payload = load_policy_news_cache(cache_file) if fetch_news else None
+    cached_payload = load_policy_news_cache(cache_file)
     analyzed: list[dict[str, Any]]
     news_source = "本地规则样例"
     analysis_source = "规则解析"
@@ -576,9 +657,32 @@ def build_policy_news_snapshot(
     cache_generated_at = ""
     next_update_after = ""
 
-    if fetch_news and cached_payload and not force_refresh and is_cache_fresh(cached_payload, now=run_now, max_age_hours=cache_max_age):
+    if not fetch_news and cached_payload:
         cached_items = cached_payload.get("items", [])
-        analyzed = cached_items if isinstance(cached_items, list) else []
+        analyzed = (
+            [
+                normalize_policy_analysis_item(item)
+                for item in cached_items
+                if is_region_relevant_policy_item(item)
+            ]
+            if isinstance(cached_items, list)
+            else []
+        )
+        analysis_source = str(cached_payload.get("analysis_source", "OpenAI"))
+        news_source = str(cached_payload.get("news_source", "Google News RSS"))
+        cache_status = "cached"
+        cache_generated_at = str(cached_payload.get("generated_at", ""))
+    elif fetch_news and cached_payload and not force_refresh and is_cache_fresh(cached_payload, now=run_now, max_age_hours=cache_max_age):
+        cached_items = cached_payload.get("items", [])
+        analyzed = (
+            [
+                normalize_policy_analysis_item(item)
+                for item in cached_items
+                if is_region_relevant_policy_item(item)
+            ]
+            if isinstance(cached_items, list)
+            else []
+        )
         analysis_source = str(cached_payload.get("analysis_source", "OpenAI"))
         news_source = str(cached_payload.get("news_source", "Google News RSS"))
         cache_status = "fresh"
@@ -587,7 +691,7 @@ def build_policy_news_snapshot(
         raw_items: list[dict[str, Any]]
         if fetch_news:
             try:
-                raw_items = news_fetcher()
+                raw_items = [item for item in news_fetcher() if is_region_relevant_policy_item(item)]
                 news_source = "Google News RSS"
             except Exception:
                 raw_items = list(FALLBACK_ITEMS)
@@ -596,7 +700,11 @@ def build_policy_news_snapshot(
 
         if fetch_news and use_openai and selected_api_key and raw_items:
             try:
-                analyzed = news_analyzer(raw_items, api_key=selected_api_key, model=model_id)
+                analyzed = [
+                    normalize_policy_analysis_item(item)
+                    for item in news_analyzer(raw_items, api_key=selected_api_key, model=model_id)
+                    if is_region_relevant_policy_item(item)
+                ]
                 analysis_source = "OpenAI"
                 cache_status = "refreshed"
                 generated_at = run_now.isoformat(timespec="seconds")

@@ -281,3 +281,43 @@ PY
 ```
 
 All marker lines should be `False`; `axis_date_count` should be greater than zero when the large quant curve has data.
+
+## Nginx Performance And Abuse Guard
+
+The production config is tracked at `ops/nginx/global-market-dashboard.conf`. Render `__APP_DIR__` to the actual app path before installing it. Do not restore the old static-site fallback `try_files $uri $uri/ /index.html`; unknown scanner paths must return a small `404` instead of the multi-megabyte dashboard.
+
+The tracked config provides:
+
+- gzip for HTML, JSON, JavaScript, CSS, and SVG;
+- per-IP request and connection limits with HTTP `429` on excess;
+- GET/HEAD-only public access;
+- hidden-file denial and browser security headers;
+- conservative timeouts without blocking ordinary dashboard use.
+
+Deploy and verify on OpenCloudOS:
+
+```bash
+sed 's|__APP_DIR__|/opt/global-market-dashboard|g' \
+  /opt/global-market-dashboard/ops/nginx/global-market-dashboard.conf \
+  >/etc/nginx/conf.d/global-market-dashboard.conf
+nginx -t
+systemctl reload nginx
+curl -sSI -H 'Accept-Encoding: gzip' http://127.0.0.1/
+curl -sSI http://127.0.0.1/admin
+```
+
+The first response must include `Content-Encoding: gzip` and the security headers. The unknown path must return `404`, not `200` and not the dashboard body. A few scanner requests in the access log are normal; only call it an active attack when request/concurrency/error rates materially rise, not merely because probe paths appear.
+
+## Policy News Refresh
+
+The weekly OpenAI-classified news cache is private-credential backed but the resulting headlines are public. A cached render must retain the latest classified news instead of reverting to examples.
+
+To refresh only the policy-news radar while preserving market CSVs:
+
+```bash
+runuser -u globaldash -- bash -c \
+  'set -a; source /opt/global-market-dashboard/.private/policy_news.env; set +a; cd /opt/global-market-dashboard; python3 market_dashboard.py --no-fetch --force-policy-news-refresh'
+python3 validate_market_dashboard.py
+```
+
+Never put the key value in the command line, Git, service unit, logs, or dashboard output. After a refresh, inspect all six regions for wrong-country headlines and impossible policy actions. Federal Reserve year sections must stop at the next official table heading so older rows cannot be assigned to a newer year.

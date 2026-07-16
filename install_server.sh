@@ -70,20 +70,12 @@ Unit=global-market-dashboard-update.service
 WantedBy=timers.target
 EOF
 
-cat >"${NGINX_CONFIG}" <<EOF
-server {
-    listen 80 default_server;
-    listen [::]:80 default_server;
-    server_name _;
-
-    root ${APP_DIR}/dashboard;
-    index index.html;
-
-    location / {
-        try_files \$uri \$uri/ /index.html;
-    }
-}
-EOF
+NGINX_TEMPLATE="${APP_DIR}/ops/nginx/global-market-dashboard.conf"
+if [[ ! -f "${NGINX_TEMPLATE}" ]]; then
+  echo "Missing tracked Nginx template: ${NGINX_TEMPLATE}" >&2
+  exit 1
+fi
+sed "s|__APP_DIR__|${APP_DIR}|g" "${NGINX_TEMPLATE}" >"${NGINX_CONFIG}"
 
 if [[ "${NGINX_CONFIG}" == /etc/nginx/sites-available/* ]]; then
   rm -f /etc/nginx/sites-enabled/default
