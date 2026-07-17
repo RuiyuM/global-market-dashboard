@@ -157,6 +157,7 @@ Expected variable categories:
 - futures symbol
 - futures base capital
 - options base capital
+- optional options rebase date and post-funding account-value anchor
 - optional start date
 - optional local CSV path for one-time initialization
 
@@ -207,6 +208,24 @@ If the website does not show a closed BTCUSDT trade that is visible in the tradi
 2. Fetch futures stable balance using the dedicated option-futures API account when needed for combined option account value.
 3. Compute percent return against the options base capital.
 4. Upsert only today's `{date, pct}` point into the public snapshot.
+
+When option capital changes, never recalculate the historical percentage curve with the new denominator. Configure the new current base and a private post-funding anchor:
+
+```text
+QUANT_FUND_OPTIONS_BASE_USD=<current capital base>
+QUANT_FUND_OPTIONS_REBASE_DATE=<YYYY-MM-DD funding-day anchor>
+QUANT_FUND_OPTIONS_REBASE_TOTAL_USD=<account total immediately after funding>
+```
+
+The funding-day percentage already present in the public snapshot is the curve anchor. The updater leaves every point through that date unchanged and calculates later points as:
+
+```text
+new published pct = funding-day published pct
+                  + (current account total - post-funding account total)
+                    / current capital base * 100
+```
+
+All three values remain only in `.private/quant_fund.env`. Only `{date, pct}` is public. Capture the post-funding total from the correct options and option-futures API accounts after the transfer is complete; otherwise the cash flow would be misclassified as investment return. A partial or invalid rebase configuration must preserve the existing public curve with `rebase_config_error`, never fall back to recomputing history.
 
 Raw account totals, stablecoin balances, and position strings are not written to public HTML/snapshot.
 

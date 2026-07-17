@@ -79,6 +79,16 @@ def env_float(name: str) -> float | None:
     return value if math.isfinite(value) and value > 0 else None
 
 
+def env_date(name: str) -> date | None:
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return None
+    try:
+        return parse_ymd(raw.strip())
+    except ValueError:
+        return None
+
+
 def parse_ymd(value: str) -> date:
     return datetime.strptime(value, "%Y-%m-%d").date()
 
@@ -253,6 +263,39 @@ def upsert_percent_point(points: list[dict[str, Any]], day: date, pct: float) ->
     return rows
 
 
+def update_options_percent_points(
+    existing: list[dict[str, Any]],
+    *,
+    day: date,
+    total: float,
+    base_usd: float,
+    rebase_date: date | None = None,
+    rebase_total_usd: float | None = None,
+) -> list[dict[str, Any]]:
+    if not math.isfinite(total) or base_usd <= 0:
+        raise ValueError("invalid options total or base")
+
+    rows = public_points({"points": existing})
+    if rebase_date is None and rebase_total_usd is None:
+        pct = (total - base_usd) / base_usd * 100
+        return upsert_percent_point(rows, day, pct)
+    if rebase_date is None or rebase_total_usd is None or rebase_total_usd <= 0:
+        raise ValueError("incomplete options rebase configuration")
+
+    anchor_rows = [row for row in rows if row["date"] <= rebase_date.isoformat()]
+    if not anchor_rows:
+        raise ValueError("missing public options rebase anchor")
+
+    # Keep the funding-day point historical. Only subsequent PnL is scaled by
+    # the new capital base, so the deposit itself cannot appear as return.
+    if day <= rebase_date:
+        return rows
+
+    anchor_pct = float(anchor_rows[-1]["pct"])
+    pct = anchor_pct + (total - rebase_total_usd) / base_usd * 100
+    return upsert_percent_point(rows, day, pct)
+
+
 def merge_percent_points(existing: list[dict[str, Any]], updates: list[dict[str, Any]]) -> list[dict[str, Any]]:
     existing_rows = public_points({"points": existing})
     update_rows = public_points({"points": updates})
@@ -346,6 +389,14 @@ def build_snapshot() -> dict[str, Any]:
     symbol = os.environ.get("QUANT_FUND_SYMBOL", DEFAULT_SYMBOL).strip().upper()
     futures_base = env_float("QUANT_FUND_FUTURES_BASE_USD")
     options_base = env_float("QUANT_FUND_OPTIONS_BASE_USD")
+    options_rebase_date_raw = os.environ.get("QUANT_FUND_OPTIONS_REBASE_DATE", "").strip()
+    options_rebase_total_raw = os.environ.get("QUANT_FUND_OPTIONS_REBASE_TOTAL_USD", "").strip()
+    options_rebase_date = env_date("QUANT_FUND_OPTIONS_REBASE_DATE")
+    options_rebase_total = env_float("QUANT_FUND_OPTIONS_REBASE_TOTAL_USD")
+    options_rebase_requested = bool(options_rebase_date_raw or options_rebase_total_raw)
+    options_rebase_valid = not options_rebase_requested or (
+        options_rebase_date is not None and options_rebase_total is not None
+    )
     futures_key = os.environ.get("BINANCE_FUTURES_API_KEY", "")
     futures_secret = os.environ.get("BINANCE_FUTURES_API_SECRET", "")
     option_key = os.environ.get("BINANCE_OPTION_API_KEY", "")
@@ -407,14 +458,23 @@ def build_snapshot() -> dict[str, Any]:
     if options_base is None:
         option_points = existing_options_points or built_in_options_seed_points()
         option_status = "seeded" if option_points else "missing_base"
+    elif not options_rebase_valid:
+        option_points = existing_options_points or built_in_options_seed_points()
+        option_status = "rebase_config_error"
     elif option_key and option_secret and option_futures_key and option_futures_secret:
         try:
             total = fetch_option_wallet_total(option_key, option_secret) + fetch_futures_stable_balance(
                 option_futures_key,
                 option_futures_secret,
             )
-            pct = (total - options_base) / options_base * 100
-            option_points = upsert_percent_point(existing_options_points, now.date(), pct)
+            option_points = update_options_percent_points(
+                existing_options_points,
+                day=now.date(),
+                total=total,
+                base_usd=options_base,
+                rebase_date=options_rebase_date,
+                rebase_total_usd=options_rebase_total,
+            )
             option_status = "ok" if option_points else "no_history"
         except Exception as exc:  # noqa: BLE001
             option_points = existing_options_points

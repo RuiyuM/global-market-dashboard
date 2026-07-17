@@ -6,17 +6,21 @@ from __future__ import annotations
 import json
 from datetime import date, datetime, timezone
 
+import pytest
+
 import quant_fund_snapshot as qfs
 from quant_fund_snapshot import (
     aggregate_futures_trade_curve,
     build_options_percent_history,
     built_in_options_seed_points,
     default_quant_fund_snapshot,
+    env_date,
     env_float,
     fetch_futures_trades,
     futures_api_fetch_start,
     load_futures_trades_csv,
     merge_percent_points,
+    update_options_percent_points,
 )
 
 
@@ -172,6 +176,49 @@ def test_options_total_is_rendered_as_percent_of_configured_base() -> None:
     ]
 
 
+def test_options_rebase_preserves_history_and_scales_only_new_pnl() -> None:
+    history = [
+        {"date": "2026-07-15", "pct": 1.25},
+        {"date": "2026-07-16", "pct": 2.0},
+    ]
+
+    funding_day = update_options_percent_points(
+        history,
+        day=date(2026, 7, 16),
+        total=10000.0,
+        base_usd=10000.0,
+        rebase_date=date(2026, 7, 16),
+        rebase_total_usd=10000.0,
+    )
+    next_day = update_options_percent_points(
+        funding_day,
+        day=date(2026, 7, 17),
+        total=10100.0,
+        base_usd=10000.0,
+        rebase_date=date(2026, 7, 16),
+        rebase_total_usd=10000.0,
+    )
+
+    assert funding_day == history
+    assert next_day == [
+        {"date": "2026-07-15", "pct": 1.25},
+        {"date": "2026-07-16", "pct": 2.0},
+        {"date": "2026-07-17", "pct": 3.0},
+    ]
+
+
+def test_options_rebase_rejects_missing_public_anchor() -> None:
+    with pytest.raises(ValueError, match="missing public options rebase anchor"):
+        update_options_percent_points(
+            [],
+            day=date(2026, 7, 17),
+            total=10100.0,
+            base_usd=10000.0,
+            rebase_date=date(2026, 7, 16),
+            rebase_total_usd=10000.0,
+        )
+
+
 def test_default_snapshot_is_public_and_sanitized() -> None:
     snapshot = default_quant_fund_snapshot()
     text = str(snapshot)
@@ -258,6 +305,8 @@ def test_api_futures_update_writes_only_public_percent_points(monkeypatch, tmp_p
 def test_api_options_update_uses_dedicated_option_futures_credentials(monkeypatch, tmp_path) -> None:
     for name in ["QUANT_FUND_FUTURES_BASE_USD", "QUANT_FUND_FUTURES_TRADES_CSV", "QUANT_FUND_SYMBOL"]:
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.delenv("QUANT_FUND_OPTIONS_REBASE_DATE", raising=False)
+    monkeypatch.delenv("QUANT_FUND_OPTIONS_REBASE_TOTAL_USD", raising=False)
     monkeypatch.setenv("QUANT_FUND_START_DATE", "2026-04-01")
     monkeypatch.setenv("QUANT_FUND_OPTIONS_BASE_USD", "1000")
     monkeypatch.setenv("BINANCE_FUTURES_API_KEY", "trading-futures-key")
@@ -315,11 +364,72 @@ def test_api_options_update_uses_dedicated_option_futures_credentials(monkeypatc
     assert "total_usdt_usdc" not in text
 
 
+def test_api_options_rebase_chain_links_without_changing_history(monkeypatch) -> None:
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            value = cls(2026, 7, 17, 12, 0, tzinfo=timezone.utc)
+            return value if tz is not None else value.replace(tzinfo=None)
+
+    for name in ["QUANT_FUND_FUTURES_BASE_USD", "QUANT_FUND_FUTURES_TRADES_CSV", "QUANT_FUND_SYMBOL"]:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("QUANT_FUND_OPTIONS_BASE_USD", "1000")
+    monkeypatch.setenv("QUANT_FUND_OPTIONS_REBASE_DATE", "2026-07-16")
+    monkeypatch.setenv("QUANT_FUND_OPTIONS_REBASE_TOTAL_USD", "1000")
+    monkeypatch.setenv("BINANCE_OPTION_API_KEY", "test-option-key")
+    monkeypatch.setenv("BINANCE_OPTION_API_SECRET", "test-option-secret")
+    monkeypatch.setenv("BINANCE_OPTION_FUTURES_API_KEY", "option-futures-key")
+    monkeypatch.setenv("BINANCE_OPTION_FUTURES_API_SECRET", "option-futures-secret")
+    monkeypatch.setattr(qfs, "datetime", FixedDateTime)
+    monkeypatch.setattr(
+        qfs,
+        "load_existing_public_snapshot",
+        lambda: {
+            "options": {
+                "points": [
+                    {"date": "2026-07-15", "pct": 1.25},
+                    {"date": "2026-07-16", "pct": 2.0},
+                ]
+            }
+        },
+    )
+    monkeypatch.setattr(qfs, "fetch_option_wallet_total", lambda *_args, **_kwargs: 900.0)
+    monkeypatch.setattr(qfs, "fetch_futures_stable_balance", lambda *_args, **_kwargs: 110.0)
+
+    snapshot = qfs.build_snapshot()
+
+    assert snapshot["options"]["status"] == "ok"
+    assert snapshot["options"]["points"] == [
+        {"date": "2026-07-15", "pct": 1.25},
+        {"date": "2026-07-16", "pct": 2.0},
+        {"date": "2026-07-17", "pct": 3.0},
+    ]
+    assert "rebase" not in json.dumps(snapshot, ensure_ascii=False).lower()
+
+
+def test_incomplete_options_rebase_config_preserves_existing_curve(monkeypatch) -> None:
+    monkeypatch.setenv("QUANT_FUND_OPTIONS_BASE_USD", "1000")
+    monkeypatch.setenv("QUANT_FUND_OPTIONS_REBASE_DATE", "2026-07-16")
+    monkeypatch.delenv("QUANT_FUND_OPTIONS_REBASE_TOTAL_USD", raising=False)
+    monkeypatch.setattr(
+        qfs,
+        "load_existing_public_snapshot",
+        lambda: {"options": {"points": [{"date": "2026-07-16", "pct": 2.0}]}},
+    )
+
+    snapshot = qfs.build_snapshot()
+
+    assert snapshot["options"]["status"] == "rebase_config_error"
+    assert snapshot["options"]["points"] == [{"date": "2026-07-16", "pct": 2.0}]
+
+
 def test_api_options_update_does_not_reuse_trading_futures_credentials(monkeypatch) -> None:
     for name in ["QUANT_FUND_FUTURES_BASE_USD", "QUANT_FUND_FUTURES_TRADES_CSV", "QUANT_FUND_SYMBOL"]:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.delenv("BINANCE_OPTION_FUTURES_API_KEY", raising=False)
     monkeypatch.delenv("BINANCE_OPTION_FUTURES_API_SECRET", raising=False)
+    monkeypatch.delenv("QUANT_FUND_OPTIONS_REBASE_DATE", raising=False)
+    monkeypatch.delenv("QUANT_FUND_OPTIONS_REBASE_TOTAL_USD", raising=False)
     monkeypatch.setenv("QUANT_FUND_OPTIONS_BASE_USD", "1000")
     monkeypatch.setenv("BINANCE_FUTURES_API_KEY", "trading-futures-key")
     monkeypatch.setenv("BINANCE_FUTURES_API_SECRET", "trading-futures-secret")
@@ -381,9 +491,13 @@ def test_futures_stable_balance_matches_options_publisher_usdc_only(monkeypatch)
 def test_base_usd_has_no_repository_default(monkeypatch) -> None:
     monkeypatch.delenv("QUANT_FUND_FUTURES_BASE_USD", raising=False)
     monkeypatch.delenv("QUANT_FUND_OPTIONS_BASE_USD", raising=False)
+    monkeypatch.delenv("QUANT_FUND_OPTIONS_REBASE_DATE", raising=False)
+    monkeypatch.delenv("QUANT_FUND_OPTIONS_REBASE_TOTAL_USD", raising=False)
 
     assert env_float("QUANT_FUND_FUTURES_BASE_USD") is None
     assert env_float("QUANT_FUND_OPTIONS_BASE_USD") is None
+    assert env_date("QUANT_FUND_OPTIONS_REBASE_DATE") is None
+    assert env_float("QUANT_FUND_OPTIONS_REBASE_TOTAL_USD") is None
 
 
 def test_options_seed_points_are_percent_only_without_raw_amounts() -> None:
