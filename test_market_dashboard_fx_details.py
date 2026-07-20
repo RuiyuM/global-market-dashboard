@@ -10,6 +10,7 @@ import pytest
 
 from market_dashboard import (
     build_flow_sections,
+    build_fx_flow_views,
     build_fx_cross_details,
     reliable_direct_cross,
     reliable_official_direct_cross,
@@ -26,6 +27,22 @@ def row(day: int, close: float) -> dict[str, object]:
 
 def dated(month: int, day: int, close: float) -> dict[str, object]:
     return {"date": date(2026, month, day), "open": close, "high": close, "low": close, "close": close}
+
+
+def complete_triad_series(*days: int) -> dict[str, list[dict[str, object]]]:
+    bases = {
+        "USDCNY": 7.0,
+        "JPYCNY": 0.05,
+        "USDJPY": 140.0,
+        "EURCNY": 8.0,
+        "EURUSD": 1.1,
+        "RUBCNY": 0.09,
+        "USDRUB": 78.0,
+    }
+    return {
+        key: [row(day, base * (1 + index * 0.01)) for index, day in enumerate(days)]
+        for key, base in bases.items()
+    }
 
 
 def test_build_fx_cross_details_derives_russia_cny_usd_jpy_pairs() -> None:
@@ -190,6 +207,67 @@ def test_build_flow_sections_does_not_mark_closed_session_as_intraday() -> None:
     assert periods["当日"]["is_intraday"] is False
 
 
+def test_build_fx_flow_views_captures_complete_asia_intraday_snapshot() -> None:
+    ny = ZoneInfo("America/New_York")
+    current, views = build_fx_flow_views(
+        complete_triad_series(25, 26, 29),
+        now=datetime(2026, 6, 29, 7, 0, tzinfo=ny),
+    )
+
+    assert views["default"] == "asia_intraday"
+    assert views["asia_intraday"]["is_intraday"] is True
+    assert views["asia_intraday"]["as_of_date"] == "2026-06-29"
+    assert set(views["asia_intraday"]["as_of_dates"].values()) == {"2026-06-29"}
+    assert all(period["is_intraday"] for period in [section["periods"][0] for section in current])
+    assert views["closed"]["as_of_date"] == "2026-06-26"
+
+
+def test_build_fx_flow_views_preserves_asia_snapshot_after_us_close() -> None:
+    ny = ZoneInfo("America/New_York")
+    morning_series = complete_triad_series(25, 26, 29)
+    _, morning_views = build_fx_flow_views(
+        morning_series,
+        now=datetime(2026, 6, 29, 7, 0, tzinfo=ny),
+    )
+    morning_asia = morning_views["asia_intraday"]
+    morning_usdcny = morning_asia["flows"][0]["periods"][0]["changes"][0]["new"]
+
+    close_series = complete_triad_series(25, 26, 29)
+    close_series["USDCNY"][-1] = row(29, 7.5)
+    current, close_views = build_fx_flow_views(
+        close_series,
+        previous_snapshot={"fx_flow_views": morning_views},
+        now=datetime(2026, 6, 29, 16, 30, tzinfo=ny),
+    )
+
+    assert close_views["default"] == "closed"
+    assert close_views["closed"]["as_of_date"] == "2026-06-29"
+    assert close_views["closed"]["flows"][0]["periods"][0]["changes"][0]["new"] == 7.5
+    assert close_views["asia_intraday"]["captured_at"] == morning_asia["captured_at"]
+    assert close_views["asia_intraday"]["flows"][0]["periods"][0]["changes"][0]["new"] == morning_usdcny
+    assert all(not section["periods"][0]["is_intraday"] for section in current)
+
+
+def test_build_fx_flow_views_does_not_replace_asia_snapshot_with_partial_intraday_data() -> None:
+    ny = ZoneInfo("America/New_York")
+    _, morning_views = build_fx_flow_views(
+        complete_triad_series(25, 26, 29),
+        now=datetime(2026, 6, 29, 7, 0, tzinfo=ny),
+    )
+    previous_asia = morning_views["asia_intraday"]
+    partial_series = complete_triad_series(26, 29, 30)
+    partial_series["USDRUB"] = partial_series["USDRUB"][:-1]
+
+    _, next_views = build_fx_flow_views(
+        partial_series,
+        previous_snapshot={"fx_flow_views": morning_views},
+        now=datetime(2026, 6, 30, 7, 0, tzinfo=ny),
+    )
+
+    assert next_views["default"] == "closed"
+    assert next_views["asia_intraday"] == previous_asia
+
+
 def test_build_flow_sections_uses_us_calendar_week_windows() -> None:
     rows_by_key = {
         "USDCNY": [
@@ -304,6 +382,42 @@ def test_render_flow_period_dates_omit_year_in_visible_label() -> None:
 
     assert "<small>06-25 → 06-26</small>" in html
     assert "<small>2026-06-25 → 2026-06-26</small>" not in html
+
+
+def test_render_flow_views_exposes_clickable_closed_and_asia_snapshots() -> None:
+    ny = ZoneInfo("America/New_York")
+    current, morning_views = build_fx_flow_views(
+        complete_triad_series(25, 26, 29),
+        now=datetime(2026, 6, 29, 7, 0, tzinfo=ny),
+    )
+    _, close_views = build_fx_flow_views(
+        complete_triad_series(25, 26, 29),
+        previous_snapshot={"fx_flow_views": morning_views},
+        now=datetime(2026, 6, 29, 16, 30, tzinfo=ny),
+    )
+    html = render_html(
+        {
+            "countries": [],
+            "volatility_rankings": {"bond": [], "equity": [], "fx": []},
+            "fx_rank_details": {},
+            "second_order_monitor": [],
+            "fx_flows": current,
+            "fx_flow_views": close_views,
+            "series_status": [],
+            "notes": [],
+            "generated_at": "2026-06-29T16:30:00-04:00",
+        }
+    )
+
+    assert 'data-flow-view-tab="closed"' in html
+    assert 'data-flow-view-tab="asia_intraday"' in html
+    assert 'class="flow-view-tab active" data-flow-view-tab="closed"' in html
+    assert 'data-flow-view-panel="closed"' in html
+    assert 'data-flow-view-panel="asia_intraday" hidden' in html
+    assert 'data-flow-view="closed"' in html
+    assert 'data-flow-view="asia_intraday"' in html
+    assert "亚洲收盘盘中快照" in html
+    assert "activateFlowView" in html
 
 
 def test_render_flow_period_dates_aligns_mixed_source_dates_to_common_close() -> None:

@@ -32,10 +32,12 @@ Both recurring jobs use the `America/Chicago` timezone and run Monday through Fr
 
 | Dallas time | Purpose | Required result checks |
 |---|---|---|
-| 06:00 | Asia-close refresh | Report China, Japan, and Korea equity latest dates; core FX latest dates; and the three tri-currency flow summaries. Before New York 16:00, a flow may be marked intraday only when all three legs share the same New York date. |
-| 15:30 | U.S.-close refresh | Report the latest U.S. market date and the tri-currency daily summaries. At or after New York 16:00, the current common date is treated as a completed daily observation rather than intraday. |
+| 06:00 | Asia-close refresh | Report China, Japan, and Korea equity latest dates; core FX latest dates; and the three tri-currency flow summaries. Before New York 16:00, replace `fx_flow_views.asia_intraday` only when all three triads are complete and every leg shares the same New York date. Report the captured New York date/time. |
+| 15:30 | U.S.-close refresh | Report the latest U.S. market date and `fx_flow_views.closed`. At or after New York 16:00, the current common date is treated as a completed daily observation rather than intraday. Verify that the previously captured Asia-close view is still present and clickable; never overwrite it with the close calculation. |
 
 The jobs are recurring trading-day updates, not weekly backfills. They must not run `git pull`, use `--weekly`, upload an entire cache directory, or weaken validation. On a market holiday, retaining the most recent common trading date is correct and must be stated in the result rather than relabeled as current.
+
+The public snapshot keeps both tri-currency views. `fx_flows` remains the backward-compatible result for the current run, while `fx_flow_views.closed` is rebuilt from completed New York sessions and `fx_flow_views.asia_intraday` is a retained morning snapshot. A partial morning update must preserve the previous valid Asia snapshot instead of publishing mixed-date legs. The dashboard defaults to the Asia view immediately after a complete morning capture and to the U.S.-close view after the close; users can switch between them without recomputation.
 
 ## Source Split
 

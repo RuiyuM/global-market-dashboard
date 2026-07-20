@@ -26,8 +26,10 @@ def test_flow_panel_precedes_collapsed_country_panel_and_defaults_expanded() -> 
     assert html.index("<h2>三币种资金流向</h2>") < html.index("<summary><span>国家面板</span>")
     assert '<button type="button" class="flow-panel-toggle" data-flow-panel-toggle aria-expanded="true">' in html
     assert '<span class="toggle-icon">▾</span><span>收起</span>' in html
-    assert '<div class="flow-grid" data-flow-panel-body>' in html
-    assert '<div class="flow-grid" data-flow-panel-body hidden>' not in html
+    assert '<div class="flow-panel-body" data-flow-panel-body>' in html
+    assert '<div class="flow-panel-body" data-flow-panel-body hidden>' not in html
+    assert 'data-flow-view-tab="closed"' in html
+    assert 'data-flow-view-panel="closed"' in html
     assert '<details class="panel country-panel">' in html
     assert '<details class="panel country-panel" open>' not in html
     assert "<summary><span>国家面板</span>" in html

@@ -503,33 +503,76 @@ def main() -> int:
                     if item["positive"] != (item["bond_10y"] >= item["bond_2y"]):
                         errors.append(f"{row.get('country')} bond curve bad positive flag")
 
-    flow_names = {section["name"] for section in snapshot.get("fx_flows", [])}
-    if flow_names != FLOWS:
-        errors.append(f"flow groups mismatch: {sorted(flow_names)}")
-    for section in snapshot.get("fx_flows", []):
-        period_names = {period["period"] for period in section.get("periods", [])}
-        if period_names != PERIODS:
-            errors.append(f"{section['name']} periods mismatch: {sorted(period_names)}")
-        for period in section.get("periods", []):
-            result = period.get("result") or {}
-            if not result.get("best_route"):
-                errors.append(f"{section['name']} {period['period']} missing best route: {period.get('missing')}")
-            if result.get("source_code") != USER_FX_FLOW_CODE:
-                errors.append(f"{section['name']} {period['period']} not using user FX flow code")
-            routes = result.get("routes", [])
-            if routes and len(routes) != 6:
-                errors.append(f"{section['name']} {period['period']} route count mismatch: {len(routes)}")
-    expected_flow_routes = len(FLOWS) * len(PERIODS) * 6
+    def validate_flow_sections(flow_sections: list[dict[str, object]], label: str) -> None:
+        flow_names = {section["name"] for section in flow_sections}
+        if flow_names != FLOWS:
+            errors.append(f"{label} flow groups mismatch: {sorted(flow_names)}")
+        for section in flow_sections:
+            period_names = {period["period"] for period in section.get("periods", [])}
+            if period_names != PERIODS:
+                errors.append(f"{label} {section['name']} periods mismatch: {sorted(period_names)}")
+            for period in section.get("periods", []):
+                result = period.get("result") or {}
+                if not result.get("best_route"):
+                    errors.append(
+                        f"{label} {section['name']} {period['period']} missing best route: {period.get('missing')}"
+                    )
+                if result.get("source_code") != USER_FX_FLOW_CODE:
+                    errors.append(f"{label} {section['name']} {period['period']} not using user FX flow code")
+                routes = result.get("routes", [])
+                if routes and len(routes) != 6:
+                    errors.append(
+                        f"{label} {section['name']} {period['period']} route count mismatch: {len(routes)}"
+                    )
+
+    current_flows = snapshot.get("fx_flows", [])
+    validate_flow_sections(current_flows, "current")
+    flow_views = snapshot.get("fx_flow_views")
+    rendered_flow_views: dict[str, dict[str, object]] = {}
+    if not isinstance(flow_views, dict):
+        errors.append("missing fx_flow_views")
+        flow_views = {}
+    else:
+        for view_key in ["closed", "asia_intraday"]:
+            view = flow_views.get(view_key)
+            if view is None and view_key == "asia_intraday":
+                continue
+            if not isinstance(view, dict) or not isinstance(view.get("flows"), list):
+                errors.append(f"invalid FX flow view: {view_key}")
+                continue
+            rendered_flow_views[view_key] = view
+            validate_flow_sections(view["flows"], view_key)
+        default_flow_view = flow_views.get("default")
+        if default_flow_view not in rendered_flow_views:
+            errors.append(f"invalid default FX flow view: {default_flow_view}")
+
+    closed_view = rendered_flow_views.get("closed")
+    if closed_view:
+        for section in closed_view["flows"]:
+            daily = next((period for period in section.get("periods", []) if period.get("period") == "当日"), {})
+            if daily.get("is_intraday"):
+                errors.append(f"closed {section.get('name')} daily flow should not be intraday")
+    asia_view = rendered_flow_views.get("asia_intraday")
+    if asia_view:
+        if asia_view.get("is_intraday") is not True:
+            errors.append("Asia FX flow view should be marked intraday")
+        for section in asia_view["flows"]:
+            daily = next((period for period in section.get("periods", []) if period.get("period") == "当日"), {})
+            if not daily.get("is_intraday"):
+                errors.append(f"Asia {section.get('name')} daily flow should be intraday")
+
+    expected_flow_routes = len(FLOWS) * len(PERIODS) * 6 * len(rendered_flow_views)
     flow_route_count = html.count('class="flow-route"')
     if flow_route_count != expected_flow_routes:
         errors.append(f"flow route button count mismatch: {flow_route_count}")
     collapsed_route_groups = html.count('class="flow-routes" hidden')
-    if collapsed_route_groups != FLOW_PERIOD_COUNT:
+    expected_route_groups = FLOW_PERIOD_COUNT * len(rendered_flow_views)
+    if collapsed_route_groups != expected_route_groups:
         errors.append(f"collapsed flow route group count mismatch: {collapsed_route_groups}")
     flow_expand_count = html.count('class="flow-expand"')
-    if flow_expand_count != FLOW_PERIOD_COUNT:
+    if flow_expand_count != expected_route_groups:
         errors.append(f"flow route expand button count mismatch: {flow_expand_count}")
-    if 'class="flow-grid" data-flow-panel-body hidden' in html:
+    if 'class="flow-panel-body" data-flow-panel-body hidden' in html:
         errors.append("FX flow panel should default expanded")
     if '<button type="button" class="flow-panel-toggle" data-flow-panel-toggle aria-expanded="true">' not in html:
         errors.append("FX flow panel toggle should default expanded")
@@ -546,6 +589,9 @@ def main() -> int:
         'id="fx-flow-data"',
         'data-flow-panel-toggle',
         'data-flow-panel-body',
+        'data-flow-view-tab="closed"',
+        'data-flow-view-panel="closed"',
+        "activateFlowView",
         "toggleFlowPanel",
         ".flow-routes[hidden]",
         ".flow-route-detail",

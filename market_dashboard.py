@@ -2145,13 +2145,122 @@ def build_flow_sections(
     return sections
 
 
-def load_previous_fetch_context() -> tuple[list[dict[str, str]], str]:
+def flow_view_daily_periods(flows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    daily_periods = []
+    for section in flows:
+        daily = next((item for item in section.get("periods", []) if item.get("period") == "当日"), None)
+        if daily:
+            daily_periods.append(daily)
+    return daily_periods
+
+
+def complete_flow_view(flows: list[dict[str, Any]]) -> bool:
+    daily_periods = flow_view_daily_periods(flows)
+    return len(daily_periods) == 3 and all(
+        period.get("result") and len(period.get("changes", [])) == 3 for period in daily_periods
+    )
+
+
+def complete_intraday_flow_view(flows: list[dict[str, Any]]) -> bool:
+    daily_periods = flow_view_daily_periods(flows)
+    if not complete_flow_view(flows) or not all(period.get("is_intraday") for period in daily_periods):
+        return False
+    latest_dates = {
+        change.get("latest_date")
+        for period in daily_periods
+        for change in period.get("changes", [])
+        if change.get("latest_date")
+    }
+    return len(latest_dates) == 1
+
+
+def flow_view_as_of_dates(flows: list[dict[str, Any]]) -> dict[str, str]:
+    as_of_dates: dict[str, str] = {}
+    for section in flows:
+        daily = next((item for item in section.get("periods", []) if item.get("period") == "当日"), None)
+        latest_dates = sorted(
+            {
+                str(change.get("latest_date"))
+                for change in (daily or {}).get("changes", [])
+                if change.get("latest_date")
+            }
+        )
+        if len(latest_dates) == 1:
+            as_of_dates[str(section.get("name", ""))] = latest_dates[0]
+    return as_of_dates
+
+
+def make_fx_flow_view(
+    label: str,
+    flows: list[dict[str, Any]],
+    captured_at: datetime,
+    *,
+    is_intraday: bool,
+) -> dict[str, Any]:
+    captured_at_ny = captured_at.astimezone(ZoneInfo("America/New_York"))
+    as_of_dates = flow_view_as_of_dates(flows)
+    unique_as_of_dates = set(as_of_dates.values())
+    return {
+        "label": label,
+        "captured_at": captured_at_ny.isoformat(timespec="seconds"),
+        "as_of_date": next(iter(unique_as_of_dates)) if len(unique_as_of_dates) == 1 else "",
+        "as_of_dates": as_of_dates,
+        "is_intraday": is_intraday,
+        "complete": complete_flow_view(flows),
+        "flows": flows,
+    }
+
+
+def valid_saved_intraday_flow_view(view: Any) -> bool:
+    if not isinstance(view, dict) or view.get("is_intraday") is not True:
+        return False
+    flows = view.get("flows")
+    return isinstance(flows, list) and complete_intraday_flow_view(flows)
+
+
+def build_fx_flow_views(
+    series: dict[str, list[dict[str, Any]]],
+    *,
+    previous_snapshot: dict[str, Any] | None = None,
+    now: datetime | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    captured_at = now or datetime.now().astimezone()
+    if captured_at.tzinfo is None or captured_at.utcoffset() is None:
+        raise ValueError("now must be timezone-aware")
+
+    current_flows = build_flow_sections(series, include_intraday=True, now=captured_at)
+    closed_flows = build_flow_sections(series, include_intraday=False, now=captured_at)
+    closed_view = make_fx_flow_view("美股收盘", closed_flows, captured_at, is_intraday=False)
+
+    previous_views = (previous_snapshot or {}).get("fx_flow_views")
+    previous_asia = previous_views.get("asia_intraday") if isinstance(previous_views, dict) else None
+    captured_fresh_asia = complete_intraday_flow_view(current_flows)
+    if captured_fresh_asia:
+        asia_view = make_fx_flow_view("亚洲收盘盘中", current_flows, captured_at, is_intraday=True)
+    elif valid_saved_intraday_flow_view(previous_asia):
+        asia_view = previous_asia
+    else:
+        asia_view = None
+
+    return current_flows, {
+        "default": "asia_intraday" if captured_fresh_asia else "closed",
+        "closed": closed_view,
+        "asia_intraday": asia_view,
+    }
+
+
+def load_previous_snapshot() -> dict[str, Any]:
     if not SNAPSHOT_JSON.exists():
-        return [], ""
+        return {}
     try:
         previous = json.loads(SNAPSHOT_JSON.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return [], ""
+        return {}
+    return previous if isinstance(previous, dict) else {}
+
+
+def load_previous_fetch_context(previous: dict[str, Any] | None = None) -> tuple[list[dict[str, str]], str]:
+    previous = previous if previous is not None else load_previous_snapshot()
     records = previous.get("fetch_records")
     if not isinstance(records, list):
         records = []
@@ -2176,10 +2285,20 @@ def build_snapshot(
     force_policy_news_refresh: bool = False,
     fetch_mode: str = "network",
     last_fetch_at: str = "",
+    previous_snapshot: dict[str, Any] | None = None,
+    now: datetime | None = None,
 ) -> dict[str, Any]:
     series, specs = load_all_series()
     countries = build_country_rows(series, specs)
-    generated_at = datetime.now().astimezone().isoformat(timespec="seconds")
+    generated_at_dt = now or datetime.now().astimezone()
+    if generated_at_dt.tzinfo is None or generated_at_dt.utcoffset() is None:
+        raise ValueError("now must be timezone-aware")
+    generated_at = generated_at_dt.isoformat(timespec="seconds")
+    fx_flows, fx_flow_views = build_fx_flow_views(
+        series,
+        previous_snapshot=previous_snapshot,
+        now=generated_at_dt,
+    )
     snapshot = {
         "generated_at": generated_at,
         "fetch_mode": fetch_mode,
@@ -2196,7 +2315,8 @@ def build_snapshot(
         "volatility_rankings": volatility_rankings(countries),
         "fx_rank_details": build_fx_cross_details(series),
         "second_order_monitor": build_second_order_monitor(series, specs),
-        "fx_flows": build_flow_sections(series, include_intraday=True),
+        "fx_flows": fx_flows,
+        "fx_flow_views": fx_flow_views,
         "hike_cycle_example": build_hike_cycle_example(series),
         "series_status": build_series_status(series, specs),
         "source_audit": build_source_audit(series, specs),
@@ -2207,6 +2327,7 @@ def build_snapshot(
             "7D/30D 波动率 = 对应窗口相邻交易观测的平均绝对日变化；债券单位 bp/日，股指和汇率单位 %/日。",
             f"三币种资金流向直接调用用户提供代码：{USER_FX_FLOW_CODE}",
             "三币种资金流向以纽约时间为统一日期；16:00前仅当每组三条汇率都有纽约当日数据时显示盘中值，否则停在最近共同收盘日，避免亚洲/欧洲先更新造成跨日期混算。",
+            "三币种资金流向同时保留美股收盘与亚洲收盘盘中两个视图；亚洲盘中快照只在三组全部完成同日对齐时更新，美股收盘更新不会覆盖已留存的亚洲快照。",
             "derived = 本地公式而非外部供应商：CNY_BASE=1；债券曲线=10Y-2Y；CNYJPY=1/JPYCNY；RUB/CNY 优先使用 MOEX CNYRUB_TOM 真实直接成交历史的倒数，Yahoo 仅作交叉核验，MOEX 缺失或陈旧时才用 USDCNY/USDRUB 派生；RUB/JPY 仍要求 Yahoo 直接报价具备历史深度且与同日公式价偏差不超过2%。",
             "美债扩展期限优先使用 WSCN 日线；中国国债使用 ChinaMoney/CFETS 官方收盘收益率曲线并按缺口回填历史，其中中国3M合并 ChinaBond/CCDC 政府债收益率曲线历史；德国2Y/10Y使用 WSCN 日线、Investing.com 周度缺口补档和 Bundesbank 官方收盘锚点，德国5Y/7Y/30Y使用 Bundesbank 当前联邦证券官方日频 CSV，德国1Y/3Y使用 Bundesbank 官方 Svensson 期限结构日频 CSV，德国3M/6M暂无稳定官方日频二级市场源，暂用 Trading Economics 最新页；日本1M/3M/6M 使用 Trading Economics 图表历史、Investing.com 历史表并合并 Trading Economics 最新页；日本1Y/2Y/3Y/5Y/7Y/10Y/30Y 使用日本财务省 MOF 官方收益率曲线作为历史底座，WSCN 提供可用日线 OHLC，Investing.com 周度补齐 OHLC 缺口，并合并 Trading Economics 最新页；韩国1M/3M/6M 使用 SMBS KORIBOR 作为短端资金代理而非政府债，韩国3M/6M可由 BOK ECOS 交叉验证，韩国1Y/2Y/3Y/5Y/10Y/30Y 使用 Investing.com 历史表并在有更新日期时合并 Trading Economics 最新页；俄罗斯2Y/10Y 在 Investing.com 被云服务器拦截时保留历史缓存并合并 Trading Economics 最新页。",
             "宏观指标使用 Yahoo Finance 日线：美元指数 DX-Y.NYB、VIX ^VIX、黄金 GC=F、WTI 原油 CL=F。",
@@ -3481,12 +3602,128 @@ def render_hike_cycle_example(example: dict[str, Any]) -> str:
     return "".join(html)
 
 
+def normalized_fx_flow_views(snapshot: dict[str, Any]) -> dict[str, Any]:
+    raw_views = snapshot.get("fx_flow_views")
+    views: dict[str, Any] = {}
+    default_view = "closed"
+    if isinstance(raw_views, dict):
+        default_view = str(raw_views.get("default") or "closed")
+        for key in ("closed", "asia_intraday"):
+            view = raw_views.get(key)
+            if isinstance(view, dict) and isinstance(view.get("flows"), list):
+                views[key] = view
+
+    if "closed" not in views:
+        legacy_flows = snapshot.get("fx_flows")
+        if not isinstance(legacy_flows, list):
+            legacy_flows = []
+        views["closed"] = {
+            "label": "美股收盘",
+            "captured_at": snapshot.get("generated_at", ""),
+            "as_of_date": "",
+            "as_of_dates": flow_view_as_of_dates(legacy_flows),
+            "is_intraday": False,
+            "complete": complete_flow_view(legacy_flows),
+            "flows": legacy_flows,
+        }
+    if default_view not in views:
+        default_view = "closed"
+    return {"default": default_view, "views": views}
+
+
+def flow_view_time_label(value: Any) -> str:
+    try:
+        captured_at = datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return ""
+    if captured_at.tzinfo is None or captured_at.utcoffset() is None:
+        return captured_at.strftime("%m-%d %H:%M")
+    return captured_at.astimezone(ZoneInfo("America/New_York")).strftime("%m-%d %H:%M")
+
+
+def flow_view_caption(view_key: str, view: dict[str, Any]) -> str:
+    as_of_date = short_date_range_label(str(view.get("as_of_date") or ""))
+    captured_at = flow_view_time_label(view.get("captured_at"))
+    if view_key == "asia_intraday":
+        parts = ["亚洲收盘盘中快照"]
+        if as_of_date:
+            parts.append(f"纽约日期 {as_of_date}")
+        if captured_at:
+            parts.append(f"采集于纽约 {captured_at}")
+    else:
+        parts = ["美股收盘快照"]
+        if as_of_date:
+            parts.append(f"共同收盘日 {as_of_date}")
+        if captured_at:
+            parts.append(f"生成于纽约 {captured_at}")
+    return " · ".join(parts)
+
+
+def render_flow_view_grid(view_key: str, view: dict[str, Any], *, active: bool) -> str:
+    flows = view.get("flows") if isinstance(view.get("flows"), list) else []
+    hidden = "" if active else " hidden"
+    html = [
+        f'<div class="flow-view-panel" role="tabpanel" data-flow-view-panel="{escape(view_key)}"{hidden}>',
+        f'<p class="flow-view-caption">{escape(flow_view_caption(view_key, view))}</p>',
+        '<div class="flow-grid">',
+    ]
+    for section_index, section in enumerate(flows):
+        html.append('<div class="flow-block">')
+        html.append(f'<h3>{escape(section["name"])}</h3>')
+        for period_index, period in enumerate(section.get("periods", [])):
+            html.append('<div class="flow-row">')
+            date_range = period.get("date_range") or ""
+            date_html = f'<small>{escape(short_date_range_label(str(date_range)))}</small>' if date_range else ""
+            live_html = '<span class="flow-live-tag">盘中</span>' if period.get("is_intraday") else ""
+            html.append(f'<div class="period"><strong>{escape(period["period"])}{live_html}</strong>{date_html}</div>')
+            result = period.get("result")
+            if result and result.get("best_route"):
+                best = result["best_route"]
+                route_path = " > ".join([best["x"], best["y"], best["z"]])
+                html.append(
+                    '<div class="flow-cell">'
+                    f'<div><strong>{escape(best["label"])}</strong> '
+                    f'<span class="pos">{best["score"]:+.4f}</span></div>'
+                    f'<div class="muted">路径：{escape(route_path)}</div>'
+                    f'<button type="button" class="flow-expand" data-flow-view="{escape(view_key)}" '
+                    f'data-flow-section="{section_index}" data-flow-period="{period_index}" aria-expanded="false">'
+                    '<span class="toggle-icon">▸</span><span>查看6条路线</span>'
+                    '</button>'
+                    f'<div class="flow-routes" hidden data-flow-routes="{escape(view_key)}-{section_index}-{period_index}">'
+                )
+                for route_index, route in enumerate(result.get("routes", [])):
+                    score_cls = "pos" if route["score"] >= 0 else "neg"
+                    status = "成立" if route["score"] > 0 else "不成立" if route["score"] < 0 else "临界"
+                    html.append(
+                        f'<button type="button" class="flow-route" data-flow-view="{escape(view_key)}" '
+                        f'data-flow-section="{section_index}" data-flow-period="{period_index}" '
+                        f'data-flow-route="{route_index}">'
+                        f'<span>{escape(route["label"])}</span>'
+                        f'<span class="{score_cls}">{route["score"]:+.4f}</span>'
+                        f'<span class="route-status">{escape(status)}</span>'
+                        '</button>'
+                    )
+                html.append('</div></div>')
+            else:
+                html.append(f'<div class="muted">缺少：{escape(", ".join(period.get("missing", [])))}</div>')
+            html.append('</div>')
+        html.append('</div>')
+    html.extend(['</div>', '</div>'])
+    return "".join(html)
+
+
 def render_html(snapshot: dict[str, Any]) -> str:
     countries = snapshot["countries"]
     rankings = snapshot["volatility_rankings"]
     fx_rank_details = snapshot.get("fx_rank_details", {})
     second_order = snapshot["second_order_monitor"]
-    flow_json = json.dumps(snapshot["fx_flows"], ensure_ascii=False).replace("</", "<\\/")
+    normalized_flow_views = normalized_fx_flow_views(snapshot)
+    flow_default_view = normalized_flow_views["default"]
+    flow_views = normalized_flow_views["views"]
+    flow_json = json.dumps(
+        {key: view["flows"] for key, view in flow_views.items()},
+        ensure_ascii=False,
+    ).replace("</", "<\\/")
     ohlc_payload = {
         row["key"]: {
             "country": row["country"],
@@ -3747,49 +3984,33 @@ def render_html(snapshot: dict[str, Any]) -> str:
             '<span class="toggle-icon">▾</span><span>收起</span>'
             "</button>",
             "</div>",
-            '<div class="flow-grid" data-flow-panel-body>',
+            '<div class="flow-panel-body" data-flow-panel-body>',
+            '<div class="flow-view-tabs" role="tablist" aria-label="资金流向时间视图">',
         ]
     )
-    for section_index, section in enumerate(snapshot["fx_flows"]):
-        html.append('<div class="flow-block">')
-        html.append(f'<h3>{escape(section["name"])}</h3>')
-        for period_index, period in enumerate(section["periods"]):
-            html.append('<div class="flow-row">')
-            date_range = period.get("date_range") or ""
-            date_html = f'<small>{escape(short_date_range_label(str(date_range)))}</small>' if date_range else ""
-            live_html = '<span class="flow-live-tag">盘中</span>' if period.get("is_intraday") else ""
-            html.append(f'<div class="period"><strong>{escape(period["period"])}{live_html}</strong>{date_html}</div>')
-            result = period["result"]
-            if result and result["best_route"]:
-                best = result["best_route"]
-                route_path = " > ".join([best["x"], best["y"], best["z"]])
-                html.append(
-                    '<div class="flow-cell">'
-                    f'<div><strong>{escape(best["label"])}</strong> '
-                    f'<span class="pos">{best["score"]:+.4f}</span></div>'
-                    f'<div class="muted">路径：{escape(route_path)}</div>'
-                    f'<button type="button" class="flow-expand" data-flow-section="{section_index}" '
-                    f'data-flow-period="{period_index}" aria-expanded="false">'
-                    '<span class="toggle-icon">▸</span><span>查看6条路线</span>'
-                    "</button>"
-                    f'<div class="flow-routes" hidden data-flow-routes="{section_index}-{period_index}">'
-                )
-                for route_index, route in enumerate(result["routes"]):
-                    score_cls = "pos" if route["score"] >= 0 else "neg"
-                    status = "成立" if route["score"] > 0 else "不成立" if route["score"] < 0 else "临界"
-                    html.append(
-                        f'<button type="button" class="flow-route" data-flow-section="{section_index}" '
-                        f'data-flow-period="{period_index}" data-flow-route="{route_index}">'
-                        f'<span>{escape(route["label"])}</span>'
-                        f'<span class="{score_cls}">{route["score"]:+.4f}</span>'
-                        f'<span class="route-status">{escape(status)}</span>'
-                        "</button>"
-                    )
-                html.append("</div></div>")
-            else:
-                html.append(f'<div class="muted">缺少：{escape(", ".join(period["missing"]))}</div>')
-            html.append("</div>")
-        html.append("</div>")
+    flow_view_order = [("closed", "美股收盘"), ("asia_intraday", "亚洲收盘盘中")]
+    for view_key, label in flow_view_order:
+        view = flow_views.get(view_key)
+        active = view_key == flow_default_view
+        if view:
+            as_of = short_date_range_label(str(view.get("as_of_date") or ""))
+            meta = f"截至 {as_of}" if as_of else "查看具体日期"
+            html.append(
+                f'<button type="button" class="flow-view-tab{" active" if active else ""}" '
+                f'data-flow-view-tab="{escape(view_key)}" role="tab" aria-selected="{str(active).lower()}">'
+                f'<span>{escape(label)}</span><small>{escape(meta)}</small></button>'
+            )
+        else:
+            html.append(
+                '<button type="button" class="flow-view-tab" disabled aria-disabled="true" '
+                'title="下一次亚洲收盘更新后可用">'
+                f'<span>{escape(label)}</span><small>等待首次留存</small></button>'
+            )
+    html.append('</div>')
+    for view_key, _ in flow_view_order:
+        view = flow_views.get(view_key)
+        if view:
+            html.append(render_flow_view_grid(view_key, view, active=view_key == flow_default_view))
     html.extend(
         [
             "</div>",
@@ -4242,6 +4463,28 @@ th:first-child, td:first-child { text-align: left; }
   cursor: pointer;
 }
 .flow-panel-toggle:hover { background: #f8fafc; border-color: #b7c2cf; }
+.flow-panel-body[hidden] { display: none; }
+.flow-view-tabs { display: flex; align-items: stretch; gap: 8px; margin-top: 12px; }
+.flow-view-tab {
+  display: grid;
+  gap: 2px;
+  min-width: 148px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+  padding: 7px 10px;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.flow-view-tab span { font-size: 13px; font-weight: 750; }
+.flow-view-tab small { color: var(--muted); font-size: 10px; font-weight: 650; }
+.flow-view-tab:hover:not(:disabled) { border-color: #9cb4d2; background: #f8fafc; }
+.flow-view-tab.active { border-color: var(--blue); background: #eaf2ff; color: var(--blue); }
+.flow-view-tab:disabled { cursor: not-allowed; opacity: 0.58; }
+.flow-view-panel[hidden] { display: none; }
+.flow-view-caption { margin: 10px 0 0; color: var(--muted); font-size: 11px; font-weight: 650; }
 .flow-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
 .flow-grid[hidden] { display: none; }
 .flow-block { padding: 12px; }
@@ -4391,6 +4634,7 @@ th:first-child, td:first-child { text-align: left; }
   .daily-alert-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .policy-news-head { align-items: flex-start; flex-direction: column; }
   .policy-news-grid, .ranking-grid, .flow-grid { grid-template-columns: 1fr; }
+  .flow-view-tabs { flex-wrap: wrap; }
   .policy-actions-head { align-items: flex-start; flex-direction: column; }
   .policy-actions-head span { text-align: left; }
   .policy-action-row { grid-template-columns: 78px 78px minmax(0, 1fr); }
@@ -4432,6 +4676,8 @@ th:first-child, td:first-child { text-align: left; }
   #ohlc-jump-date-button { grid-column: 1 / -1; }
   .ohlc-head { font-size: 12px; line-height: 1.45; }
   #ohlc-chart { min-height: 260px; }
+  .flow-view-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .flow-view-tab { min-width: 0; width: 100%; }
 }
 """
 
@@ -4442,7 +4688,7 @@ JS = """
   const ohlcData = JSON.parse(raw);
   const spreadRaw = document.getElementById("spread-data")?.textContent || "[]";
   const spreadData = JSON.parse(spreadRaw);
-  const flowRaw = document.getElementById("fx-flow-data")?.textContent || "[]";
+  const flowRaw = document.getElementById("fx-flow-data")?.textContent || "{}";
   const flowData = JSON.parse(flowRaw);
   const rows = Array.from(document.querySelectorAll(".derivative-row"));
   const countryToggles = Array.from(document.querySelectorAll(".country-toggle"));
@@ -4450,6 +4696,8 @@ JS = """
   const extraBondToggleRows = Array.from(document.querySelectorAll("[data-extra-bond-toggle-row]"));
   const flowPanelToggle = document.querySelector("[data-flow-panel-toggle]");
   const flowPanelBody = document.querySelector("[data-flow-panel-body]");
+  const flowViewTabs = Array.from(document.querySelectorAll("[data-flow-view-tab]"));
+  const flowViewPanels = Array.from(document.querySelectorAll("[data-flow-view-panel]"));
   const flowExpandButtons = Array.from(document.querySelectorAll(".flow-expand"));
   const flowRoutes = Array.from(document.querySelectorAll(".flow-route"));
   const policyActionToggles = Array.from(document.querySelectorAll("[data-policy-actions-toggle]"));
@@ -4655,16 +4903,16 @@ JS = """
     button.textContent = nextExpanded ? "收起数字计算" : "展开数字计算";
   };
 
-  const renderFlowDetail = (sectionIndex, periodIndex, routeIndex, routeButton) => {
-    const section = flowData[Number(sectionIndex)];
+  const renderFlowDetail = (flowView, sectionIndex, periodIndex, routeIndex, routeButton) => {
+    const section = flowData[flowView]?.[Number(sectionIndex)];
     const period = section?.periods?.[Number(periodIndex)];
     const route = period?.result?.routes?.[Number(routeIndex)];
     const selectedButton = routeButton || document.querySelector(
-      `.flow-route[data-flow-section="${sectionIndex}"][data-flow-period="${periodIndex}"][data-flow-route="${routeIndex}"]`
+      `.flow-route[data-flow-view="${flowView}"][data-flow-section="${sectionIndex}"][data-flow-period="${periodIndex}"][data-flow-route="${routeIndex}"]`
     );
     if (!section || !period || !route || !selectedButton) return;
     const flowDetail = activeFlowDetail || createFlowDetail();
-    const routeKey = `${sectionIndex}-${periodIndex}-${routeIndex}`;
+    const routeKey = `${flowView}-${sectionIndex}-${periodIndex}-${routeIndex}`;
     if (activeFlowRouteKey === routeKey && selectedButton.nextElementSibling === flowDetail && !flowDetail.hidden) {
       collapseFlowDetail();
       return;
@@ -4687,7 +4935,8 @@ JS = """
       .join("") || '<p class="muted">无闭环残差。</p>';
 
     flowRoutes.forEach((button) => {
-      const selected = button.dataset.flowSection === String(sectionIndex)
+      const selected = button.dataset.flowView === String(flowView)
+        && button.dataset.flowSection === String(sectionIndex)
         && button.dataset.flowPeriod === String(periodIndex)
         && button.dataset.flowRoute === String(routeIndex);
       button.classList.toggle("selected", selected);
@@ -4724,7 +4973,7 @@ JS = """
   };
 
   const toggleFlowRoutes = (button) => {
-    const key = `${button.dataset.flowSection}-${button.dataset.flowPeriod}`;
+    const key = `${button.dataset.flowView}-${button.dataset.flowSection}-${button.dataset.flowPeriod}`;
     const routes = document.querySelector(`[data-flow-routes="${key}"]`);
     if (!routes) return;
     const nextExpanded = button.getAttribute("aria-expanded") !== "true";
@@ -4734,6 +4983,20 @@ JS = """
     if (icon) icon.textContent = nextExpanded ? "▾" : "▸";
     const label = button.querySelector("span:last-child");
     if (label) label.textContent = nextExpanded ? "收起6条路线" : "查看6条路线";
+  };
+
+  const activateFlowView = (button) => {
+    const flowView = button.dataset.flowViewTab;
+    if (!flowView || !flowData[flowView]) return;
+    collapseFlowDetail();
+    flowViewTabs.forEach((item) => {
+      const selected = item === button;
+      item.classList.toggle("active", selected);
+      item.setAttribute("aria-selected", String(selected));
+    });
+    flowViewPanels.forEach((panelItem) => {
+      panelItem.hidden = panelItem.dataset.flowViewPanel !== flowView;
+    });
   };
 
   const toggleFlowPanel = () => {
@@ -5743,9 +6006,19 @@ JS = """
 
   flowPanelToggle?.addEventListener("click", toggleFlowPanel);
 
+  flowViewTabs.forEach((button) => {
+    button.addEventListener("click", () => activateFlowView(button));
+  });
+
   flowRoutes.forEach((button) => {
     button.addEventListener("click", () => {
-      renderFlowDetail(button.dataset.flowSection, button.dataset.flowPeriod, button.dataset.flowRoute, button);
+      renderFlowDetail(
+        button.dataset.flowView,
+        button.dataset.flowSection,
+        button.dataset.flowPeriod,
+        button.dataset.flowRoute,
+        button
+      );
     });
   });
 
@@ -5928,13 +6201,14 @@ JS = """
 
 def main() -> int:
     args = parse_args()
+    previous_snapshot = load_previous_snapshot()
     if args.fetch:
         LOCAL_PATCH_REPORT_JSON.unlink(missing_ok=True)
         fetch_records = fetch_all(args)
         fetch_mode = "network"
         last_fetch_at = datetime.now().astimezone().isoformat(timespec="seconds")
     else:
-        fetch_records, last_fetch_at = load_previous_fetch_context()
+        fetch_records, last_fetch_at = load_previous_fetch_context(previous_snapshot)
         fetch_mode = "cache"
     snapshot = build_snapshot(
         fetch_records,
@@ -5942,6 +6216,7 @@ def main() -> int:
         force_policy_news_refresh=args.force_policy_news_refresh,
         fetch_mode=fetch_mode,
         last_fetch_at=last_fetch_at,
+        previous_snapshot=previous_snapshot,
     )
     DASHBOARD.mkdir(parents=True, exist_ok=True)
     SNAPSHOT_JSON.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
