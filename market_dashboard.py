@@ -614,7 +614,7 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
                 {
                     "status": fetch_record_status(incoming),
                     "rows": str(len(rows)),
-                    "latest": rows[-1]["date"] if rows else "",
+                    "latest": incoming[-1]["date"] if incoming else "",
                 }
             )
         except Exception as exc:

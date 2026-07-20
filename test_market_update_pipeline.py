@@ -129,16 +129,19 @@ def test_wscn_overlay_excludes_close_only_holiday_row(tmp_path, monkeypatch) -> 
         "fetch_wscn_ohlc",
         lambda *_args: [complete, holiday_close_only],
     )
+    market_dashboard.write_ohlc(tmp_path / spec.cache_file, [holiday_close_only])
 
     records = market_dashboard.fetch_all(SimpleNamespace(wscn_count=10, lookback_days=30, sleep_sec=0))
 
     assert records[0]["status"] == "ok"
     assert records[0]["latest"] == "2026-07-17"
     cached = market_dashboard.read_ohlc(tmp_path / spec.cache_file)
-    assert len(cached) == 1
+    assert len(cached) == 2
     assert cached[0]["date"] == date(2026, 7, 17)
     assert cached[0]["open"] == 1.90
     assert cached[0]["close"] == 1.92
+    assert cached[1]["date"] == date(2026, 7, 20)
+    assert not market_dashboard.has_complete_ohlc(cached[1])
 
 
 def test_no_fetch_context_preserves_last_network_audit(tmp_path, monkeypatch) -> None:
