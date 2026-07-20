@@ -63,6 +63,36 @@ def test_empty_wscn_response_does_not_overwrite_cache(tmp_path, monkeypatch) -> 
     assert market_dashboard.read_ohlc(tmp_path / spec.cache_file)[-1]["date"].isoformat() == "2026-07-09"
 
 
+def test_partial_wscn_response_merges_with_existing_history(tmp_path, monkeypatch) -> None:
+    spec = market_dashboard.SeriesSpec("TEST", "Test", "equity", "wscn", "TEST.SS", "TEST.csv")
+    cached = [
+        {"date": "2026-07-16", "timestamp": 1, "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.5},
+        {"date": "2026-07-17", "timestamp": 2, "open": 100.5, "high": 102.0, "low": 100.0, "close": 101.5},
+    ]
+    incoming = [
+        {"date": "2026-07-20", "timestamp": 3, "open": 101.5, "high": 103.0, "low": 101.0, "close": 102.5}
+    ]
+    monkeypatch.setattr(market_dashboard, "DASHBOARD_DATA", tmp_path)
+    monkeypatch.setattr(market_dashboard, "WSCN_SPECS", [spec])
+    monkeypatch.setattr(market_dashboard, "MOEX_SPECS", [])
+    monkeypatch.setattr(market_dashboard, "YAHOO_SPECS", [])
+    monkeypatch.setattr(market_dashboard, "NIKKEI_SPECS", [])
+    monkeypatch.setattr(market_dashboard, "CHINA_BOND_SPECS", [])
+    monkeypatch.setattr(market_dashboard, "GERMANY_BOND_SPECS", [])
+    monkeypatch.setattr(market_dashboard, "KOREA_BOND_SPECS", [])
+    monkeypatch.setattr(market_dashboard, "JAPAN_BOND_SPECS", [])
+    monkeypatch.setattr(market_dashboard, "INVESTING_SPECS", [])
+    monkeypatch.setattr(market_dashboard, "fetch_wscn_ohlc", lambda *_args: incoming)
+    market_dashboard.write_ohlc(tmp_path / spec.cache_file, cached)
+
+    records = market_dashboard.fetch_all(SimpleNamespace(wscn_count=10, lookback_days=30, sleep_sec=0))
+
+    rows = market_dashboard.read_ohlc(tmp_path / spec.cache_file)
+    assert records[0]["status"] == "ok"
+    assert records[0]["rows"] == "3"
+    assert [item["date"] for item in rows] == [date(2026, 7, 16), date(2026, 7, 17), date(2026, 7, 20)]
+
+
 def test_wscn_overlay_excludes_close_only_holiday_row(tmp_path, monkeypatch) -> None:
     spec = market_dashboard.SeriesSpec(
         "TEST_WSCN_OHLC", "Test overlay", "bond", "wscn-overlay", "TEST.OTC", "TEST.csv"
