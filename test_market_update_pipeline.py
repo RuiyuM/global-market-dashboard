@@ -63,6 +63,54 @@ def test_empty_wscn_response_does_not_overwrite_cache(tmp_path, monkeypatch) -> 
     assert market_dashboard.read_ohlc(tmp_path / spec.cache_file)[-1]["date"].isoformat() == "2026-07-09"
 
 
+def test_wscn_overlay_excludes_close_only_holiday_row(tmp_path, monkeypatch) -> None:
+    spec = market_dashboard.SeriesSpec(
+        "TEST_WSCN_OHLC", "Test overlay", "bond", "wscn-overlay", "TEST.OTC", "TEST.csv"
+    )
+    complete = {
+        "date": "2026-07-17",
+        "timestamp": 1,
+        "open": 1.90,
+        "high": 1.97,
+        "low": 1.89,
+        "close": 1.92,
+    }
+    holiday_close_only = {
+        "date": "2026-07-20",
+        "timestamp": 2,
+        "open": 1.93,
+        "high": 1.93,
+        "low": 1.93,
+        "close": 1.93,
+    }
+    monkeypatch.setattr(market_dashboard, "DASHBOARD_DATA", tmp_path)
+    monkeypatch.setattr(market_dashboard, "WSCN_SPECS", [spec])
+    monkeypatch.setattr(market_dashboard, "WSCN_OHLC_OVERLAY_TARGETS", {spec.key: "TEST"})
+    monkeypatch.setattr(market_dashboard, "MOEX_SPECS", [])
+    monkeypatch.setattr(market_dashboard, "YAHOO_SPECS", [])
+    monkeypatch.setattr(market_dashboard, "NIKKEI_SPECS", [])
+    monkeypatch.setattr(market_dashboard, "CHINA_BOND_SPECS", [])
+    monkeypatch.setattr(market_dashboard, "GERMANY_BOND_SPECS", [])
+    monkeypatch.setattr(market_dashboard, "KOREA_BOND_SPECS", [])
+    monkeypatch.setattr(market_dashboard, "JAPAN_BOND_SPECS", [])
+    monkeypatch.setattr(market_dashboard, "INVESTING_SPECS", [])
+    monkeypatch.setattr(
+        market_dashboard,
+        "fetch_wscn_ohlc",
+        lambda *_args: [complete, holiday_close_only],
+    )
+
+    records = market_dashboard.fetch_all(SimpleNamespace(wscn_count=10, lookback_days=30, sleep_sec=0))
+
+    assert records[0]["status"] == "ok"
+    assert records[0]["latest"] == "2026-07-17"
+    cached = market_dashboard.read_ohlc(tmp_path / spec.cache_file)
+    assert len(cached) == 1
+    assert cached[0]["date"] == date(2026, 7, 17)
+    assert cached[0]["open"] == 1.90
+    assert cached[0]["close"] == 1.92
+
+
 def test_no_fetch_context_preserves_last_network_audit(tmp_path, monkeypatch) -> None:
     snapshot = tmp_path / "latest_market_snapshot.json"
     snapshot.write_text(

@@ -604,6 +604,8 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
         record = {"key": spec.key, "source": spec.source, "symbol": spec.symbol, "status": "pending", "file": str(path), "error": ""}
         try:
             rows = fetch_wscn_ohlc(spec.symbol, "1D", args.wscn_count, min(args.wscn_count, 1000))
+            if spec.key in WSCN_OHLC_OVERLAY_TARGETS:
+                rows = [row for row in rows if has_complete_ohlc(row)]
             if rows:
                 write_ohlc(path, rows)
             record.update({"status": fetch_record_status(rows), "rows": str(len(rows)), "latest": rows[-1]["date"] if rows else ""})
