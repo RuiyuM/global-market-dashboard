@@ -768,6 +768,22 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
         if args.sleep_sec:
             time.sleep(args.sleep_sec)
 
+    koribor_cache_latest: list[date] = []
+    koribor_cache_complete = True
+    for series_spec, source_kind, _source_key in KOREA_BOND_SPECS:
+        if source_kind != "smbs-koribor":
+            continue
+        cache_path = DASHBOARD_DATA / series_spec.cache_file
+        cached_rows = read_ohlc(cache_path) if cache_path.exists() else []
+        if not cached_rows:
+            koribor_cache_complete = False
+            break
+        koribor_cache_latest.append(row_date_key(cached_rows[-1]))
+    koribor_start = (
+        max(start, min(koribor_cache_latest) - timedelta(days=7))
+        if koribor_cache_complete and koribor_cache_latest
+        else start
+    )
     korea_koribor_rows: dict[str, list[dict[str, Any]]] | None = None
     for series_spec, source_kind, source_key in KOREA_BOND_SPECS:
         path = DASHBOARD_DATA / series_spec.cache_file

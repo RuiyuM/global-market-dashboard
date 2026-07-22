@@ -115,6 +115,29 @@ def test_rows_by_tenor_from_smbs_koribor_html_decodes_daily_history() -> None:
     assert rows["12M"][-1]["source"] == "Seoul Money Brokerage Services KORIBOR fixing"
 
 
+def test_smbs_koribor_fetch_splits_large_ranges_into_bounded_segments(monkeypatch) -> None:
+    calls: list[tuple[date, date]] = []
+
+    def fake_segment(start_day: date, end_day: date):
+        calls.append((start_day, end_day))
+        return {"1M": [close_only_row(end_day.isoformat(), 2.5 + len(calls))]}
+
+    monkeypatch.setattr(fetch_global_bond_ohlc, "_fetch_smbs_koribor_segment", fake_segment)
+    monkeypatch.setattr(fetch_global_bond_ohlc.time, "sleep", lambda _seconds: None)
+
+    rows = fetch_global_bond_ohlc.fetch_smbs_koribor_rows_by_tenor(
+        date(2026, 1, 1),
+        date(2026, 3, 15),
+    )
+
+    assert calls == [
+        (date(2026, 1, 1), date(2026, 1, 31)),
+        (date(2026, 2, 1), date(2026, 3, 3)),
+        (date(2026, 3, 4), date(2026, 3, 15)),
+    ]
+    assert [row["date"] for row in rows["1M"]] == ["2026-01-31", "2026-03-03", "2026-03-15"]
+
+
 def test_rows_from_bok_ecos_payload_parses_daily_market_rates() -> None:
     payload = {
         "StatisticSearch": {

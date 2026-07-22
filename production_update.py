@@ -188,8 +188,19 @@ def patch_smbs_koribor(keys: Iterable[str], start: date, end: date) -> tuple[lis
     supported = [key for key in requested if key in specs]
     if not supported:
         return [], failures
+    existing_by_key: dict[str, list[dict[str, Any]]] = {}
+    for key in supported:
+        spec, _tenor = specs[key]
+        path = DASHBOARD_DATA / spec.cache_file
+        existing_by_key[key] = read_ohlc(path) if path.exists() else []
+    refresh_start = start
+    if existing_by_key and all(existing_by_key.values()):
+        refresh_start = max(
+            start,
+            min(row_date_key(rows[-1]) for rows in existing_by_key.values()) - timedelta(days=7),
+        )
     try:
-        rows_by_tenor = fetch_smbs_koribor_rows_by_tenor(start, end)
+        rows_by_tenor = fetch_smbs_koribor_rows_by_tenor(refresh_start, end)
     except Exception as exc:
         failures.extend(f"{key}: {type(exc).__name__}: {exc}" for key in supported)
         return [], failures

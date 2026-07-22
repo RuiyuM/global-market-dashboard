@@ -7,6 +7,7 @@ from datetime import date, timedelta
 from types import SimpleNamespace
 
 import market_dashboard
+from fetch_japan_bond_ohlc import close_only_row
 from market_dashboard import COUNTRY_BOND_TENORS
 from market_dashboard import CHINA_BOND_SPECS
 from market_dashboard import CSS
@@ -765,6 +766,42 @@ def test_korea_short_end_koribor_history_is_shared_across_tenors(monkeypatch, tm
     assert [record["key"] for record in records] == ["KR_1M", "KR_3M", "KR_6M"]
     assert [record["rows"] for record in records] == ["1", "1", "1"]
     assert market_dashboard.read_ohlc(tmp_path / "KR_3M.csv")[0]["close"] == 3.01
+
+
+def test_korea_short_end_koribor_refresh_starts_from_oldest_cache_with_overlap(monkeypatch, tmp_path) -> None:
+    specs = [
+        (SeriesSpec("KR_1M", "KR 1M", "bond", "smbs-koribor", "SMBS:KORIBOR:1M", "KR_1M.csv"), "smbs-koribor", "1M"),
+        (SeriesSpec("KR_3M", "KR 3M", "bond", "smbs-koribor", "SMBS:KORIBOR:3M", "KR_3M.csv"), "smbs-koribor", "3M"),
+        (SeriesSpec("KR_6M", "KR 6M", "bond", "smbs-koribor", "SMBS:KORIBOR:6M", "KR_6M.csv"), "smbs-koribor", "6M"),
+    ]
+    for name in [
+        "WSCN_SPECS", "YAHOO_SPECS", "MOEX_SPECS", "NIKKEI_SPECS", "CHINA_BOND_SPECS",
+        "GERMANY_BOND_SPECS", "JAPAN_BOND_SPECS", "INVESTING_SPECS",
+    ]:
+        monkeypatch.setattr(market_dashboard, name, [])
+    monkeypatch.setattr(market_dashboard, "KOREA_BOND_SPECS", specs)
+    monkeypatch.setattr(market_dashboard, "DASHBOARD_DATA", tmp_path)
+    monkeypatch.setattr(market_dashboard, "today_utc", lambda: date(2026, 7, 21))
+    for spec, _source_kind, tenor in specs:
+        latest = date(2026, 7, 18) if tenor == "3M" else date(2026, 7, 20)
+        market_dashboard.write_ohlc(
+            tmp_path / spec.cache_file,
+            [close_only_row(latest.isoformat(), 3.0)],
+        )
+    calls: list[tuple[date, date]] = []
+
+    def fake_koribor(start_day: date, end_day: date):
+        calls.append((start_day, end_day))
+        return {
+            tenor: [close_only_row("2026-07-21", value)]
+            for tenor, value in (("1M", 2.8), ("3M", 3.0), ("6M", 3.26))
+        }
+
+    monkeypatch.setattr(market_dashboard, "fetch_smbs_koribor_rows_by_tenor", fake_koribor)
+
+    market_dashboard.fetch_all(SimpleNamespace(wscn_count=500, lookback_days=540, sleep_sec=0))
+
+    assert calls == [(date(2026, 7, 11), date(2026, 7, 21))]
 
 
 def test_korea_government_bonds_merge_investing_history_with_te_latest(monkeypatch, tmp_path) -> None:

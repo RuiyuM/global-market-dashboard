@@ -26,6 +26,7 @@ CHINABOND_PBC_REFERER = "https://yield.chinabond.com.cn/cbweb-pbc-web/pbc/showHi
 TRADINGECONOMICS_BASE_URL = "https://tradingeconomics.com"
 BOK_ECOS_BASE_URL = "https://ecos.bok.or.kr/api"
 SMBS_KORIBOR_URL = "http://www.smbs.biz/Eng/Funds/Koribor.jsp"
+SMBS_KORIBOR_MAX_QUERY_DAYS = 31
 
 CHINAMONEY_TERMS = {
     "0.083": "1M",
@@ -247,7 +248,7 @@ def rows_by_tenor_from_smbs_koribor_html(html: str) -> dict[str, list[dict[str, 
     return {tenor: sorted(rows, key=lambda row: row["date"]) for tenor, rows in rows_by_tenor.items() if rows}
 
 
-def fetch_smbs_koribor_rows_by_tenor(start_day: date, end_day: date) -> dict[str, list[dict[str, Any]]]:
+def _fetch_smbs_koribor_segment(start_day: date, end_day: date) -> dict[str, list[dict[str, Any]]]:
     form = {
         "StrSch_Year": f"{end_day.year}",
         "StrSch_Month": f"{end_day.month:02d}",
@@ -282,6 +283,25 @@ def fetch_smbs_koribor_rows_by_tenor(start_day: date, end_day: date) -> dict[str
     )
     html = urlopen(request, timeout=60).read().decode("euc-kr", "ignore")
     return rows_by_tenor_from_smbs_koribor_html(html)
+
+
+def fetch_smbs_koribor_rows_by_tenor(start_day: date, end_day: date) -> dict[str, list[dict[str, Any]]]:
+    if start_day > end_day:
+        return {}
+    collected: dict[str, list[dict[str, Any]]] = {}
+    cursor = start_day
+    while cursor <= end_day:
+        segment_end = min(end_day, cursor + timedelta(days=SMBS_KORIBOR_MAX_QUERY_DAYS - 1))
+        for tenor, rows in _fetch_smbs_koribor_segment(cursor, segment_end).items():
+            collected.setdefault(tenor, []).extend(rows)
+        cursor = segment_end + timedelta(days=1)
+        if cursor <= end_day:
+            time.sleep(0.1)
+    return {
+        tenor: [dedup[row_date] for row_date in sorted(dedup)]
+        for tenor, rows in collected.items()
+        for dedup in [{str(row["date"]): row for row in rows}]
+    }
 
 
 def rows_from_bok_ecos_payload(payload: dict[str, Any]) -> list[dict[str, Any]]:

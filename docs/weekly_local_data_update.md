@@ -106,6 +106,7 @@ An empty response, exception, or incoming dataset older than the local cache is 
 - A no-fetch render must retain `fetch_records` and `last_fetch_at`; otherwise the original 403/429 evidence is lost.
 - Expected Investing degradation may warn but does not fail while its fallback/cache remains usable.
 - Yahoo `429` is intermittent. Patch only failed Yahoo keys; do not overwrite working official/WSCN files.
+- SMBS KORIBOR refreshes start from the oldest 1M/3M/6M cache date with a 7-day overlap and split requests into at most 31-day segments. Do not restore a single 540-day POST; it can time out even while the official endpoint is healthy.
 - Do not use `git pull` as part of a data refresh. Code deployment and market-data refresh are separate operations.
 
 ## Privacy Boundary
