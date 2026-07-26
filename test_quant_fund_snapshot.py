@@ -19,6 +19,7 @@ from quant_fund_snapshot import (
     fetch_futures_trades,
     load_futures_trades_csv,
     rebuild_percent_points_after_seed,
+    require_lead_futures_context,
     update_options_percent_points,
 )
 
@@ -77,6 +78,36 @@ def test_futures_trades_fetch_uses_valid_daily_windows(monkeypatch) -> None:
         (utc_ms(2026, 6, 25), utc_ms(2026, 6, 26) - 1),
         (utc_ms(2026, 6, 26), utc_ms(2026, 6, 27) - 1000),
     ]
+
+
+def test_futures_source_requires_lead_trader_and_symbol_whitelist(monkeypatch) -> None:
+    calls = []
+
+    def fake_signed_get(_base, path, _api_key, _api_secret, _params=None):
+        calls.append(path)
+        if path.endswith("/userStatus"):
+            return {"success": True, "data": {"isLeadTrader": True}}
+        return {"success": True, "data": [{"symbol": "BTCUSDT"}]}
+
+    monkeypatch.setattr(qfs, "signed_get", fake_signed_get)
+
+    require_lead_futures_context("lead-key", "lead-secret", "BTCUSDT")
+
+    assert calls == [
+        "/sapi/v1/copyTrading/futures/userStatus",
+        "/sapi/v1/copyTrading/futures/leadSymbol",
+    ]
+
+
+def test_futures_source_rejects_regular_futures_credentials(monkeypatch) -> None:
+    monkeypatch.setattr(
+        qfs,
+        "signed_get",
+        lambda *_args, **_kwargs: {"success": True, "data": {"isLeadTrader": False}},
+    )
+
+    with pytest.raises(ValueError, match="not a lead-trading portfolio"):
+        require_lead_futures_context("regular-key", "regular-secret", "BTCUSDT")
 
 
 def test_futures_api_rebuild_preserves_seed_and_replaces_incomplete_later_points() -> None:
@@ -240,9 +271,10 @@ def test_api_futures_update_writes_only_public_percent_points(monkeypatch, tmp_p
     monkeypatch.setenv("QUANT_FUND_START_DATE", "2026-04-01")
     monkeypatch.setenv("QUANT_FUND_FUTURES_BASE_USD", "1000")
     monkeypatch.setenv("QUANT_FUND_SYMBOL", "BTCUSDT")
-    monkeypatch.setenv("BINANCE_FUTURES_API_KEY", "test-key")
-    monkeypatch.setenv("BINANCE_FUTURES_API_SECRET", "test-secret")
+    monkeypatch.setenv("BINANCE_LEAD_FUTURES_API_KEY", "test-key")
+    monkeypatch.setenv("BINANCE_LEAD_FUTURES_API_SECRET", "test-secret")
     monkeypatch.setattr(qfs, "load_existing_public_snapshot", lambda: {})
+    monkeypatch.setattr(qfs, "require_lead_futures_context", lambda *_args: None)
     monkeypatch.setattr(
         qfs,
         "fetch_futures_trades",
@@ -307,8 +339,8 @@ def test_api_futures_update_rebuilds_every_date_after_private_seed_anchor(monkey
     monkeypatch.setenv("QUANT_FUND_FUTURES_SEED_END_DATE", "2026-06-24")
     monkeypatch.setenv("QUANT_FUND_FUTURES_BASE_USD", "1000")
     monkeypatch.setenv("QUANT_FUND_SYMBOL", "BTCUSDT")
-    monkeypatch.setenv("BINANCE_FUTURES_API_KEY", "test-key")
-    monkeypatch.setenv("BINANCE_FUTURES_API_SECRET", "test-secret")
+    monkeypatch.setenv("BINANCE_LEAD_FUTURES_API_KEY", "test-key")
+    monkeypatch.setenv("BINANCE_LEAD_FUTURES_API_SECRET", "test-secret")
     monkeypatch.setattr(
         qfs,
         "load_existing_public_snapshot",
@@ -336,6 +368,7 @@ def test_api_futures_update_rebuilds_every_date_after_private_seed_anchor(monkey
         ]
 
     monkeypatch.setattr(qfs, "fetch_futures_trades", fake_fetch)
+    monkeypatch.setattr(qfs, "require_lead_futures_context", lambda *_args: None)
 
     snapshot = qfs.build_snapshot()
 
@@ -355,8 +388,8 @@ def test_api_options_update_uses_dedicated_option_futures_credentials(monkeypatc
     monkeypatch.delenv("QUANT_FUND_OPTIONS_REBASE_TOTAL_USD", raising=False)
     monkeypatch.setenv("QUANT_FUND_START_DATE", "2026-04-01")
     monkeypatch.setenv("QUANT_FUND_OPTIONS_BASE_USD", "1000")
-    monkeypatch.setenv("BINANCE_FUTURES_API_KEY", "trading-futures-key")
-    monkeypatch.setenv("BINANCE_FUTURES_API_SECRET", "trading-futures-secret")
+    monkeypatch.setenv("BINANCE_LEAD_FUTURES_API_KEY", "lead-futures-key")
+    monkeypatch.setenv("BINANCE_LEAD_FUTURES_API_SECRET", "lead-futures-secret")
     monkeypatch.setenv("BINANCE_OPTION_API_KEY", "test-option-key")
     monkeypatch.setenv("BINANCE_OPTION_API_SECRET", "test-option-secret")
     monkeypatch.setenv("BINANCE_OPTION_FUTURES_API_KEY", "option-futures-key")
@@ -394,8 +427,8 @@ def test_api_options_update_uses_dedicated_option_futures_credentials(monkeypatc
         "total_usdt_usdc",
         "option_positions",
         "futures_positions",
-        "trading-futures-key",
-        "trading-futures-secret",
+        "lead-futures-key",
+        "lead-futures-secret",
         "test-option-key",
         "test-option-secret",
         "option-futures-key",
@@ -477,8 +510,8 @@ def test_api_options_update_does_not_reuse_trading_futures_credentials(monkeypat
     monkeypatch.delenv("QUANT_FUND_OPTIONS_REBASE_DATE", raising=False)
     monkeypatch.delenv("QUANT_FUND_OPTIONS_REBASE_TOTAL_USD", raising=False)
     monkeypatch.setenv("QUANT_FUND_OPTIONS_BASE_USD", "1000")
-    monkeypatch.setenv("BINANCE_FUTURES_API_KEY", "trading-futures-key")
-    monkeypatch.setenv("BINANCE_FUTURES_API_SECRET", "trading-futures-secret")
+    monkeypatch.setenv("BINANCE_LEAD_FUTURES_API_KEY", "lead-futures-key")
+    monkeypatch.setenv("BINANCE_LEAD_FUTURES_API_SECRET", "lead-futures-secret")
     monkeypatch.setenv("BINANCE_OPTION_API_KEY", "test-option-key")
     monkeypatch.setenv("BINANCE_OPTION_API_SECRET", "test-option-secret")
     monkeypatch.setattr(

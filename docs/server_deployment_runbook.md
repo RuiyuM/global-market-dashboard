@@ -151,7 +151,7 @@ The systemd drop-in may contain only `EnvironmentFile=/opt/global-market-dashboa
 
 Expected variable categories:
 
-- futures API key and secret: Binance USD-M futures account used by the BTCUSDT futures trading script.
+- lead-futures API key and secret: the dedicated Binance Futures Copy Trading key bound to the BTCUSDT lead portfolio.
 - option API key and secret: Binance options account used by the options account-status publisher.
 - option-futures API key and secret: Binance USD-M futures account used by the options account-status publisher for its futures USDC component.
 - futures symbol
@@ -167,10 +167,11 @@ Important: `.private/` and generated snapshots are ignored by `.gitignore`.
 Important credential rule:
 
 - Futures API, options API, and option-futures API are three separate credential roles. Do not reuse one role for another.
-- `BINANCE_FUTURES_API_KEY` / `BINANCE_FUTURES_API_SECRET` must be the futures trading API, the same account used by the local BTCUSDT futures trading code.
+- `BINANCE_LEAD_FUTURES_API_KEY` / `BINANCE_LEAD_FUTURES_API_SECRET` must be the dedicated Futures Copy Trading key used by the local BTCUSDT lead-trading script.
 - `BINANCE_OPTION_API_KEY` / `BINANCE_OPTION_API_SECRET` must be the options account API, the same account used by `account_status_publisher/publish_account_status.py`.
 - `BINANCE_OPTION_FUTURES_API_KEY` / `BINANCE_OPTION_FUTURES_API_SECRET` must be the futures-balance API used by the options account-status publisher. This is not the BTCUSDT futures trading API unless the publisher really uses the same account.
 - The futures curve only reads futures trade/PnL data for `QUANT_FUND_SYMBOL`, normally `BTCUSDT`.
+- Before reading any futures fills, the updater checks Binance Copy Trading `userStatus` and `leadSymbol`. It must see `isLeadTrader=true` and the configured symbol in the lead-trading whitelist; a regular USD-M or options-related key fails closed.
 - The options curve reads option wallet value from `BINANCE_OPTION_API_*` and reads the stable futures balance component from `BINANCE_OPTION_FUTURES_API_*`.
 - Never paste any API key into Git, public HTML, public JSON, shell history, or this document.
 
@@ -208,7 +209,7 @@ Do not use the latest public point as the next API anchor. A point written durin
 
 The raw trade list is not written by the dashboard pipeline. It should only exist in memory while `quant_fund_snapshot.py` runs, unless using a one-time private CSV import path outside the public repo.
 
-If the website does not show a closed BTCUSDT trade that is visible in the trading UI, first check that the server's `BINANCE_FUTURES_API_KEY` is the same futures account as the local Lorentzian BTC script. Do not debug this by swapping in the options API.
+If the website does not show a closed BTCUSDT trade that is visible in the trading UI, first check that the server's `BINANCE_LEAD_FUTURES_API_KEY` is the same dedicated lead-portfolio key as the local Lorentzian BTC script. Do not debug this by swapping in the regular futures, options, or option-futures API.
 
 ## Options Curve Logic
 

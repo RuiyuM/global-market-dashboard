@@ -135,6 +135,35 @@ def fetch_futures_trades(api_key: str, api_secret: str, symbol: str, start: date
     return trades
 
 
+def require_lead_futures_context(api_key: str, api_secret: str, symbol: str) -> None:
+    status = signed_get(
+        SAPI_BASE,
+        "/sapi/v1/copyTrading/futures/userStatus",
+        api_key,
+        api_secret,
+    )
+    if not (
+        isinstance(status, dict)
+        and status.get("success") is True
+        and isinstance(status.get("data"), dict)
+        and status["data"].get("isLeadTrader") is True
+    ):
+        raise ValueError("futures credentials are not a lead-trading portfolio")
+
+    whitelist = signed_get(
+        SAPI_BASE,
+        "/sapi/v1/copyTrading/futures/leadSymbol",
+        api_key,
+        api_secret,
+    )
+    symbols = whitelist.get("data", []) if isinstance(whitelist, dict) and whitelist.get("success") is True else []
+    if not any(
+        isinstance(item, dict) and str(item.get("symbol", "")).upper() == symbol
+        for item in symbols
+    ):
+        raise ValueError("futures symbol is not enabled for lead trading")
+
+
 def load_futures_trades_csv(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
@@ -380,8 +409,8 @@ def build_snapshot() -> dict[str, Any]:
     options_rebase_valid = not options_rebase_requested or (
         options_rebase_date is not None and options_rebase_total is not None
     )
-    futures_key = os.environ.get("BINANCE_FUTURES_API_KEY", "")
-    futures_secret = os.environ.get("BINANCE_FUTURES_API_SECRET", "")
+    futures_key = os.environ.get("BINANCE_LEAD_FUTURES_API_KEY", "")
+    futures_secret = os.environ.get("BINANCE_LEAD_FUTURES_API_SECRET", "")
     option_key = os.environ.get("BINANCE_OPTION_API_KEY", "")
     option_secret = os.environ.get("BINANCE_OPTION_API_SECRET", "")
     option_futures_key = os.environ.get("BINANCE_OPTION_FUTURES_API_KEY", "")
@@ -421,6 +450,7 @@ def build_snapshot() -> dict[str, Any]:
         try:
             if existing_futures_points and futures_seed_end is None:
                 raise ValueError("missing futures seed configuration")
+            require_lead_futures_context(futures_key, futures_secret, symbol)
             fetch_start = (futures_seed_end + timedelta(days=1)) if futures_seed_end else start
             trades = fetch_futures_trades(futures_key, futures_secret, symbol, fetch_start, now.date())
             fetched_points = aggregate_futures_trade_curve(trades, base_usd=futures_base, start=start)
