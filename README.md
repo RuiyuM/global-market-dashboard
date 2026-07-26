@@ -54,8 +54,9 @@ No domain is required.
 - Clones this repo to `/opt/global-market-dashboard`
 - Runs an initial dashboard update and validation
 - Configures Nginx to serve `/opt/global-market-dashboard/dashboard`
-- Creates a systemd timer to update after the U.S. market close by default:
-  `Mon..Fri *-*-* 17:30:00 America/New_York`
+- Creates a server-only fallback update shortly after the U.S. market close,
+  before the local public-data patch runs:
+  `Mon..Fri *-*-* 16:10:00 America/New_York`
 
 ## Operations
 
@@ -75,7 +76,7 @@ systemctl list-timers global-market-dashboard-update.timer
 Change the update schedule:
 
 ```bash
-sudo env UPDATE_CALENDAR='Mon..Fri *-*-* 17:30:00 America/New_York' bash install_server.sh
+sudo env UPDATE_CALENDAR='Mon..Fri *-*-* 16:10:00 America/New_York' bash install_server.sh
 ```
 
 View logs:

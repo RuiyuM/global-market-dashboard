@@ -15,6 +15,7 @@ CERTBOT_SERVICE = (
 CERTBOT_TIMER = (
     ROOT / "ops" / "systemd" / "dashboard-certbot-renew.timer"
 ).read_text(encoding="utf-8")
+INSTALLER = (ROOT / "install_server.sh").read_text(encoding="utf-8")
 
 
 def test_dashboard_nginx_compresses_large_static_payloads() -> None:
@@ -69,3 +70,10 @@ def test_dashboard_ip_certificate_renews_and_reloads_nginx() -> None:
     assert "dashboard-certbot-reload-nginx" in CERTBOT_SERVICE
     assert "OnCalendar=*-*-* 00,12:17:00" in CERTBOT_TIMER
     assert "Persistent=true" in CERTBOT_TIMER
+
+
+def test_dashboard_fallback_update_precedes_local_post_close_patch() -> None:
+    assert (
+        'UPDATE_CALENDAR="${UPDATE_CALENDAR:-Mon..Fri *-*-* 16:10:00 America/New_York}"'
+        in INSTALLER
+    )

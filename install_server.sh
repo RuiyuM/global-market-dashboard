@@ -4,7 +4,7 @@ set -euo pipefail
 REPO_URL="${REPO_URL:-https://github.com/RuiyuM/global-market-dashboard.git}"
 APP_DIR="${APP_DIR:-/opt/global-market-dashboard}"
 SERVICE_USER="${SERVICE_USER:-globaldash}"
-UPDATE_CALENDAR="${UPDATE_CALENDAR:-Mon..Fri *-*-* 17:30:00 America/New_York}"
+UPDATE_CALENDAR="${UPDATE_CALENDAR:-Mon..Fri *-*-* 16:10:00 America/New_York}"
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "Run as root: curl -fsSL ... | sudo bash" >&2

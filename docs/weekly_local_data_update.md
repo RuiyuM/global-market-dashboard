@@ -24,7 +24,7 @@ Audit production without changing it:
 python production_update.py --audit-only
 ```
 
-The server-only daily timer remains useful when the Mac is offline. It updates every source reachable from Tencent Cloud, updates the sanitized quant curves, validates the rendered site, and performs a source audit.
+The server-only daily timer remains useful when the Mac is offline. It runs at 16:10 New York time, after the U.S. close but before the 15:30 Dallas local orchestrator. It updates every source reachable from Tencent Cloud, updates the sanitized quant curves, validates the rendered site, and performs a source audit. When the Mac is available, the later local run remediates Yahoo 429 sources and remains the final production audit instead of being overwritten by a redundant server-only run.
 
 ## Codex Scheduled Windows
 
