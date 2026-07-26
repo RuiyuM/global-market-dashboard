@@ -196,16 +196,11 @@ net = realizedPnl - stable-asset commission
 
 3. Accumulate net PnL by date.
 4. Divide cumulative PnL by the futures base capital.
-5. Preserve the verified CSV seed through `QUANT_FUND_FUTURES_SEED_END_DATE`.
-6. Rebuild every later API-derived point on each run, then write only `{date, pct}` points to `dashboard/quant_fund_snapshot.json`.
+5. On every run, fetch all BTCUSDT fills from `QUANT_FUND_START_DATE` through today and rebuild the full curve.
+6. Require the rebuilt curve to contain every previously published trade date and to end no earlier than the current public curve.
+7. Write only `{date, pct}` points to `dashboard/quant_fund_snapshot.json`.
 
-The current production seed ends on the final verified date in the private April initialization CSV. Configure that date only in the private environment:
-
-```text
-QUANT_FUND_FUTURES_SEED_END_DATE=<YYYY-MM-DD>
-```
-
-Do not use the latest public point as the next API anchor. A point written during an open position or before all same-day fills arrive can be incomplete. Re-fetching and replacing the full post-seed segment lets the next run finalize that date without changing the verified seed history. If the API rebuild omits a previously published post-seed trade date, the updater preserves the current public curve and reports an error instead of deleting or shifting history.
+The private April CSV is an audit/backup reference only; production does not splice it into the public curve. Do not use any published percentage as an API anchor. Recomputing directly from the complete raw fill history avoids cumulative rounding drift and lets a later run finalize an intraday point. If the API response omits a previously published trade date or is stale, the updater preserves the current public curve and reports an error instead of deleting or shifting history.
 
 The raw trade list is not written by the dashboard pipeline. It should only exist in memory while `quant_fund_snapshot.py` runs, unless using a one-time private CSV import path outside the public repo.
 

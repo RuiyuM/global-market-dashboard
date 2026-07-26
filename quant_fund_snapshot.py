@@ -108,10 +108,9 @@ def fetch_futures_trades(api_key: str, api_secret: str, symbol: str, start: date
     trades: list[dict[str, Any]] = []
     chunk_start = datetime(start.year, start.month, start.day, tzinfo=timezone.utc)
     final = datetime(end.year, end.month, end.day, 23, 59, 59, tzinfo=timezone.utc)
-    # Binance accepts multi-day windows in principle, but server-side calls have
-    # been less reliable near the 7-day boundary. Daily chunks keep updates small
-    # and avoid storing any raw trades between requests.
-    max_chunk = timedelta(days=1) - timedelta(milliseconds=1)
+    # Binance limits this endpoint to seven-day windows. Full-history rebuilds
+    # use the largest valid window so local VPN and server runs make fewer calls.
+    max_chunk = timedelta(days=7) - timedelta(milliseconds=1)
     while chunk_start <= final:
         chunk_end = min(final, chunk_start + max_chunk)
         page_start_ms = int(chunk_start.timestamp() * 1000)
@@ -325,43 +324,22 @@ def update_options_percent_points(
     return upsert_percent_point(rows, day, pct)
 
 
-def rebuild_percent_points_after_seed(
+def require_complete_futures_rebuild(
     existing: list[dict[str, Any]],
-    updates: list[dict[str, Any]],
-    *,
-    seed_end: date,
-) -> list[dict[str, Any]]:
+    rebuilt: list[dict[str, Any]],
+) -> None:
     existing_rows = public_points({"points": existing})
-    update_rows = public_points({"points": updates})
     if not existing_rows:
-        return update_rows
-
-    seed_day = seed_end.isoformat()
-    anchor = next((row for row in existing_rows if row["date"] == seed_day), None)
-    if anchor is None:
-        raise ValueError("missing futures seed anchor")
-
-    trusted = [row for row in existing_rows if row["date"] <= seed_day]
-    existing_api_rows = [row for row in existing_rows if row["date"] > seed_day]
-    rebuilt_api_rows = [row for row in update_rows if row["date"] > seed_day]
-    if not rebuilt_api_rows:
-        if existing_api_rows:
-            raise ValueError("empty futures API rebuild")
-        return trusted
-
-    existing_api_dates = {row["date"] for row in existing_api_rows}
-    rebuilt_api_dates = {row["date"] for row in rebuilt_api_rows}
-    if existing_api_dates - rebuilt_api_dates:
+        return
+    rebuilt_rows = public_points({"points": rebuilt})
+    if not rebuilt_rows:
+        raise ValueError("empty futures API rebuild")
+    existing_dates = {row["date"] for row in existing_rows}
+    rebuilt_dates = {row["date"] for row in rebuilt_rows}
+    if existing_dates - rebuilt_dates:
         raise ValueError("incomplete futures API rebuild")
-    if existing_api_rows and rebuilt_api_rows[-1]["date"] < existing_api_rows[-1]["date"]:
+    if rebuilt_rows[-1]["date"] < existing_rows[-1]["date"]:
         raise ValueError("stale futures API rebuild")
-
-    anchor_pct = float(anchor["pct"])
-    rebuilt = [
-        {"date": row["date"], "pct": round(anchor_pct + float(row["pct"]), 4)}
-        for row in rebuilt_api_rows
-    ]
-    return trusted + rebuilt
 
 
 def default_quant_fund_snapshot() -> dict[str, Any]:
@@ -402,9 +380,6 @@ def build_snapshot() -> dict[str, Any]:
     options_rebase_total_raw = os.environ.get("QUANT_FUND_OPTIONS_REBASE_TOTAL_USD", "").strip()
     options_rebase_date = env_date("QUANT_FUND_OPTIONS_REBASE_DATE")
     options_rebase_total = env_float("QUANT_FUND_OPTIONS_REBASE_TOTAL_USD")
-    futures_seed_end_raw = os.environ.get("QUANT_FUND_FUTURES_SEED_END_DATE", "").strip()
-    futures_seed_end = env_date("QUANT_FUND_FUTURES_SEED_END_DATE")
-    futures_seed_end_valid = not futures_seed_end_raw or futures_seed_end is not None
     options_rebase_requested = bool(options_rebase_date_raw or options_rebase_total_raw)
     options_rebase_valid = not options_rebase_requested or (
         options_rebase_date is not None and options_rebase_total is not None
@@ -440,29 +415,13 @@ def build_snapshot() -> dict[str, Any]:
             "points": futures_points,
             "latest_pct": latest_pct(futures_points),
         }
-    elif not futures_seed_end_valid:
-        snapshot["futures"] = {
-            "label": "期货",
-            "status": "seed_config_error",
-            "points": existing_futures_points,
-        }
     elif futures_key and futures_secret and symbol:
         try:
-            if existing_futures_points and futures_seed_end is None:
-                raise ValueError("missing futures seed configuration")
             require_lead_futures_context(futures_key, futures_secret, symbol)
-            fetch_start = (futures_seed_end + timedelta(days=1)) if futures_seed_end else start
-            trades = fetch_futures_trades(futures_key, futures_secret, symbol, fetch_start, now.date())
+            trades = fetch_futures_trades(futures_key, futures_secret, symbol, start, now.date())
             fetched_points = aggregate_futures_trade_curve(trades, base_usd=futures_base, start=start)
-            futures_points = (
-                rebuild_percent_points_after_seed(
-                    existing_futures_points,
-                    fetched_points,
-                    seed_end=futures_seed_end,
-                )
-                if existing_futures_points and futures_seed_end
-                else fetched_points
-            )
+            require_complete_futures_rebuild(existing_futures_points, fetched_points)
+            futures_points = fetched_points
             snapshot["futures"] = {
                 "label": "期货",
                 "status": "ok" if futures_points else "no_trades",

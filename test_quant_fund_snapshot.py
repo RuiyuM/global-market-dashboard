@@ -18,7 +18,7 @@ from quant_fund_snapshot import (
     env_float,
     fetch_futures_trades,
     load_futures_trades_csv,
-    rebuild_percent_points_after_seed,
+    require_complete_futures_rebuild,
     require_lead_futures_context,
     update_options_percent_points,
 )
@@ -62,7 +62,7 @@ def test_futures_trades_csv_is_loaded_without_persisting_raw_trade_fields(tmp_pa
     assert curve == [{"date": "2026-04-23", "pct": -4.2508}]
 
 
-def test_futures_trades_fetch_uses_valid_daily_windows(monkeypatch) -> None:
+def test_futures_trades_fetch_uses_valid_seven_day_windows(monkeypatch) -> None:
     calls = []
 
     def fake_signed_get(_base, _path, _api_key, _api_secret, params):
@@ -74,9 +74,24 @@ def test_futures_trades_fetch_uses_valid_daily_windows(monkeypatch) -> None:
     fetch_futures_trades("key", "secret", "BTCUSDT", date(2026, 6, 24), date(2026, 6, 26))
 
     assert calls == [
-        (utc_ms(2026, 6, 24), utc_ms(2026, 6, 25) - 1),
-        (utc_ms(2026, 6, 25), utc_ms(2026, 6, 26) - 1),
-        (utc_ms(2026, 6, 26), utc_ms(2026, 6, 27) - 1000),
+        (utc_ms(2026, 6, 24), utc_ms(2026, 6, 27) - 1000),
+    ]
+
+
+def test_futures_trades_fetch_splits_long_ranges_at_seven_days(monkeypatch) -> None:
+    calls = []
+
+    def fake_signed_get(_base, _path, _api_key, _api_secret, params):
+        calls.append((params["startTime"], params["endTime"]))
+        return []
+
+    monkeypatch.setattr(qfs, "signed_get", fake_signed_get)
+
+    fetch_futures_trades("key", "secret", "BTCUSDT", date(2026, 4, 1), date(2026, 4, 10))
+
+    assert calls == [
+        (utc_ms(2026, 4, 1), utc_ms(2026, 4, 8) - 1),
+        (utc_ms(2026, 4, 8), utc_ms(2026, 4, 11) - 1000),
     ]
 
 
@@ -110,78 +125,47 @@ def test_futures_source_rejects_regular_futures_credentials(monkeypatch) -> None
         require_lead_futures_context("regular-key", "regular-secret", "BTCUSDT")
 
 
-def test_futures_api_rebuild_preserves_seed_and_replaces_incomplete_later_points() -> None:
+def test_complete_futures_rebuild_accepts_full_history_and_value_revisions() -> None:
     existing = [
         {"date": "2026-04-23", "pct": -0.8529},
         {"date": "2026-06-22", "pct": -0.8969},
         {"date": "2026-06-24", "pct": 2.9086},
-        {"date": "2026-06-29", "pct": 2.8000},
-        {"date": "2026-06-30", "pct": 1.5000},
     ]
-    api_curve = [
-        {"date": "2026-06-29", "pct": -1.1358},
-        {"date": "2026-06-30", "pct": -3.1997},
-        {"date": "2026-07-01", "pct": -4.2258},
-    ]
-
-    rebuilt = rebuild_percent_points_after_seed(
-        existing,
-        api_curve,
-        seed_end=date(2026, 6, 24),
-    )
-
-    assert rebuilt == [
-        {"date": "2026-04-23", "pct": -0.8529},
-        {"date": "2026-06-22", "pct": -0.8969},
-        {"date": "2026-06-24", "pct": 2.9086},
-        {"date": "2026-06-29", "pct": 1.7728},
-        {"date": "2026-06-30", "pct": -0.2911},
-        {"date": "2026-07-01", "pct": -1.3172},
+    rebuilt = [
+        {"date": "2026-04-23", "pct": -0.8528},
+        {"date": "2026-06-22", "pct": -0.8968},
+        {"date": "2026-06-24", "pct": 2.9087},
+        {"date": "2026-06-29", "pct": 1.7729},
     ]
 
-
-def test_futures_api_rebuild_rejects_missing_seed_anchor() -> None:
-    existing = [
-        {"date": "2026-04-23", "pct": -0.8529},
-    ]
-
-    with pytest.raises(ValueError, match="missing futures seed anchor"):
-        rebuild_percent_points_after_seed(
-            existing,
-            [{"date": "2026-06-25", "pct": -0.2}],
-            seed_end=date(2026, 6, 24),
-        )
+    assert require_complete_futures_rebuild(existing, rebuilt) is None
 
 
-def test_futures_api_rebuild_rejects_missing_existing_api_dates() -> None:
+def test_complete_futures_rebuild_rejects_missing_existing_dates() -> None:
     existing = [
         {"date": "2026-04-23", "pct": -0.8529},
         {"date": "2026-06-24", "pct": 2.9086},
         {"date": "2026-06-29", "pct": 1.7728},
-        {"date": "2026-06-30", "pct": -0.2911},
     ]
 
     with pytest.raises(ValueError, match="incomplete futures API rebuild"):
-        rebuild_percent_points_after_seed(
+        require_complete_futures_rebuild(
             existing,
-            [{"date": "2026-06-30", "pct": -3.1997}],
-            seed_end=date(2026, 6, 24),
+            [
+                {"date": "2026-04-23", "pct": -0.8529},
+                {"date": "2026-06-29", "pct": 1.7728},
+            ],
         )
 
 
-def test_futures_api_rebuild_rejects_empty_history_after_seed() -> None:
+def test_complete_futures_rebuild_rejects_empty_history() -> None:
     existing = [
         {"date": "2026-04-23", "pct": -0.8529},
         {"date": "2026-06-24", "pct": 2.9086},
-        {"date": "2026-06-29", "pct": 1.7728},
     ]
 
     with pytest.raises(ValueError, match="empty futures API rebuild"):
-        rebuild_percent_points_after_seed(
-            existing,
-            [],
-            seed_end=date(2026, 6, 24),
-        )
+        require_complete_futures_rebuild(existing, [])
 
 
 def test_options_total_is_rendered_as_percent_of_configured_base() -> None:
@@ -327,7 +311,7 @@ def test_api_futures_update_writes_only_public_percent_points(monkeypatch, tmp_p
         assert marker not in text
 
 
-def test_api_futures_update_rebuilds_every_date_after_private_seed_anchor(monkeypatch) -> None:
+def test_api_futures_update_rebuilds_full_history_from_configured_start(monkeypatch) -> None:
     for name in [
         "QUANT_FUND_OPTIONS_BASE_USD",
         "BINANCE_OPTION_API_KEY",
@@ -336,7 +320,6 @@ def test_api_futures_update_rebuilds_every_date_after_private_seed_anchor(monkey
     ]:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("QUANT_FUND_START_DATE", "2026-04-01")
-    monkeypatch.setenv("QUANT_FUND_FUTURES_SEED_END_DATE", "2026-06-24")
     monkeypatch.setenv("QUANT_FUND_FUTURES_BASE_USD", "1000")
     monkeypatch.setenv("QUANT_FUND_SYMBOL", "BTCUSDT")
     monkeypatch.setenv("BINANCE_LEAD_FUTURES_API_KEY", "test-key")
@@ -360,6 +343,18 @@ def test_api_futures_update_rebuilds_every_date_after_private_seed_anchor(monkey
         calls.append((start, end))
         return [
             {
+                "time": utc_ms(2026, 4, 23),
+                "realizedPnl": "-7",
+                "commission": "1",
+                "commissionAsset": "USDT",
+            },
+            {
+                "time": utc_ms(2026, 6, 24),
+                "realizedPnl": "38",
+                "commission": "1",
+                "commissionAsset": "USDT",
+            },
+            {
                 "time": utc_ms(2026, 6, 29),
                 "realizedPnl": "-10",
                 "commission": "1",
@@ -372,13 +367,56 @@ def test_api_futures_update_rebuilds_every_date_after_private_seed_anchor(monkey
 
     snapshot = qfs.build_snapshot()
 
-    assert calls[0][0] == date(2026, 6, 25)
+    assert calls[0][0] == date(2026, 4, 1)
     assert snapshot["futures"]["status"] == "ok"
     assert snapshot["futures"]["points"] == [
         {"date": "2026-04-23", "pct": -0.8},
         {"date": "2026-06-24", "pct": 2.9},
         {"date": "2026-06-29", "pct": 1.8},
     ]
+
+
+def test_api_futures_update_preserves_public_curve_when_rebuild_is_incomplete(monkeypatch) -> None:
+    for name in [
+        "QUANT_FUND_OPTIONS_BASE_USD",
+        "BINANCE_OPTION_API_KEY",
+        "BINANCE_OPTION_API_SECRET",
+        "QUANT_FUND_FUTURES_TRADES_CSV",
+    ]:
+        monkeypatch.delenv(name, raising=False)
+    existing = [
+        {"date": "2026-04-23", "pct": -0.8},
+        {"date": "2026-06-24", "pct": 2.9},
+    ]
+    monkeypatch.setenv("QUANT_FUND_START_DATE", "2026-04-01")
+    monkeypatch.setenv("QUANT_FUND_FUTURES_BASE_USD", "1000")
+    monkeypatch.setenv("QUANT_FUND_SYMBOL", "BTCUSDT")
+    monkeypatch.setenv("BINANCE_LEAD_FUTURES_API_KEY", "test-key")
+    monkeypatch.setenv("BINANCE_LEAD_FUTURES_API_SECRET", "test-secret")
+    monkeypatch.setattr(
+        qfs,
+        "load_existing_public_snapshot",
+        lambda: {"futures": {"points": existing}},
+    )
+    monkeypatch.setattr(qfs, "require_lead_futures_context", lambda *_args: None)
+    monkeypatch.setattr(
+        qfs,
+        "fetch_futures_trades",
+        lambda *_args, **_kwargs: [
+            {
+                "time": utc_ms(2026, 6, 24),
+                "realizedPnl": "29",
+                "commission": "0",
+                "commissionAsset": "USDT",
+            }
+        ],
+    )
+
+    snapshot = qfs.build_snapshot()
+
+    assert snapshot["futures"]["status"] == "error"
+    assert snapshot["futures"]["error"] == "ValueError"
+    assert snapshot["futures"]["points"] == existing
 
 
 def test_api_options_update_uses_dedicated_option_futures_credentials(monkeypatch, tmp_path) -> None:
