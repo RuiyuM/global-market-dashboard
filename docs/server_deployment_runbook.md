@@ -156,6 +156,7 @@ Expected variable categories:
 - option-futures API key and secret: Binance USD-M futures account used by the options account-status publisher for its futures USDC component.
 - futures symbol
 - futures base capital
+- futures seed end date: the final date already verified from the private initialization CSV
 - options base capital
 - optional options rebase date and post-funding account-value anchor
 - optional start date
@@ -194,7 +195,16 @@ net = realizedPnl - stable-asset commission
 
 3. Accumulate net PnL by date.
 4. Divide cumulative PnL by the futures base capital.
-5. Write only `{date, pct}` points to `dashboard/quant_fund_snapshot.json`.
+5. Preserve the verified CSV seed through `QUANT_FUND_FUTURES_SEED_END_DATE`.
+6. Rebuild every later API-derived point on each run, then write only `{date, pct}` points to `dashboard/quant_fund_snapshot.json`.
+
+The current production seed ends on the final verified date in the private April initialization CSV. Configure that date only in the private environment:
+
+```text
+QUANT_FUND_FUTURES_SEED_END_DATE=<YYYY-MM-DD>
+```
+
+Do not use the latest public point as the next API anchor. A point written during an open position or before all same-day fills arrive can be incomplete. Re-fetching and replacing the full post-seed segment lets the next run finalize that date without changing the verified seed history. If the API rebuild omits a previously published post-seed trade date, the updater preserves the current public curve and reports an error instead of deleting or shifting history.
 
 The raw trade list is not written by the dashboard pipeline. It should only exist in memory while `quant_fund_snapshot.py` runs, unless using a one-time private CSV import path outside the public repo.
 

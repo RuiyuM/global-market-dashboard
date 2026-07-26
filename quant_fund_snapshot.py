@@ -296,29 +296,43 @@ def update_options_percent_points(
     return upsert_percent_point(rows, day, pct)
 
 
-def merge_percent_points(existing: list[dict[str, Any]], updates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def rebuild_percent_points_after_seed(
+    existing: list[dict[str, Any]],
+    updates: list[dict[str, Any]],
+    *,
+    seed_end: date,
+) -> list[dict[str, Any]]:
     existing_rows = public_points({"points": existing})
     update_rows = public_points({"points": updates})
     if not existing_rows:
         return update_rows
-    if not update_rows:
-        return existing_rows
 
-    latest_existing = existing_rows[-1]
-    latest_existing_date = latest_existing["date"]
-    latest_existing_pct = float(latest_existing["pct"])
-    baseline_row = next((row for row in update_rows if row["date"] == latest_existing_date), None)
-    if baseline_row is None:
-        return existing_rows
-    baseline_update = float(baseline_row["pct"])
+    seed_day = seed_end.isoformat()
+    anchor = next((row for row in existing_rows if row["date"] == seed_day), None)
+    if anchor is None:
+        raise ValueError("missing futures seed anchor")
 
-    merged = list(existing_rows)
-    for row in update_rows:
-        if row["date"] <= latest_existing_date:
-            continue
-        merged.append({"date": row["date"], "pct": round(latest_existing_pct + float(row["pct"]) - baseline_update, 4)})
-    merged.sort(key=lambda item: item["date"])
-    return merged
+    trusted = [row for row in existing_rows if row["date"] <= seed_day]
+    existing_api_rows = [row for row in existing_rows if row["date"] > seed_day]
+    rebuilt_api_rows = [row for row in update_rows if row["date"] > seed_day]
+    if not rebuilt_api_rows:
+        if existing_api_rows:
+            raise ValueError("empty futures API rebuild")
+        return trusted
+
+    existing_api_dates = {row["date"] for row in existing_api_rows}
+    rebuilt_api_dates = {row["date"] for row in rebuilt_api_rows}
+    if existing_api_dates - rebuilt_api_dates:
+        raise ValueError("incomplete futures API rebuild")
+    if existing_api_rows and rebuilt_api_rows[-1]["date"] < existing_api_rows[-1]["date"]:
+        raise ValueError("stale futures API rebuild")
+
+    anchor_pct = float(anchor["pct"])
+    rebuilt = [
+        {"date": row["date"], "pct": round(anchor_pct + float(row["pct"]), 4)}
+        for row in rebuilt_api_rows
+    ]
+    return trusted + rebuilt
 
 
 def default_quant_fund_snapshot() -> dict[str, Any]:
@@ -348,23 +362,6 @@ def latest_pct(points: list[dict[str, Any]]) -> float | None:
         return None
 
 
-def futures_overlap_start_date(points: list[dict[str, Any]]) -> date | None:
-    rows = public_points({"points": points})
-    if not rows:
-        return None
-    try:
-        return parse_ymd(str(rows[-1]["date"]))
-    except (KeyError, TypeError, ValueError):
-        return None
-
-
-def futures_api_fetch_start(configured_start: date, existing_points: list[dict[str, Any]]) -> date:
-    overlap_start = futures_overlap_start_date(existing_points)
-    if overlap_start is None:
-        return configured_start
-    return max(configured_start, overlap_start)
-
-
 def build_snapshot() -> dict[str, Any]:
     load_env_file()
     now = datetime.now(timezone.utc)
@@ -376,6 +373,9 @@ def build_snapshot() -> dict[str, Any]:
     options_rebase_total_raw = os.environ.get("QUANT_FUND_OPTIONS_REBASE_TOTAL_USD", "").strip()
     options_rebase_date = env_date("QUANT_FUND_OPTIONS_REBASE_DATE")
     options_rebase_total = env_float("QUANT_FUND_OPTIONS_REBASE_TOTAL_USD")
+    futures_seed_end_raw = os.environ.get("QUANT_FUND_FUTURES_SEED_END_DATE", "").strip()
+    futures_seed_end = env_date("QUANT_FUND_FUTURES_SEED_END_DATE")
+    futures_seed_end_valid = not futures_seed_end_raw or futures_seed_end is not None
     options_rebase_requested = bool(options_rebase_date_raw or options_rebase_total_raw)
     options_rebase_valid = not options_rebase_requested or (
         options_rebase_date is not None and options_rebase_total is not None
@@ -411,12 +411,28 @@ def build_snapshot() -> dict[str, Any]:
             "points": futures_points,
             "latest_pct": latest_pct(futures_points),
         }
+    elif not futures_seed_end_valid:
+        snapshot["futures"] = {
+            "label": "期货",
+            "status": "seed_config_error",
+            "points": existing_futures_points,
+        }
     elif futures_key and futures_secret and symbol:
         try:
-            fetch_start = futures_api_fetch_start(start, existing_futures_points)
+            if existing_futures_points and futures_seed_end is None:
+                raise ValueError("missing futures seed configuration")
+            fetch_start = (futures_seed_end + timedelta(days=1)) if futures_seed_end else start
             trades = fetch_futures_trades(futures_key, futures_secret, symbol, fetch_start, now.date())
             fetched_points = aggregate_futures_trade_curve(trades, base_usd=futures_base, start=start)
-            futures_points = merge_percent_points(existing_futures_points, fetched_points)
+            futures_points = (
+                rebuild_percent_points_after_seed(
+                    existing_futures_points,
+                    fetched_points,
+                    seed_end=futures_seed_end,
+                )
+                if existing_futures_points and futures_seed_end
+                else fetched_points
+            )
             snapshot["futures"] = {
                 "label": "期货",
                 "status": "ok" if futures_points else "no_trades",

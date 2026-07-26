@@ -17,9 +17,8 @@ from quant_fund_snapshot import (
     env_date,
     env_float,
     fetch_futures_trades,
-    futures_api_fetch_start,
     load_futures_trades_csv,
-    merge_percent_points,
+    rebuild_percent_points_after_seed,
     update_options_percent_points,
 )
 
@@ -80,105 +79,78 @@ def test_futures_trades_fetch_uses_valid_daily_windows(monkeypatch) -> None:
     ]
 
 
-def test_futures_api_update_uses_exact_latest_anchor_without_rewriting_history() -> None:
+def test_futures_api_rebuild_preserves_seed_and_replaces_incomplete_later_points() -> None:
     existing = [
         {"date": "2026-04-23", "pct": -0.8529},
         {"date": "2026-06-22", "pct": -0.8969},
         {"date": "2026-06-24", "pct": 2.9086},
+        {"date": "2026-06-29", "pct": 2.8000},
+        {"date": "2026-06-30", "pct": 1.5000},
     ]
     api_curve = [
-        {"date": "2026-06-22", "pct": 0.0},
-        {"date": "2026-06-24", "pct": -0.1976},
-        {"date": "2026-06-25", "pct": -0.3966},
-        {"date": "2026-06-26", "pct": 7.1930},
+        {"date": "2026-06-29", "pct": -1.1358},
+        {"date": "2026-06-30", "pct": -3.1997},
+        {"date": "2026-07-01", "pct": -4.2258},
     ]
 
-    merged = merge_percent_points(existing, api_curve)
+    rebuilt = rebuild_percent_points_after_seed(
+        existing,
+        api_curve,
+        seed_end=date(2026, 6, 24),
+    )
 
-    assert merged == [
+    assert rebuilt == [
         {"date": "2026-04-23", "pct": -0.8529},
         {"date": "2026-06-22", "pct": -0.8969},
         {"date": "2026-06-24", "pct": 2.9086},
-        {"date": "2026-06-25", "pct": 2.7096},
-        {"date": "2026-06-26", "pct": 10.2992},
+        {"date": "2026-06-29", "pct": 1.7728},
+        {"date": "2026-06-30", "pct": -0.2911},
+        {"date": "2026-07-01", "pct": -1.3172},
     ]
 
 
-def test_futures_api_update_rejects_missing_exact_latest_anchor() -> None:
+def test_futures_api_rebuild_rejects_missing_seed_anchor() -> None:
     existing = [
         {"date": "2026-04-23", "pct": -0.8529},
-        {"date": "2026-06-22", "pct": -0.8969},
-        {"date": "2026-06-24", "pct": 2.9086},
-    ]
-    api_curve = [
-        {"date": "2026-06-22", "pct": 0.0},
-        {"date": "2026-06-25", "pct": -0.3966},
-        {"date": "2026-06-26", "pct": 7.1930},
     ]
 
-    assert merge_percent_points(existing, api_curve) == existing
+    with pytest.raises(ValueError, match="missing futures seed anchor"):
+        rebuild_percent_points_after_seed(
+            existing,
+            [{"date": "2026-06-25", "pct": -0.2}],
+            seed_end=date(2026, 6, 24),
+        )
 
 
-def test_futures_api_update_appends_when_only_latest_overlap_is_available() -> None:
+def test_futures_api_rebuild_rejects_missing_existing_api_dates() -> None:
     existing = [
         {"date": "2026-04-23", "pct": -0.8529},
-        {"date": "2026-06-22", "pct": -0.8969},
         {"date": "2026-06-24", "pct": 2.9086},
-    ]
-    api_curve = [
-        {"date": "2026-06-24", "pct": -0.1976},
-        {"date": "2026-06-25", "pct": -0.3966},
-        {"date": "2026-06-26", "pct": 7.1930},
-        {"date": "2026-06-29", "pct": 16.0640},
+        {"date": "2026-06-29", "pct": 1.7728},
+        {"date": "2026-06-30", "pct": -0.2911},
     ]
 
-    merged = merge_percent_points(existing, api_curve)
-
-    assert merged == [
-        {"date": "2026-04-23", "pct": -0.8529},
-        {"date": "2026-06-22", "pct": -0.8969},
-        {"date": "2026-06-24", "pct": 2.9086},
-        {"date": "2026-06-25", "pct": 2.7096},
-        {"date": "2026-06-26", "pct": 10.2992},
-        {"date": "2026-06-29", "pct": 19.1702},
-    ]
+    with pytest.raises(ValueError, match="incomplete futures API rebuild"):
+        rebuild_percent_points_after_seed(
+            existing,
+            [{"date": "2026-06-30", "pct": -3.1997}],
+            seed_end=date(2026, 6, 24),
+        )
 
 
-def test_futures_api_update_appends_when_overlap_matches_existing_curve() -> None:
+def test_futures_api_rebuild_rejects_empty_history_after_seed() -> None:
     existing = [
         {"date": "2026-04-23", "pct": -0.8529},
-        {"date": "2026-06-22", "pct": -0.8969},
         {"date": "2026-06-24", "pct": 2.9086},
-    ]
-    api_curve = [
-        {"date": "2026-06-24", "pct": 3.8055},
-        {"date": "2026-06-25", "pct": 3.6064},
-        {"date": "2026-06-26", "pct": 11.1961},
+        {"date": "2026-06-29", "pct": 1.7728},
     ]
 
-    merged = merge_percent_points(existing, api_curve)
-
-    assert merged == [
-        {"date": "2026-04-23", "pct": -0.8529},
-        {"date": "2026-06-22", "pct": -0.8969},
-        {"date": "2026-06-24", "pct": 2.9086},
-        {"date": "2026-06-25", "pct": 2.7095},
-        {"date": "2026-06-26", "pct": 10.2992},
-    ]
-
-
-def test_futures_api_fetch_start_uses_latest_public_point_for_incremental_update() -> None:
-    existing = [
-        {"date": "2026-04-23", "pct": -0.8529},
-        {"date": "2026-06-22", "pct": -0.8969},
-        {"date": "2026-06-24", "pct": 2.9086},
-    ]
-
-    assert futures_api_fetch_start(date(2026, 4, 1), existing) == date(2026, 6, 24)
-
-
-def test_futures_api_fetch_start_falls_back_to_configured_start_without_history() -> None:
-    assert futures_api_fetch_start(date(2026, 4, 1), []) == date(2026, 4, 1)
+    with pytest.raises(ValueError, match="empty futures API rebuild"):
+        rebuild_percent_points_after_seed(
+            existing,
+            [],
+            seed_end=date(2026, 6, 24),
+        )
 
 
 def test_options_total_is_rendered_as_percent_of_configured_base() -> None:
@@ -321,6 +293,59 @@ def test_api_futures_update_writes_only_public_percent_points(monkeypatch, tmp_p
         "test-secret",
     ]:
         assert marker not in text
+
+
+def test_api_futures_update_rebuilds_every_date_after_private_seed_anchor(monkeypatch) -> None:
+    for name in [
+        "QUANT_FUND_OPTIONS_BASE_USD",
+        "BINANCE_OPTION_API_KEY",
+        "BINANCE_OPTION_API_SECRET",
+        "QUANT_FUND_FUTURES_TRADES_CSV",
+    ]:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("QUANT_FUND_START_DATE", "2026-04-01")
+    monkeypatch.setenv("QUANT_FUND_FUTURES_SEED_END_DATE", "2026-06-24")
+    monkeypatch.setenv("QUANT_FUND_FUTURES_BASE_USD", "1000")
+    monkeypatch.setenv("QUANT_FUND_SYMBOL", "BTCUSDT")
+    monkeypatch.setenv("BINANCE_FUTURES_API_KEY", "test-key")
+    monkeypatch.setenv("BINANCE_FUTURES_API_SECRET", "test-secret")
+    monkeypatch.setattr(
+        qfs,
+        "load_existing_public_snapshot",
+        lambda: {
+            "futures": {
+                "points": [
+                    {"date": "2026-04-23", "pct": -0.8},
+                    {"date": "2026-06-24", "pct": 2.9},
+                    {"date": "2026-06-29", "pct": 2.8},
+                ]
+            }
+        },
+    )
+    calls = []
+
+    def fake_fetch(_key, _secret, _symbol, start, end):
+        calls.append((start, end))
+        return [
+            {
+                "time": utc_ms(2026, 6, 29),
+                "realizedPnl": "-10",
+                "commission": "1",
+                "commissionAsset": "USDT",
+            }
+        ]
+
+    monkeypatch.setattr(qfs, "fetch_futures_trades", fake_fetch)
+
+    snapshot = qfs.build_snapshot()
+
+    assert calls[0][0] == date(2026, 6, 25)
+    assert snapshot["futures"]["status"] == "ok"
+    assert snapshot["futures"]["points"] == [
+        {"date": "2026-04-23", "pct": -0.8},
+        {"date": "2026-06-24", "pct": 2.9},
+        {"date": "2026-06-29", "pct": 1.8},
+    ]
 
 
 def test_api_options_update_uses_dedicated_option_futures_credentials(monkeypatch, tmp_path) -> None:
