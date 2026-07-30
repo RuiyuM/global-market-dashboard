@@ -35,6 +35,7 @@ from market_dashboard import (
     YAHOO_SPECS,
     SeriesSpec,
     fetch_smbs_koribor_rows_by_tenor,
+    fetch_moex_index_ohlc,
     fetch_yahoo_ohlc,
     merge_ohlc_rows,
     read_ohlc,
@@ -216,7 +217,7 @@ def patch_smbs_koribor(keys: Iterable[str], start: date, end: date) -> tuple[lis
             row["source_symbol"] = spec.symbol
             row["source"] = "SMBS KORIBOR money-market fixing; local public-data patch"
         path = DASHBOARD_DATA / spec.cache_file
-        existing = read_ohlc(path) if path.exists() else []
+        existing = existing_by_key.get(key, [])
         if existing and row_date_key(incoming[-1]) < row_date_key(existing[-1]):
             failures.append(f"{key}: incoming SMBS data is older than local cache")
             continue
@@ -278,6 +279,45 @@ def patch_investing(keys: Iterable[str], policy: dict[str, Any], start: date, en
             }
         )
         print(f"PATCH Investing {key} {rows[0]['date']} -> {rows[-1]['date']} ({len(rows)} rows)")
+    return patched, failures
+
+
+def patch_moex_indices(keys: Iterable[str], policy: dict[str, Any], start: date, end: date) -> tuple[list[dict[str, Any]], list[str]]:
+    overrides = policy.get("local_source_overrides", {})
+    specs = dashboard_spec_map()
+    patched: list[dict[str, Any]] = []
+    failures: list[str] = []
+    for key in sorted(set(keys)):
+        override = overrides.get(key, {})
+        dashboard_spec = specs.get(key)
+        if override.get("provider") != "moex_iss" or not override.get("symbol") or not dashboard_spec:
+            failures.append(f"{key}: missing MOEX ISS/source policy mapping")
+            continue
+        symbol = str(override["symbol"])
+        try:
+            incoming = fetch_moex_index_ohlc(symbol, start, end)
+        except Exception as exc:
+            failures.append(f"{key}: {type(exc).__name__}: {exc}")
+            continue
+        if not incoming:
+            failures.append(f"{key}: empty MOEX ISS response")
+            continue
+        cache_path = DASHBOARD_DATA / dashboard_spec.cache_file
+        existing = read_ohlc(cache_path) if cache_path.exists() else []
+        if existing and row_date_key(incoming[-1]) < row_date_key(existing[-1]):
+            failures.append(f"{key}: incoming MOEX ISS data is older than local cache")
+            continue
+        merged = merge_ohlc_rows(existing, incoming)
+        write_ohlc(cache_path, merged)
+        patched.append(
+            {
+                "key": key,
+                "latest": str(incoming[-1]["date"]),
+                "rows": len(incoming),
+                "files": [str(cache_path.relative_to(ROOT))],
+            }
+        )
+        print(f"PATCH MOEX ISS {key} {incoming[0]['date']} -> {incoming[-1]['date']} ({len(incoming)} rows)")
     return patched, failures
 
 
@@ -413,17 +453,21 @@ def main() -> int:
         if args.weekly:
             investing_keys.update(policy.get("local_weekly_ohlc", []))
 
+        override_keys = investing_keys & set(policy.get("local_source_overrides", {}))
+        investing_keys -= override_keys
+
         end = date.today()
         start = end - timedelta(days=args.lookback_days)
         yahoo_patched, yahoo_failures = patch_yahoo(yahoo_keys, start, end)
         smbs_patched, smbs_failures = patch_smbs_koribor(smbs_keys, start, end)
         investing_patched, investing_failures = patch_investing(investing_keys, policy, start, end)
-        patched = [*yahoo_patched, *smbs_patched, *investing_patched]
-        failures = [*yahoo_failures, *smbs_failures, *investing_failures]
+        override_patched, override_failures = patch_moex_indices(override_keys, policy, start, end)
+        patched = [*yahoo_patched, *smbs_patched, *investing_patched, *override_patched]
+        failures = [*yahoo_failures, *smbs_failures, *investing_failures, *override_failures]
         for failure in failures:
             print("PATCH ERROR", failure)
 
-        required_failures = set(policy.get("local_required", [])) & investing_keys - {item["key"] for item in investing_patched}
+        required_failures = set(policy.get("local_required", [])) - {item["key"] for item in patched}
         unresolved_yahoo = yahoo_keys - {item["key"] for item in yahoo_patched}
         unresolved_smbs = smbs_keys - {item["key"] for item in smbs_patched}
         if required_failures or unresolved_yahoo or unresolved_smbs:

@@ -32,6 +32,8 @@ MACRO_KEYS = {"DXY", "VIX", "GOLD", "USOIL"}
 ONE_YEAR_BOND_KEYS = {"US_1Y": "美国", "CN_1Y": "中国", "JP_1Y": "日本", "DE_1Y": "德国", "KR_1Y": "韩国"}
 KOREA_GOVERNMENT_HISTORY_KEYS = {"KR_1Y", "KR_2Y", "KR_3Y", "KR_5Y", "KR_10Y", "KR_30Y"}
 KOREA_GOVERNMENT_MIN_ROWS = 250
+GERMANY_TRADING_OHLC_KEYS = {"DE_3M", "DE_6M", "DE_1Y", "DE_3Y", "DE_5Y", "DE_7Y", "DE_30Y"}
+GERMANY_TRADING_OHLC_MIN_COMPLETE = 300
 EXTENDED_BOND_KEYS = {
     "US_1M": "美国",
     "US_3M": "美国",
@@ -450,6 +452,14 @@ def main() -> int:
         ohlc = row.get("ohlc") or []
         if len(ohlc) < KOREA_GOVERNMENT_MIN_ROWS:
             errors.append(f"{key} has too few history rows: {len(ohlc)}")
+    for key in GERMANY_TRADING_OHLC_KEYS:
+        row = row_by_key.get(key)
+        if not row:
+            errors.append(f"missing Germany traded-yield OHLC row: {key}")
+            continue
+        complete = sum(has_complete_ohlc(bar) for bar in (row.get("ohlc") or [])[-OHLC_MAX_WINDOW:])
+        if complete < GERMANY_TRADING_OHLC_MIN_COMPLETE:
+            errors.append(f"{key} has too few complete OHLC bars in recent window: {complete}")
     curve_rows = [row for row in second_order if row.get("group") == "债券曲线"]
     if len(curve_rows) != BOND_CURVE_ROWS:
         errors.append(f"bond curve row count mismatch: {len(curve_rows)}")

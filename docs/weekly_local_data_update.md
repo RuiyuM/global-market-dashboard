@@ -46,12 +46,12 @@ The public snapshot keeps both tri-currency views. `fx_flows` remains the backwa
 | Source | Symbols | Policy |
 |---|---|---|
 | WSCN | U.S. Treasury curve, core China Treasury tenors, core FX, Shanghai Composite; OHLC overlays for China 30Y, Japan 2Y/3Y/5Y/10Y/30Y, and Germany 2Y/10Y | Fetch daily; an empty response never replaces cache. A complete OHLC bar always wins over a same-date close-only observation. |
-| Moscow Exchange ISS | `CNYRUB_TOM` official traded daily candles, inverted to `RUB/CNY` | Primary direct `RUB/CNY` history. Paginated back to 2019 and refreshed daily on the server. |
+| Moscow Exchange ISS | `CNYRUB_TOM` official traded daily candles, inverted to `RUB/CNY`; `IMOEX` official index candles | Primary direct `RUB/CNY` history is paginated back to 2019 and refreshed daily on the server. `IMOEX` is refreshed by the local public-data patch because Investing.com may challenge local automated requests. |
 | ChinaMoney / ChinaBond CCDC | China 1M through 30Y curve | Official daily source and historical backfill. |
 | Nikkei | `JP_EQUITY` | Preferred official Nikkei 225 daily CSV. |
 | Japan MOF | Japan 1Y through 30Y | Official close-only historical anchor. WSCN supplies daily OHLC where configured; local Investing supplies weekly gap fills, including Japan 30Y through verified instrument ID `23904`. |
-| Trading Economics | Japan short-bill chart history/latest; Japan, Korea, Russia latest yield closes; Germany 3M/6M latest | Server-safe fallback. Close-only rows are explicit. |
-| Bundesbank | Germany 1Y through 30Y except 3M/6M | Official close history. Germany 2Y/10Y additionally use WSCN OHLC and locally refreshed Investing OHLC to fill WSCN gaps. |
+| Trading Economics | Japan short-bill chart history/latest; Japan, Korea, Russia latest yield closes; Germany 3M/6M latest | Server-safe fallback. Close-only rows are explicit; Germany 3M/6M also receive locally refreshed Investing OHLC. |
+| Bundesbank | Germany 1Y through 30Y except 3M/6M | Official close history. Every listed German tenor receives locally refreshed Investing OHLC; Germany 2Y/10Y also use WSCN OHLC. |
 | SMBS KORIBOR | Korea 1M/3M/6M | Money-market proxy, not a Korean government-bond yield. |
 | Yahoo | Equity, FX, DXY, VIX, gold, oil series in the policy file | Server first; local only after an actual server error/empty response. |
 
@@ -66,14 +66,16 @@ The server runs with `MARKET_SKIP_INVESTING=1` and records these rows as `degrad
 ```text
 JP_1M JP_3M JP_6M
 JP_1Y JP_2Y JP_3Y JP_5Y JP_7Y JP_10Y JP_30Y
-DE_2Y DE_10Y
+DE_3M DE_6M DE_1Y DE_2Y DE_3Y DE_5Y DE_7Y DE_10Y DE_30Y
 KR_1Y KR_2Y KR_3Y KR_5Y KR_10Y KR_30Y
 RU_2Y RU_10Y RU_EQUITY
 ```
 
-Japan 2Y/3Y/5Y/10Y/30Y receive daily WSCN OHLC plus weekly local Investing gap fills. Japan 1Y/7Y retain MOF close anchors and cached local Investing OHLC. Germany 2Y/10Y receive WSCN OHLC plus weekly local Investing gap fills and Bundesbank close anchors. Japan 1M/3M/6M still receive Trading Economics chart history and latest data. Korea and Russia bonds retain their cached OHLC history and receive a Trading Economics latest close. `RU_EQUITY` has no confirmed server-safe replacement and is the only fixed local-required series.
+Japan 2Y/3Y/5Y/10Y/30Y receive daily WSCN OHLC plus weekly local Investing gap fills. Japan 1Y/7Y retain MOF close anchors and cached local Investing OHLC. Germany 3M/6M/1Y/2Y/3Y/5Y/7Y/10Y/30Y receive weekly local Investing OHLC; the official Trading Economics or Bundesbank close series remains the anchor, and Germany 2Y/10Y additionally receive daily WSCN OHLC. Japan 1M/3M/6M still receive Trading Economics chart history and latest data. Korea and Russia bonds retain their cached OHLC history and receive a Trading Economics latest close. `RU_EQUITY` uses official Moscow Exchange ISS `IMOEX` daily candles and is the only fixed local-required series. Investing.com remains blocked on the server and is not required for this equity patch.
 
 Japan 30Y must use Investing instrument ID `23904`. The old ID `23903` was a wrong-tenor mapping and ran roughly 33-37bp below the same-date Japan MOF 30Y curve. ID `23904` was cross-checked against MOF and WSCN before admission. Never restore `23903` or infer tenor identity from a filename alone.
+
+Germany uses verified Investing IDs `23681`, `23682`, `23684`, `23685`, `23686`, `23688`, `23690`, `23693`, and `23696` for 3M through 30Y. Their same-date closes were cross-checked against Trading Economics or Deutsche Bundesbank before admission. Do not use WSCN `DE30YR.OTC`: despite its label, its close was roughly 115bp below the Bundesbank 30Y series and tracked the wrong curve level.
 
 ### Local Fallback
 
@@ -81,8 +83,8 @@ Japan 30Y must use Investing instrument ID `23904`. The old ID `23903` was a wro
 
 - Refresh every Yahoo symbol whose server fetch record is `error`, `empty`, or unexpectedly degraded.
 - Refresh SMBS KORIBOR 1M/3M/6M locally only when the server records an actual timeout, error, or empty response.
-- Refresh `RU_EQUITY` from Investing.com on each local production run.
-- With `--weekly`, refresh the public Investing OHLC list in `local_weekly_ohlc` from the policy file. This includes Japan 1Y/7Y, gap fills for Japan 2Y/3Y/5Y/10Y/30Y, and gap fills for Germany 2Y/10Y.
+- Refresh `RU_EQUITY` from the official Moscow Exchange ISS `IMOEX` candle endpoint on each local production run.
+- With `--weekly`, refresh the public Investing OHLC list in `local_weekly_ohlc` from the policy file. This includes Japan 1Y/7Y, gap fills for Japan 2Y/3Y/5Y/10Y/30Y, and Germany 3M/6M/1Y/2Y/3Y/5Y/7Y/10Y/30Y.
 - Upload only files produced successfully in that run.
 
 An empty response, exception, or incoming dataset older than the local cache is rejected. A required local failure stops the run before deployment.

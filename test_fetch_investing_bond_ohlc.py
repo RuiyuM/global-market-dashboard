@@ -10,6 +10,20 @@ def test_japan_30_year_uses_verified_instrument_id() -> None:
     assert BOND_SPECS["JP30Y"].instrument_id == "23904"
 
 
+def test_germany_ohlc_tenors_use_verified_instrument_ids() -> None:
+    expected = {
+        "DE3M": "23681",
+        "DE6M": "23682",
+        "DE1Y": "23684",
+        "DE3Y": "23686",
+        "DE5Y": "23688",
+        "DE7Y": "23690",
+        "DE30Y": "23696",
+    }
+
+    assert {key: BOND_SPECS[key].instrument_id for key in expected} == expected
+
+
 def test_rows_from_html_parses_next_historical_data_store() -> None:
     html = """
     <script>

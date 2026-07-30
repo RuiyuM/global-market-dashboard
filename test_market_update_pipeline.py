@@ -342,6 +342,45 @@ def test_patch_smbs_koribor_writes_only_requested_public_series(tmp_path, monkey
     assert rows[-1]["close"] == 2.68
 
 
+def test_patch_moex_index_writes_official_public_series(tmp_path, monkeypatch) -> None:
+    dashboard_data = tmp_path / "dashboard" / "data"
+    monkeypatch.setattr(production_update, "ROOT", tmp_path)
+    monkeypatch.setattr(production_update, "DASHBOARD_DATA", dashboard_data)
+    monkeypatch.setattr(
+        production_update,
+        "fetch_moex_index_ohlc",
+        lambda *_args: [
+            {
+                "date": "2026-07-16",
+                "timestamp": 1784160000,
+                "open": 2072.9,
+                "high": 2074.49,
+                "low": 2020.34,
+                "close": 2021.9,
+                "volume": 0,
+                "source_symbol": "IMOEX",
+                "source": "Moscow Exchange ISS official index daily candles; local public-data patch",
+            }
+        ],
+    )
+
+    patched, failures = production_update.patch_moex_indices(
+        ["RU_EQUITY"],
+        {"local_source_overrides": {"RU_EQUITY": {"provider": "moex_iss", "symbol": "IMOEX"}}},
+        date(2026, 7, 1),
+        date(2026, 7, 17),
+    )
+
+    assert failures == []
+    assert patched[0]["key"] == "RU_EQUITY"
+    assert patched[0]["files"] == ["dashboard/data/RU_EQUITY.csv"]
+    rows = market_dashboard.read_ohlc(dashboard_data / "RU_EQUITY.csv")
+    assert rows[-1]["close"] == 2021.9
+    assert "IMOEX,Moscow Exchange ISS official index daily candles" in (
+        dashboard_data / "RU_EQUITY.csv"
+    ).read_text(encoding="utf-8")
+
+
 def test_upload_allowlist_rejects_private_or_unrelated_files() -> None:
     assert production_update.validate_public_upload_paths(
         ["dashboard/data/US_EQUITY.csv", "data/RU_EQUITY_INVESTING_1D_ohlc.csv", "dashboard/local_patch_report.json"]
@@ -366,11 +405,13 @@ def test_source_policy_keys_match_dashboard_and_investing_specs() -> None:
     }
     weekly = set(policy["local_weekly_ohlc"])
     required = set(policy["local_required"])
+    overrides = set(policy["local_source_overrides"])
     mapped = set(policy["investing_symbol_map"])
 
     assert blocked == set(policy["server_fallbacks"])
     assert required <= weekly <= blocked
-    assert weekly <= mapped <= dashboard_keys
+    assert weekly - overrides <= mapped <= dashboard_keys
+    assert required <= overrides <= dashboard_keys
     assert set(policy["yahoo_patch_on_failure"]) <= dashboard_keys
     assert set(policy["smbs_patch_on_failure"]) <= dashboard_keys
     assert set(policy["optional_sources"]) <= dashboard_keys
@@ -378,12 +419,23 @@ def test_source_policy_keys_match_dashboard_and_investing_specs() -> None:
         policy["investing_symbol_map"][key]
         for key in mapped
     } <= set(production_update.INVESTING_BOND_SPECS)
-    assert {"JP_30Y", "DE_2Y", "DE_10Y"} <= weekly
-    assert {"JP_30Y", "DE_2Y", "DE_10Y"} <= mapped
+    german_ohlc = {
+        "DE_3M",
+        "DE_6M",
+        "DE_1Y",
+        "DE_2Y",
+        "DE_3Y",
+        "DE_5Y",
+        "DE_7Y",
+        "DE_10Y",
+        "DE_30Y",
+    }
+    assert {"JP_30Y", *german_ohlc} <= weekly
+    assert {"JP_30Y", *german_ohlc} <= mapped
     assert "JP_30Y_INVESTING_ID_23903" in policy["ohlc_overlay_policy"]["rejected"]
     assert "JP_30Y_INVESTING_ID_23904" in policy["ohlc_overlay_policy"]["verified_local_gap_fills"]
     assert policy["ohlc_overlay_policy"]["wscn_daily"] == market_dashboard.WSCN_OHLC_OVERLAY_TARGETS
-    for key in ("JP_30Y", "DE_2Y", "DE_10Y"):
+    for key in ("JP_30Y", *sorted(german_ohlc)):
         dashboard_spec = production_update.dashboard_spec_map()[key]
         investing_spec = production_update.INVESTING_BOND_SPECS[policy["investing_symbol_map"][key]]
         assert dashboard_spec.local_file == investing_spec.output_name

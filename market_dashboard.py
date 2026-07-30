@@ -72,6 +72,7 @@ US_MARKET_CLOSE_HOUR_ET = 16
 RUB_DIRECT_MAX_DIVERGENCE_PCT = 2.0
 MOEX_DIRECT_MAX_LAG_DAYS = 7
 MOEX_CANDLES_URL = "https://iss.moex.com/iss/engines/currency/markets/selt/securities/{symbol}/candles.json"
+MOEX_INDEX_CANDLES_URL = "https://iss.moex.com/iss/engines/stock/markets/index/securities/{symbol}/candles.json"
 
 
 def env_flag(name: str) -> bool:
@@ -189,15 +190,15 @@ CHINA_BOND_SPECS: list[tuple[SeriesSpec, str, str]] = [
 
 
 GERMANY_BOND_SPECS: list[tuple[SeriesSpec, str, str]] = [
-    (SeriesSpec("DE_3M", "德国3个月国债", "bond", "tradingeconomics", "DE:TE:3M", "DE_3M.csv"), "tradingeconomics:germany", TRADING_ECONOMICS_COUNTRY_SLUGS["germany"]["3M"]),
-    (SeriesSpec("DE_6M", "德国6个月国债", "bond", "tradingeconomics", "DE:TE:6M", "DE_6M.csv"), "tradingeconomics:germany", TRADING_ECONOMICS_COUNTRY_SLUGS["germany"]["6M"]),
-    (SeriesSpec("DE_1Y", "德国1年国债", "bond", "bundesbank-term", BUNDESBANK_TERM_STRUCTURE_CODES["1Y"], "DE_1Y.csv"), "bundesbank-term", BUNDESBANK_TERM_STRUCTURE_CODES["1Y"]),
+    (SeriesSpec("DE_3M", "德国3个月国债", "bond", "tradingeconomics", "DE3MT=RR / DE:TE:3M", "DE_3M.csv", "DE3MR_INVESTING_1D_ohlc.csv"), "tradingeconomics:germany", TRADING_ECONOMICS_COUNTRY_SLUGS["germany"]["3M"]),
+    (SeriesSpec("DE_6M", "德国6个月国债", "bond", "tradingeconomics", "DE6MT=RR / DE:TE:6M", "DE_6M.csv", "DE6MR_INVESTING_1D_ohlc.csv"), "tradingeconomics:germany", TRADING_ECONOMICS_COUNTRY_SLUGS["germany"]["6M"]),
+    (SeriesSpec("DE_1Y", "德国1年国债", "bond", "bundesbank-term", f"DE1YT=RR / {BUNDESBANK_TERM_STRUCTURE_CODES['1Y']}", "DE_1Y.csv", "DE1YR_INVESTING_1D_ohlc.csv"), "bundesbank-term", BUNDESBANK_TERM_STRUCTURE_CODES["1Y"]),
     (SeriesSpec("DE_2Y", "德国2年国债", "bond", "bundesbank", f"DE2YR.OTC / {BUNDESBANK_CODES['2Y']}", "DE_2Y.csv", "DE2YR_INVESTING_1D_ohlc.csv"), "bundesbank", BUNDESBANK_CODES["2Y"]),
-    (SeriesSpec("DE_3Y", "德国3年国债", "bond", "bundesbank-term", BUNDESBANK_TERM_STRUCTURE_CODES["3Y"], "DE_3Y.csv"), "bundesbank-term", BUNDESBANK_TERM_STRUCTURE_CODES["3Y"]),
-    (SeriesSpec("DE_5Y", "德国5年国债", "bond", "bundesbank", BUNDESBANK_CODES["5Y"], "DE_5Y.csv"), "bundesbank", BUNDESBANK_CODES["5Y"]),
-    (SeriesSpec("DE_7Y", "德国7年国债", "bond", "bundesbank", BUNDESBANK_CODES["7Y"], "DE_7Y.csv"), "bundesbank", BUNDESBANK_CODES["7Y"]),
+    (SeriesSpec("DE_3Y", "德国3年国债", "bond", "bundesbank-term", f"DE3YT=RR / {BUNDESBANK_TERM_STRUCTURE_CODES['3Y']}", "DE_3Y.csv", "DE3YR_INVESTING_1D_ohlc.csv"), "bundesbank-term", BUNDESBANK_TERM_STRUCTURE_CODES["3Y"]),
+    (SeriesSpec("DE_5Y", "德国5年国债", "bond", "bundesbank", f"DE5YT=RR / {BUNDESBANK_CODES['5Y']}", "DE_5Y.csv", "DE5YR_INVESTING_1D_ohlc.csv"), "bundesbank", BUNDESBANK_CODES["5Y"]),
+    (SeriesSpec("DE_7Y", "德国7年国债", "bond", "bundesbank", f"DE7YT=RR / {BUNDESBANK_CODES['7Y']}", "DE_7Y.csv", "DE7YR_INVESTING_1D_ohlc.csv"), "bundesbank", BUNDESBANK_CODES["7Y"]),
     (SeriesSpec("DE_10Y", "德国10年国债", "bond", "bundesbank", f"DE10YR.OTC / {BUNDESBANK_CODES['10Y']}", "DE_10Y.csv", "DE10YR_INVESTING_1D_ohlc.csv"), "bundesbank", BUNDESBANK_CODES["10Y"]),
-    (SeriesSpec("DE_30Y", "德国30年国债", "bond", "bundesbank", BUNDESBANK_CODES["30Y"], "DE_30Y.csv"), "bundesbank", BUNDESBANK_CODES["30Y"]),
+    (SeriesSpec("DE_30Y", "德国30年国债", "bond", "bundesbank", f"DE30YT=RR / {BUNDESBANK_CODES['30Y']}", "DE_30Y.csv", "DE30YR_INVESTING_1D_ohlc.csv"), "bundesbank", BUNDESBANK_CODES["30Y"]),
 ]
 
 
@@ -508,6 +509,65 @@ def fetch_moex_rubcny_ohlc(symbol: str, start: date, end: date) -> list[dict[str
     return merge_ohlc_rows([], rows)
 
 
+def rows_from_moex_index_response(payload: dict[str, Any], symbol: str) -> list[dict[str, Any]]:
+    candles = payload.get("candles") or {}
+    columns = candles.get("columns") or []
+    rows: list[dict[str, Any]] = []
+    for values in candles.get("data") or []:
+        item = dict(zip(columns, values))
+        try:
+            parsed_date = datetime.strptime(str(item["begin"])[:10], "%Y-%m-%d").date()
+            open_px = float(item["open"])
+            close_px = float(item["close"])
+            high_px = float(item["high"])
+            low_px = float(item["low"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if min(open_px, close_px, high_px, low_px) <= 0:
+            continue
+        rows.append(
+            {
+                "date": parsed_date.isoformat(),
+                "timestamp": date_to_epoch(parsed_date),
+                "open": open_px,
+                "high": high_px,
+                "low": low_px,
+                "close": close_px,
+                "volume": item.get("volume") if item.get("volume") is not None else "",
+                "source_symbol": symbol,
+                "source": "Moscow Exchange ISS official index daily candles; local public-data patch",
+            }
+        )
+    return rows
+
+
+def fetch_moex_index_ohlc(symbol: str, start: date, end: date) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    offset = 0
+    page_size = 100
+    while True:
+        query = urlencode(
+            {
+                "from": start.isoformat(),
+                "till": end.isoformat(),
+                "interval": 24,
+                "start": offset,
+                "iss.meta": "off",
+            }
+        )
+        url = f"{MOEX_INDEX_CANDLES_URL.format(symbol=quote(symbol, safe=''))}?{query}"
+        request = Request(url, headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json,*/*"})
+        with urlopen(request, timeout=30) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        raw_count = len(((payload.get("candles") or {}).get("data") or []))
+        rows.extend(rows_from_moex_index_response(payload, symbol))
+        if raw_count < page_size:
+            break
+        offset += raw_count
+        time.sleep(0.1)
+    return merge_ohlc_rows([], rows)
+
+
 def fetch_nikkei_ohlc(symbol: str) -> list[dict[str, Any]]:
     url = f"https://indexes.nikkei.co.jp/nkave/historical/{quote(symbol, safe='')}"
     request = Request(url, headers={"User-Agent": "Mozilla/5.0", "Accept": "text/csv,*/*"})
@@ -748,15 +808,24 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
             for row in rows:
                 row["source_symbol"] = series_spec.symbol
                 if source_kind == "bundesbank":
-                    row["source"] = (
-                        "WSCN traded-yield OHLC + Investing.com gap fill + Deutsche Bundesbank official daily close anchor"
-                        if series_spec.key in WSCN_OHLC_TARGET_KEYS
-                        else "Deutsche Bundesbank official daily yield CSV"
-                    )
+                    if series_spec.key in WSCN_OHLC_TARGET_KEYS:
+                        row["source"] = "WSCN traded-yield OHLC + Investing.com gap fill + Deutsche Bundesbank official daily close anchor"
+                    elif series_spec.local_file:
+                        row["source"] = "Investing.com traded-yield OHLC + Deutsche Bundesbank official daily close anchor"
+                    else:
+                        row["source"] = "Deutsche Bundesbank official daily yield CSV"
                 elif source_kind == "bundesbank-term":
-                    row["source"] = "Deutsche Bundesbank official daily term-structure CSV"
+                    row["source"] = (
+                        "Investing.com traded-yield OHLC + Deutsche Bundesbank official daily term-structure close anchor"
+                        if series_spec.local_file
+                        else "Deutsche Bundesbank official daily term-structure CSV"
+                    )
                 else:
-                    row["source"] = "Trading Economics latest yield page"
+                    row["source"] = (
+                        "Investing.com traded-yield OHLC + Trading Economics latest close"
+                        if series_spec.local_file
+                        else "Trading Economics latest yield page"
+                    )
             if rows:
                 write_ohlc(path, rows)
             record.update({"status": fetch_record_status(rows, latest_error), "rows": str(len(rows)), "latest": rows[-1]["date"] if rows else ""})
@@ -793,7 +862,7 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
             latest_error = ""
             if source_kind == "smbs-koribor":
                 if korea_koribor_rows is None:
-                    korea_koribor_rows = fetch_smbs_koribor_rows_by_tenor(start, end)
+                    korea_koribor_rows = fetch_smbs_koribor_rows_by_tenor(koribor_start, end)
                 rows = merge_ohlc_rows(rows, korea_koribor_rows.get(source_key, []))
             elif source_kind == "investing+tradingeconomics":
                 investing_spec = INVESTING_BOND_SPECS[f"KR{source_key}"]
@@ -2353,7 +2422,7 @@ def build_snapshot(
             "三币种资金流向以纽约时间为统一日期；16:00前仅当每组三条汇率都有纽约当日数据时显示盘中值，否则停在最近共同收盘日，避免亚洲/欧洲先更新造成跨日期混算。",
             "三币种资金流向同时保留美股收盘与亚洲收盘盘中两个视图；亚洲盘中快照只在三组全部完成同日对齐时更新，美股收盘更新不会覆盖已留存的亚洲快照。",
             "derived = 本地公式而非外部供应商：CNY_BASE=1；债券曲线=10Y-2Y；CNYJPY=1/JPYCNY；RUB/CNY 优先使用 MOEX CNYRUB_TOM 真实直接成交历史的倒数，Yahoo 仅作交叉核验，MOEX 缺失或陈旧时才用 USDCNY/USDRUB 派生；RUB/JPY 仍要求 Yahoo 直接报价具备历史深度且与同日公式价偏差不超过2%。",
-            "美债扩展期限优先使用 WSCN 日线；中国国债使用 ChinaMoney/CFETS 官方收盘收益率曲线并按缺口回填历史，其中中国3M合并 ChinaBond/CCDC 政府债收益率曲线历史；德国2Y/10Y使用 WSCN 日线、Investing.com 周度缺口补档和 Bundesbank 官方收盘锚点，德国5Y/7Y/30Y使用 Bundesbank 当前联邦证券官方日频 CSV，德国1Y/3Y使用 Bundesbank 官方 Svensson 期限结构日频 CSV，德国3M/6M暂无稳定官方日频二级市场源，暂用 Trading Economics 最新页；日本1M/3M/6M 使用 Trading Economics 图表历史、Investing.com 历史表并合并 Trading Economics 最新页；日本1Y/2Y/3Y/5Y/7Y/10Y/30Y 使用日本财务省 MOF 官方收益率曲线作为历史底座，WSCN 提供可用日线 OHLC，Investing.com 周度补齐 OHLC 缺口，并合并 Trading Economics 最新页；韩国1M/3M/6M 使用 SMBS KORIBOR 作为短端资金代理而非政府债，韩国3M/6M可由 BOK ECOS 交叉验证，韩国1Y/2Y/3Y/5Y/10Y/30Y 使用 Investing.com 历史表并在有更新日期时合并 Trading Economics 最新页；俄罗斯2Y/10Y 在 Investing.com 被云服务器拦截时保留历史缓存并合并 Trading Economics 最新页。",
+            "美债扩展期限优先使用 WSCN 日线；中国国债使用 ChinaMoney/CFETS 官方收盘收益率曲线并按缺口回填历史，其中中国3M合并 ChinaBond/CCDC 政府债收益率曲线历史；德国3M/6M/1Y/2Y/3Y/5Y/7Y/10Y/30Y 使用经同日官方收盘交叉核验的 Investing.com 周度 OHLC，2Y/10Y再合并 WSCN 日线，1Y/3Y以 Bundesbank Svensson 期限结构、5Y/7Y/30Y以 Bundesbank 当前联邦证券日频收盘为锚，3M/6M合并 Trading Economics 最新收盘；日本1M/3M/6M 使用 Trading Economics 图表历史、Investing.com 历史表并合并 Trading Economics 最新页；日本1Y/2Y/3Y/5Y/7Y/10Y/30Y 使用日本财务省 MOF 官方收益率曲线作为历史底座，WSCN 提供可用日线 OHLC，Investing.com 周度补齐 OHLC 缺口，并合并 Trading Economics 最新页；韩国1M/3M/6M 使用 SMBS KORIBOR 作为短端资金代理而非政府债，韩国3M/6M可由 BOK ECOS 交叉验证，韩国1Y/2Y/3Y/5Y/10Y/30Y 使用 Investing.com 历史表并在有更新日期时合并 Trading Economics 最新页；俄罗斯2Y/10Y 在 Investing.com 被云服务器拦截时保留历史缓存并合并 Trading Economics 最新页。",
             "宏观指标使用 Yahoo Finance 日线：美元指数 DX-Y.NYB、VIX ^VIX、黄金 GC=F、WTI 原油 CL=F。",
             "政策新闻雷达只做加息、降息、维持利率相关文本筛选；抓取或 AI 分类不可用时退回本地规则解析。",
         ],

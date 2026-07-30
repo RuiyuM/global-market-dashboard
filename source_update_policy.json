@@ -1,5 +1,5 @@
 {
-  "version": 6,
+  "version": 7,
   "ohlc_overlay_policy": {
     "merge_rule": "complete OHLC always wins over close-only on the same date",
     "wscn_daily": {
@@ -14,11 +14,19 @@
     },
     "verified_local_gap_fills": {
       "JP_30Y_INVESTING_ID_23904": "cross-checked against Japan MOF and WSCN; replaces rejected instrument ID 23903",
+      "DE_3M_INVESTING_ID_23681": "cross-checked against the same-date Trading Economics close; median absolute difference 0.3bp",
+      "DE_6M_INVESTING_ID_23682": "cross-checked against the same-date Trading Economics close; median absolute difference 1.3bp",
+      "DE_1Y_INVESTING_ID_23684": "cross-checked against the Deutsche Bundesbank term-structure close; median absolute difference 2.8bp",
       "DE_2Y_INVESTING_ID_23685": "cross-checked against WSCN and Deutsche Bundesbank",
-      "DE_10Y_INVESTING_ID_23693": "cross-checked against WSCN and Deutsche Bundesbank"
+      "DE_3Y_INVESTING_ID_23686": "cross-checked against the Deutsche Bundesbank term-structure close; median absolute difference 2.3bp",
+      "DE_5Y_INVESTING_ID_23688": "cross-checked against the Deutsche Bundesbank close; median absolute difference 1.5bp",
+      "DE_7Y_INVESTING_ID_23690": "cross-checked against the Deutsche Bundesbank close; median absolute difference 5.2bp",
+      "DE_10Y_INVESTING_ID_23693": "cross-checked against WSCN and Deutsche Bundesbank",
+      "DE_30Y_INVESTING_ID_23696": "cross-checked against the Deutsche Bundesbank close; median absolute difference 1.5bp"
     },
     "rejected": {
-      "JP_30Y_INVESTING_ID_23903": "wrong tenor mapping; failed the Japan MOF cross-check by roughly 33-37bp"
+      "JP_30Y_INVESTING_ID_23903": "wrong tenor mapping; failed the Japan MOF cross-check by roughly 33-37bp",
+      "DE_30Y_WSCN_DE30YR_OTC": "label says Germany 30Y but its close was about 115bp below the Deutsche Bundesbank 30Y series and tracked the wrong curve level"
     }
   },
   "cross_rate_selection": {
@@ -51,8 +59,15 @@
         "JP_7Y",
         "JP_10Y",
         "JP_30Y",
+        "DE_3M",
+        "DE_6M",
+        "DE_1Y",
         "DE_2Y",
+        "DE_3Y",
+        "DE_5Y",
+        "DE_7Y",
         "DE_10Y",
+        "DE_30Y",
         "KR_1Y",
         "KR_2Y",
         "KR_3Y",
@@ -76,8 +91,15 @@
     "JP_7Y": "Japan MOF close anchor, cached Investing OHLC, and Trading Economics latest close",
     "JP_10Y": "WSCN daily OHLC, Japan MOF close anchor, cached Investing gap fill, and Trading Economics latest close",
     "JP_30Y": "WSCN daily OHLC, Japan MOF close anchor, verified Investing ID 23904 gap fill, and Trading Economics latest close",
+    "DE_3M": "cached Investing OHLC and Trading Economics latest close",
+    "DE_6M": "cached Investing OHLC and Trading Economics latest close",
+    "DE_1Y": "cached Investing OHLC and Deutsche Bundesbank official term-structure close anchor",
     "DE_2Y": "WSCN daily OHLC, cached Investing gap fill, and Deutsche Bundesbank official close anchor",
+    "DE_3Y": "cached Investing OHLC and Deutsche Bundesbank official term-structure close anchor",
+    "DE_5Y": "cached Investing OHLC and Deutsche Bundesbank official close anchor",
+    "DE_7Y": "cached Investing OHLC and Deutsche Bundesbank official close anchor",
     "DE_10Y": "WSCN daily OHLC, cached Investing gap fill, and Deutsche Bundesbank official close anchor",
+    "DE_30Y": "cached Investing OHLC and Deutsche Bundesbank official close anchor",
     "KR_1Y": "cached OHLC history and Trading Economics latest close",
     "KR_2Y": "cached OHLC history and Trading Economics latest close",
     "KR_3Y": "cached OHLC history and Trading Economics latest close",
@@ -86,7 +108,7 @@
     "KR_30Y": "cached OHLC history and Trading Economics latest close",
     "RU_2Y": "cached OHLC history and Trading Economics latest close",
     "RU_10Y": "cached OHLC history and Trading Economics latest close",
-    "RU_EQUITY": "cached OHLC history until a local public-data patch is uploaded"
+    "RU_EQUITY": "cached OHLC history until an official Moscow Exchange ISS local public-data patch is uploaded"
   },
   "yahoo_patch_on_failure": [
     "US_EQUITY",
@@ -121,6 +143,12 @@
   "local_required": [
     "RU_EQUITY"
   ],
+  "local_source_overrides": {
+    "RU_EQUITY": {
+      "provider": "moex_iss",
+      "symbol": "IMOEX"
+    }
+  },
   "local_weekly_ohlc": [
     "JP_1M",
     "JP_3M",
@@ -132,8 +160,15 @@
     "JP_7Y",
     "JP_10Y",
     "JP_30Y",
+    "DE_3M",
+    "DE_6M",
+    "DE_1Y",
     "DE_2Y",
+    "DE_3Y",
+    "DE_5Y",
+    "DE_7Y",
     "DE_10Y",
+    "DE_30Y",
     "KR_1Y",
     "KR_2Y",
     "KR_3Y",
@@ -155,8 +190,15 @@
     "JP_7Y": "JP7Y",
     "JP_10Y": "JP10Y",
     "JP_30Y": "JP30Y",
+    "DE_3M": "DE3M",
+    "DE_6M": "DE6M",
+    "DE_1Y": "DE1Y",
     "DE_2Y": "DE2Y",
+    "DE_3Y": "DE3Y",
+    "DE_5Y": "DE5Y",
+    "DE_7Y": "DE7Y",
     "DE_10Y": "DE10Y",
+    "DE_30Y": "DE30Y",
     "KR_1Y": "KR1Y",
     "KR_2Y": "KR2Y",
     "KR_3Y": "KR3Y",
