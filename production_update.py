@@ -388,18 +388,21 @@ runuser -u globaldash -- python3 audit_market_sources.py
 
 def print_final_summary(args: argparse.Namespace) -> None:
     snapshot = download_json(args, "dashboard/latest_market_snapshot.json")
-    quant = download_json(args, "dashboard/quant_fund_snapshot.json")
     status = {row.get("key"): row for row in snapshot.get("series_status", [])}
     print("FINAL generated_at", snapshot.get("generated_at"))
     for key in ["US_EQUITY", "DXY", "VIX", "GOLD", "USOIL", "RU_EQUITY"]:
         row = status.get(key, {})
         print("FINAL", key, row.get("latest_date", "MISSING"), row.get("latest", ""))
-    print(
-        "FINAL quant",
-        quant.get("generated_at", ""),
-        quant.get("futures", {}).get("latest_pct"),
-        quant.get("options", {}).get("latest_pct"),
-    )
+    if args.redact_quant_summary:
+        print("FINAL quant protected")
+    else:
+        quant = download_json(args, "dashboard/quant_fund_snapshot.json")
+        print(
+            "FINAL quant",
+            quant.get("generated_at", ""),
+            quant.get("futures", {}).get("latest_pct"),
+            quant.get("options", {}).get("latest_pct"),
+        )
     report = audit_sources(snapshot, load_json(POLICY_PATH))
     print("FINAL source_audit", "PASS" if report["ok"] else "FAIL", "warnings", len(report["warnings"]))
     if not report["ok"]:
@@ -415,6 +418,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--weekly", action="store_true", help="Also refresh full local OHLC for all weekly Investing fallbacks.")
     parser.add_argument("--audit-only", action="store_true", help="Read and audit the current server snapshot without updating it.")
     parser.add_argument("--skip-required-local", action="store_true", help="Do not refresh the fixed local-required source list.")
+    parser.add_argument(
+        "--redact-quant-summary",
+        action="store_true",
+        help="Do not read or print protected quant percentages in the final command summary.",
+    )
     parser.add_argument("--lookback-days", type=int, default=540)
     return parser.parse_args()
 

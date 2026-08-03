@@ -395,6 +395,46 @@ def test_upload_allowlist_rejects_private_or_unrelated_files() -> None:
             raise AssertionError(f"expected upload path rejection: {path}")
 
 
+def test_scheduled_summary_does_not_read_or_print_protected_quant_data(
+    monkeypatch, capsys
+) -> None:
+    snapshot = {
+        "generated_at": "2026-08-03T10:00:00-04:00",
+        "series_status": [],
+        "last_fetch_at": "2026-08-03T09:59:00-04:00",
+        "fetch_mode": "network",
+        "fetch_records": [],
+    }
+
+    def fake_download(_args, path):
+        if path == "dashboard/quant_fund_snapshot.json":
+            raise AssertionError("scheduled summary must not read protected quant snapshot")
+        return snapshot
+
+    monkeypatch.setattr(production_update, "download_json", fake_download)
+    monkeypatch.setattr(
+        production_update,
+        "load_json",
+        lambda _path: {
+            "server_blocked": {},
+            "yahoo_patch_on_failure": [],
+            "smbs_patch_on_failure": [],
+            "optional_sources": [],
+            "local_required": [],
+        },
+    )
+
+    production_update.print_final_summary(
+        SimpleNamespace(redact_quant_summary=True)
+    )
+
+    output = capsys.readouterr().out
+    assert "FINAL quant protected" in output
+    assert "latest_pct" not in output
+    assert "futures" not in output
+    assert "options" not in output
+
+
 def test_source_policy_keys_match_dashboard_and_investing_specs() -> None:
     policy = audit_market_sources.load_json(production_update.POLICY_PATH)
     dashboard_keys = set(production_update.dashboard_spec_map())
