@@ -37,6 +37,14 @@ def test_dashboard_nginx_has_basic_abuse_and_browser_guards() -> None:
     assert "Content-Security-Policy" in CONFIG
 
 
+def test_quant_fund_page_and_snapshot_require_server_side_authentication() -> None:
+    assert "location = /quant_fund.html {" in CONFIG
+    assert "location = /quant_fund_snapshot.json {" in CONFIG
+    assert CONFIG.count('auth_basic "Quant Fund";') == 2
+    assert CONFIG.count("auth_basic_user_file /etc/nginx/quant_fund.htpasswd;") == 2
+    assert CONFIG.count('add_header Cache-Control "private, no-store" always;') == 2
+
+
 def test_dashboard_nginx_uses_trusted_ip_https() -> None:
     assert "listen 443 ssl default_server;" in CONFIG
     assert "ssl_certificate /etc/letsencrypt/live/__PUBLIC_IP__/fullchain.pem;" in CONFIG
@@ -49,6 +57,8 @@ def test_dashboard_nginx_uses_trusted_ip_https() -> None:
 def test_dashboard_nginx_root_is_rendered_by_installer() -> None:
     assert "root __APP_DIR__/dashboard;" in CONFIG
     assert "server_name __PUBLIC_IP__" in CONFIG
+    assert 's|__APP_DIR__|${APP_DIR}|g' in INSTALLER
+    assert 's|__PUBLIC_IP__|${PUBLIC_IP}|g' in INSTALLER
 
 
 def test_dashboard_sshd_keeps_key_login_and_rejects_passwords() -> None:

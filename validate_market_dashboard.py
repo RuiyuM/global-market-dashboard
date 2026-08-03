@@ -15,6 +15,7 @@ from market_dashboard import WSCN_OHLC_OVERLAY_TARGETS, has_complete_ohlc
 SNAPSHOT = Path(__file__).resolve().parent / "dashboard" / "latest_market_snapshot.json"
 HTML = Path(__file__).resolve().parent / "dashboard" / "index.html"
 QUANT_HTML = Path(__file__).resolve().parent / "dashboard" / "quant_fund.html"
+QUANT_SNAPSHOT = Path(__file__).resolve().parent / "dashboard" / "quant_fund_snapshot.json"
 DEFAULT_FX_FLOW_CODE = Path(__file__).resolve().parent / "fx_flow_logic.py"
 USER_FX_FLOW_CODE = str(Path(os.environ.get("FX_FLOW_CODE_PATH", str(DEFAULT_FX_FLOW_CODE))))
 COUNTRIES = {"美国", "中国", "日本", "德国", "俄罗斯", "韩国"}
@@ -84,6 +85,11 @@ def main() -> int:
     snapshot = json.loads(SNAPSHOT.read_text(encoding="utf-8"))
     html = HTML.read_text(encoding="utf-8") if HTML.exists() else ""
     quant_html = QUANT_HTML.read_text(encoding="utf-8") if QUANT_HTML.exists() else ""
+    quant_snapshot = (
+        json.loads(QUANT_SNAPSHOT.read_text(encoding="utf-8"))
+        if QUANT_SNAPSHOT.exists()
+        else {}
+    )
     errors: list[str] = []
 
     if snapshot.get("fetch_mode") not in {"network", "cache"}:
@@ -231,7 +237,12 @@ def main() -> int:
     snapshot_text = json.dumps(snapshot, ensure_ascii=False)
     if any(marker in snapshot_text for marker in forbidden_public_markers):
         errors.append("snapshot should not expose API keys")
-    quant_fund = snapshot.get("quant_fund", {})
+    quant_snapshot_text = json.dumps(quant_snapshot, ensure_ascii=False)
+    if any(marker in quant_snapshot_text for marker in forbidden_public_markers):
+        errors.append("quant snapshot should not expose API keys or private fields")
+    if "quant_fund" in snapshot:
+        errors.append("public market snapshot should not embed password-protected quant data")
+    quant_fund = quant_snapshot
     if not quant_fund:
         errors.append("missing quant fund snapshot")
     for key in ["futures", "options", "equity"]:

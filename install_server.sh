@@ -75,7 +75,10 @@ if [[ ! -f "${NGINX_TEMPLATE}" ]]; then
   echo "Missing tracked Nginx template: ${NGINX_TEMPLATE}" >&2
   exit 1
 fi
-sed "s|__APP_DIR__|${APP_DIR}|g" "${NGINX_TEMPLATE}" >"${NGINX_CONFIG}"
+sed \
+  -e "s|__APP_DIR__|${APP_DIR}|g" \
+  -e "s|__PUBLIC_IP__|${PUBLIC_IP}|g" \
+  "${NGINX_TEMPLATE}" >"${NGINX_CONFIG}"
 
 if [[ "${NGINX_CONFIG}" == /etc/nginx/sites-available/* ]]; then
   rm -f /etc/nginx/sites-enabled/default

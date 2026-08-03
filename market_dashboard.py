@@ -6292,6 +6292,10 @@ JS = """
 """
 
 
+def public_market_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in snapshot.items() if key != "quant_fund"}
+
+
 def main() -> int:
     args = parse_args()
     previous_snapshot = load_previous_snapshot()
@@ -6312,7 +6316,11 @@ def main() -> int:
         previous_snapshot=previous_snapshot,
     )
     DASHBOARD.mkdir(parents=True, exist_ok=True)
-    SNAPSHOT_JSON.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    public_snapshot = public_market_snapshot(snapshot)
+    SNAPSHOT_JSON.write_text(
+        json.dumps(public_snapshot, ensure_ascii=False, indent=2, default=str),
+        encoding="utf-8",
+    )
     HTML_OUT.write_text(render_html(snapshot), encoding="utf-8")
     QUANT_FUND_HTML_OUT.write_text(render_quant_fund_page(snapshot.get("quant_fund", {})), encoding="utf-8")
     print(f"wrote {HTML_OUT}")

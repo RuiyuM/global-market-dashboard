@@ -14,8 +14,34 @@ For sources that the server cannot fetch directly, read [Weekly Local Data Updat
 - Public quant snapshot: `/opt/global-market-dashboard/dashboard/quant_fund_snapshot.json`
 - Private quant config: `/opt/global-market-dashboard/.private/quant_fund.env`
 - Private policy-news config: `/opt/global-market-dashboard/.private/policy_news.env`
+- Private quant HTTP password file: `/etc/nginx/quant_fund.htpasswd`
 
 Do not put private API keys, principal amounts, raw trades, positions, or account balances into GitHub, public HTML, or public snapshots.
+
+## Quant Page Access Control
+
+Nginx protects both `quant_fund.html` and `quant_fund_snapshot.json` with
+server-side HTTP Basic Authentication. The public market snapshot intentionally
+does not embed the quant section, so it cannot bypass the protected endpoints.
+
+Create or rotate the credential only on the server. Keep the username stable as
+`quant`, read the password interactively, and store only a SHA-512 password hash:
+
+```bash
+read -rsp "Quant password: " QUANT_PASSWORD
+printf '\n'
+QUANT_HASH="$(printf '%s' "${QUANT_PASSWORD}" | openssl passwd -6 -stdin)"
+unset QUANT_PASSWORD
+printf 'quant:%s\n' "${QUANT_HASH}" \
+  >/etc/nginx/quant_fund.htpasswd
+unset QUANT_HASH
+chown root:nginx /etc/nginx/quant_fund.htpasswd
+chmod 640 /etc/nginx/quant_fund.htpasswd
+```
+
+The password file is private server state and must never be committed. Test that
+an unauthenticated request returns `401`, invalid credentials return `401`, and
+valid credentials return `200`. This change does not modify SSH configuration.
 
 ## Normal Deployment
 

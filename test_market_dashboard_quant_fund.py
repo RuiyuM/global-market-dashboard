@@ -5,7 +5,12 @@ from __future__ import annotations
 
 import re
 
-from market_dashboard import render_html, render_quant_curve, render_quant_fund_page
+from market_dashboard import (
+    public_market_snapshot,
+    render_html,
+    render_quant_curve,
+    render_quant_fund_page,
+)
 
 
 def quant_snapshot() -> dict:
@@ -33,6 +38,14 @@ def quant_snapshot() -> dict:
         },
         "equity": {"label": "股指", "status": "pending", "points": []},
     }
+
+
+def test_public_market_snapshot_does_not_embed_protected_quant_data() -> None:
+    snapshot = {"generated_at": "2026-06-27T00:00:00Z", "quant_fund": quant_snapshot()}
+    public = public_market_snapshot(snapshot)
+
+    assert public == {"generated_at": "2026-06-27T00:00:00Z"}
+    assert "quant_fund" in snapshot
 
 
 def test_quant_fund_link_is_plain_notes_link_to_separate_page() -> None:
