@@ -4550,11 +4550,16 @@ th:first-child, td:first-child { text-align: left; }
 .all-bond-toolbar button.active { background: #eaf2ff; border-color: #aac5ee; color: var(--blue); }
 .all-bond-summary { min-height: 20px; color: var(--ink); font-size: 13px; font-weight: 650; margin-bottom: 10px; }
 .all-bond-summary-title { margin-bottom: 7px; }
-.all-bond-spreads { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
-.all-bond-spread { display: grid; grid-template-columns: auto 1fr; align-items: baseline; gap: 4px 10px; padding: 8px 10px; background: #fbfcfe; }
-.all-bond-spread + .all-bond-spread { border-left: 1px solid var(--line); }
-.all-bond-spread b { justify-self: end; font-variant-numeric: tabular-nums; }
-.all-bond-spread small { grid-column: 1 / -1; color: var(--muted); font-size: 11px; font-weight: 600; }
+.all-bond-spread-matrix { border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.all-bond-matrix-row { display: grid; grid-template-columns: minmax(110px, 0.8fr) repeat(3, minmax(90px, 1fr)); align-items: stretch; }
+.all-bond-matrix-row + .all-bond-matrix-row { border-top: 1px solid var(--line); }
+.all-bond-matrix-row > span { display: flex; align-items: center; justify-content: flex-end; min-width: 0; padding: 7px 10px; border-left: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+.all-bond-matrix-row > span:first-child { justify-content: flex-start; border-left: 0; }
+.all-bond-matrix-head { background: #f3f6fa; color: var(--muted); font-size: 11px; }
+.all-bond-matrix-head > span { justify-content: center; font-weight: 700; }
+.all-bond-matrix-head > span:first-child { justify-content: flex-start; }
+.all-bond-matrix-label { display: grid !important; gap: 1px; }
+.all-bond-matrix-label small { color: var(--muted); font-size: 10px; font-weight: 600; }
 .all-bond-legend { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
 .all-bond-legend button { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); cursor: pointer; height: 28px; padding: 0 8px; font: inherit; font-size: 12px; font-weight: 650; }
 .all-bond-legend button:hover { background: #f8fafc; border-color: #b7c2cf; }
@@ -4828,8 +4833,9 @@ th:first-child, td:first-child { text-align: left; }
   .all-bond-toolbar .segmented { width: 100%; }
   .all-bond-toolbar .segmented button { flex: 1 1 0; min-width: 0; height: 38px; }
   .all-bond-summary { font-size: 12px; line-height: 1.45; }
-  .all-bond-spreads { grid-template-columns: 1fr; }
-  .all-bond-spread + .all-bond-spread { border-left: 0; border-top: 1px solid var(--line); }
+  .all-bond-spread-matrix { overflow-x: auto; }
+  .all-bond-matrix-row { grid-template-columns: 76px repeat(3, minmax(78px, 1fr)); min-width: 326px; }
+  .all-bond-matrix-row > span { padding: 7px 5px; font-size: 11px; }
   #all-bond-chart { min-height: 280px; }
   .flow-view-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .flow-view-tab { min-width: 0; width: 100%; }
@@ -5859,22 +5865,37 @@ JS = """
     return { startDate, endDate, start, end, delta: end - start };
   };
 
-  const groupedSpreadCard = (label, spread) => {
-    if (!spread) return `<div class="all-bond-spread"><span>${esc(label)}</span><b>缺失</b><small>缺少共同日期</small></div>`;
-    const direction = spread.delta > 0 ? "走阔" : spread.delta < 0 ? "收窄" : "持平";
-    return `<div class="all-bond-spread"><span>${esc(label)}</span><b>${signed(spread.end, 1)}bp</b>`
-      + `<small>${spread.startDate.slice(5)} 至 ${spread.endDate.slice(5)}：${signed(spread.delta, 1)}bp · ${direction}</small></div>`;
+  const groupedSpreadCell = (spread, field) => {
+    if (!spread) return "缺失";
+    return `${signed(spread[field], 1)}bp`;
   };
 
-  const renderGroupedBondSummary = (country, series, dates) => {
-    if (!allBondSummary) return;
+  const groupedMatrixRow = (label, dates, series, field) => {
+    const dateText = dates.length ? `${dates[0].slice(5)}→${dates[dates.length - 1].slice(5)}` : "缺少共同日期";
     const longShort = groupedSpread(series, "group-long", "group-short", dates);
     const longMid = groupedSpread(series, "group-long", "group-mid", dates);
     const midShort = groupedSpread(series, "group-mid", "group-short", dates);
-    const start = dates[0] || "";
-    const end = dates[dates.length - 1] || "";
-    allBondSummary.innerHTML = `<div class="all-bond-summary-title">${esc(country?.name || "")}｜${allBondWindow}D｜${esc(start)} 至 ${esc(end)}｜组内期限等权平均</div>`
-      + `<div class="all-bond-spreads">${groupedSpreadCard("长-短", longShort)}${groupedSpreadCard("长-中", longMid)}${groupedSpreadCard("中-短", midShort)}</div>`;
+    return `<div class="all-bond-matrix-row"><span class="all-bond-matrix-label"><b>${esc(label)}</b><small>${esc(dateText)}</small></span>`
+      + `<span>${groupedSpreadCell(longShort, field)}</span>`
+      + `<span>${groupedSpreadCell(longMid, field)}</span>`
+      + `<span>${groupedSpreadCell(midShort, field)}</span></div>`;
+  };
+
+  const renderGroupedBondSummary = (country, series) => {
+    if (!allBondSummary) return;
+    const groupDateSets = series.map((item) => new Set(item.rows.map((row) => row.date)));
+    const commonDates = series[0]?.rows.map((row) => row.date).filter((day) => groupDateSets.every((dates) => dates.has(day))) || [];
+    const latest = commonDates.length ? [commonDates[commonDates.length - 1]] : [];
+    const horizonRows = [90, 60, 30, 7].map((days) => {
+      const selected = commonDates.slice(-Math.min(commonDates.length, days + 1));
+      return groupedMatrixRow(`${days}D变化`, selected, series, "delta");
+    }).join("");
+    allBondSummary.innerHTML = `<div class="all-bond-summary-title">${esc(country?.name || "")}｜组内期限等权平均｜价差单位 bp</div>`
+      + `<div class="all-bond-spread-matrix">`
+      + `<div class="all-bond-matrix-row all-bond-matrix-head"><span>窗口</span><span>长-短</span><span>长-中</span><span>中-短</span></div>`
+      + groupedMatrixRow("当前价差", latest, series, "end")
+      + horizonRows
+      + `</div>`;
   };
 
   const renderAllBondChart = () => {
@@ -5962,7 +5983,7 @@ JS = """
     allBondChart.innerHTML = `<rect width="${width}" height="${height}" fill="#fff" />${grid}${bands}${paths}${dateTicks}${hits}`;
     const latestComparable = dateStats.slice().reverse().find((row) => row.low && row.high);
     if (allBondMode === "grouped") {
-      renderGroupedBondSummary(country, bonds, dates);
+      renderGroupedBondSummary(country, bonds);
     } else if (allBondSummary) {
       if (latestComparable?.low && latestComparable?.high) {
         const gap = (latestComparable.high.close - latestComparable.low.close) * 100;
