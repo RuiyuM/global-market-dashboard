@@ -288,7 +288,8 @@ def test_all_bond_tenors_chart_is_interactive_and_uses_exact_date_values() -> No
     assert "const groupedMatrixRow = (label, dates, series, field) =>" in JS
     assert '[90, 60, 30, 7].map' in JS
     assert 'groupedMatrixRow("当前价差", latest, series, "end")' in JS
-    assert '<span>长-短</span><span>长-中</span><span>中-短</span>' in JS
+    assert '<span>窗口</span><span>长-中</span><span>中-短</span>' in JS
+    assert '<span>长-短</span>' not in JS
     assert 'groupedMatrixRow(`${days}D变化`, selected, series, "delta")' in JS
     assert "const renderAllBondChart = () =>" in JS
     assert "const exactByDate = new Map" in JS

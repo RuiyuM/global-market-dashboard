@@ -4551,7 +4551,7 @@ th:first-child, td:first-child { text-align: left; }
 .all-bond-summary { min-height: 20px; color: var(--ink); font-size: 13px; font-weight: 650; margin-bottom: 10px; }
 .all-bond-summary-title { margin-bottom: 7px; }
 .all-bond-spread-matrix { border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
-.all-bond-matrix-row { display: grid; grid-template-columns: minmax(110px, 0.8fr) repeat(3, minmax(90px, 1fr)); align-items: stretch; }
+.all-bond-matrix-row { display: grid; grid-template-columns: minmax(110px, 0.8fr) repeat(2, minmax(110px, 1fr)); align-items: stretch; }
 .all-bond-matrix-row + .all-bond-matrix-row { border-top: 1px solid var(--line); }
 .all-bond-matrix-row > span { display: flex; align-items: center; justify-content: flex-end; min-width: 0; padding: 7px 10px; border-left: 1px solid var(--line); font-variant-numeric: tabular-nums; }
 .all-bond-matrix-row > span:first-child { justify-content: flex-start; border-left: 0; }
@@ -4834,7 +4834,7 @@ th:first-child, td:first-child { text-align: left; }
   .all-bond-toolbar .segmented button { flex: 1 1 0; min-width: 0; height: 38px; }
   .all-bond-summary { font-size: 12px; line-height: 1.45; }
   .all-bond-spread-matrix { overflow-x: auto; }
-  .all-bond-matrix-row { grid-template-columns: 76px repeat(3, minmax(78px, 1fr)); min-width: 326px; }
+  .all-bond-matrix-row { grid-template-columns: 76px repeat(2, minmax(96px, 1fr)); min-width: 268px; }
   .all-bond-matrix-row > span { padding: 7px 5px; font-size: 11px; }
   #all-bond-chart { min-height: 280px; }
   .flow-view-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -5872,11 +5872,9 @@ JS = """
 
   const groupedMatrixRow = (label, dates, series, field) => {
     const dateText = dates.length ? `${dates[0].slice(5)}→${dates[dates.length - 1].slice(5)}` : "缺少共同日期";
-    const longShort = groupedSpread(series, "group-long", "group-short", dates);
     const longMid = groupedSpread(series, "group-long", "group-mid", dates);
     const midShort = groupedSpread(series, "group-mid", "group-short", dates);
     return `<div class="all-bond-matrix-row"><span class="all-bond-matrix-label"><b>${esc(label)}</b><small>${esc(dateText)}</small></span>`
-      + `<span>${groupedSpreadCell(longShort, field)}</span>`
       + `<span>${groupedSpreadCell(longMid, field)}</span>`
       + `<span>${groupedSpreadCell(midShort, field)}</span></div>`;
   };
@@ -5892,7 +5890,7 @@ JS = """
     }).join("");
     allBondSummary.innerHTML = `<div class="all-bond-summary-title">${esc(country?.name || "")}｜组内期限等权平均｜价差单位 bp</div>`
       + `<div class="all-bond-spread-matrix">`
-      + `<div class="all-bond-matrix-row all-bond-matrix-head"><span>窗口</span><span>长-短</span><span>长-中</span><span>中-短</span></div>`
+      + `<div class="all-bond-matrix-row all-bond-matrix-head"><span>窗口</span><span>长-中</span><span>中-短</span></div>`
       + groupedMatrixRow("当前价差", latest, series, "end")
       + horizonRows
       + `</div>`;
@@ -6014,7 +6012,7 @@ JS = """
         allBondTooltip.innerHTML = `<strong>${esc(stat.date)}</strong>`
           + ordered.map((point) => `<div class="tenor-row"><span><i class="tenor-dot" style="--dot:${point.bond.color}"></i>${esc(point.bond.tenor)}</span><b>${fmt(point.close)}%</b></div>`).join("")
           + (allBondMode === "grouped"
-            ? `<div class="muted">${tooltipSpread("group-long", "group-short", "长-短")}${tooltipSpread("group-long", "group-mid", "长-中")}${tooltipSpread("group-mid", "group-short", "中-短")}</div>`
+            ? `<div class="muted">${tooltipSpread("group-long", "group-mid", "长-中")}${tooltipSpread("group-mid", "group-short", "中-短")}</div>`
             : `<div class="muted">期限范围差：${gap === null ? "缺失" : `${signed(gap, 1)}bp（${esc(stat.high.bond.tenor)}-${esc(stat.low.bond.tenor)}）`}</div>`);
       });
       node.addEventListener("mouseleave", () => {
