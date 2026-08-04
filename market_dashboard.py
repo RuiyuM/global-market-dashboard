@@ -6004,7 +6004,7 @@ JS = """
           const first = pointByGroup.get(firstKey);
           const second = pointByGroup.get(secondKey);
           if (!first || !second) return "";
-          return `<div>${esc(label)}：<b>${signed((first.close - second.close) * 100, 1)}bp</b></div>`;
+          return `<div>当日${esc(label)}：${Number(first.close).toFixed(4)}% - ${Number(second.close).toFixed(4)}% = <b>${signed((first.close - second.close) * 100, 1)}bp</b></div>`;
         };
         allBondTooltip.style.display = "block";
         allBondTooltip.style.left = `${Math.min(bounds.width - 250, Math.max(8, event.clientX - bounds.left + 14))}px`;
