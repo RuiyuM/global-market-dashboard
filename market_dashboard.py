@@ -4045,6 +4045,10 @@ def render_html(snapshot: dict[str, Any]) -> str:
             "<h2>全期限债券</h2>",
             '<div class="all-bond-toolbar">',
             '<label>国家 <select id="all-bond-country-select"></select></label>',
+            '<div class="segmented" aria-label="全期限债券显示方式">',
+            '<button type="button" class="all-bond-mode active" data-all-bond-mode="grouped">分组</button>',
+            '<button type="button" class="all-bond-mode" data-all-bond-mode="tenors">全部期限</button>',
+            "</div>",
             '<div class="segmented" aria-label="全期限债券窗口">',
             '<button type="button" class="all-bond-window" data-all-bond-window="30">30D</button>',
             '<button type="button" class="all-bond-window active" data-all-bond-window="90">90D</button>',
@@ -4544,7 +4548,13 @@ th:first-child, td:first-child { text-align: left; }
 .all-bond-toolbar button { border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); cursor: pointer; min-width: 42px; height: 30px; padding: 0 10px; font: inherit; font-size: 12px; font-weight: 650; }
 .all-bond-toolbar button:hover { background: #f8fafc; border-color: #b7c2cf; }
 .all-bond-toolbar button.active { background: #eaf2ff; border-color: #aac5ee; color: var(--blue); }
-.all-bond-summary { min-height: 20px; color: var(--ink); font-size: 13px; font-weight: 650; margin-bottom: 8px; }
+.all-bond-summary { min-height: 20px; color: var(--ink); font-size: 13px; font-weight: 650; margin-bottom: 10px; }
+.all-bond-summary-title { margin-bottom: 7px; }
+.all-bond-spreads { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.all-bond-spread { display: grid; grid-template-columns: auto 1fr; align-items: baseline; gap: 4px 10px; padding: 8px 10px; background: #fbfcfe; }
+.all-bond-spread + .all-bond-spread { border-left: 1px solid var(--line); }
+.all-bond-spread b { justify-self: end; font-variant-numeric: tabular-nums; }
+.all-bond-spread small { grid-column: 1 / -1; color: var(--muted); font-size: 11px; font-weight: 600; }
 .all-bond-legend { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
 .all-bond-legend button { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); cursor: pointer; height: 28px; padding: 0 8px; font: inherit; font-size: 12px; font-weight: 650; }
 .all-bond-legend button:hover { background: #f8fafc; border-color: #b7c2cf; }
@@ -4818,6 +4828,8 @@ th:first-child, td:first-child { text-align: left; }
   .all-bond-toolbar .segmented { width: 100%; }
   .all-bond-toolbar .segmented button { flex: 1 1 0; min-width: 0; height: 38px; }
   .all-bond-summary { font-size: 12px; line-height: 1.45; }
+  .all-bond-spreads { grid-template-columns: 1fr; }
+  .all-bond-spread + .all-bond-spread { border-left: 0; border-top: 1px solid var(--line); }
   #all-bond-chart { min-height: 280px; }
   .flow-view-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .flow-view-tab { min-width: 0; width: 100%; }
@@ -4882,6 +4894,7 @@ JS = """
   const spreadChart = document.getElementById("spread-chart");
   const spreadTooltip = document.getElementById("spread-tooltip");
   const allBondCountrySelect = document.getElementById("all-bond-country-select");
+  const allBondModeButtons = Array.from(document.querySelectorAll(".all-bond-mode"));
   const allBondWindowButtons = Array.from(document.querySelectorAll(".all-bond-window"));
   const allBondSummary = document.getElementById("all-bond-summary");
   const allBondLegend = document.getElementById("all-bond-legend");
@@ -4906,10 +4919,16 @@ JS = """
   const customRangeByKey = {};
   let dragStart = null;
   let spreadMode = "30";
+  let allBondMode = "grouped";
   let allBondWindow = 90;
   const hiddenAllBondKeys = new Set();
   let sharedHoverDate = null;
   const allBondColors = ["#2457a6", "#b36b00", "#087443", "#b42318", "#6f42c1", "#087f8c", "#8a4b2b", "#52606d", "#c23b78", "#2d7dd2"];
+  const allBondGroups = [
+    { key: "group-short", tenor: "短端", legendLabel: "短端 <2Y", color: "#b36b00", matches: (months) => months < 24 },
+    { key: "group-mid", tenor: "中端", legendLabel: "中端 2Y-7Y", color: "#087443", matches: (months) => months >= 24 && months <= 84 },
+    { key: "group-long", tenor: "长端", legendLabel: "长端 10Y/30Y", color: "#2457a6", matches: (months) => months >= 120 }
+  ];
 
   const fmt = (value) => {
     if (value === null || value === undefined || Number.isNaN(Number(value))) return "缺失";
@@ -5768,14 +5787,37 @@ JS = """
 
   const selectedAllBondCountry = () => spreadData.find((item) => item.code === allBondCountrySelect?.value) || spreadData[0];
 
+  const buildAllBondGroups = (bonds) => allBondGroups.map((group) => {
+    const members = bonds.filter((bond) => group.matches(Number(bond.tenorMonths)));
+    if (!members.length) return null;
+    const memberMaps = members.map((bond) => new Map(bond.rows.map((row) => [row.date, row.close])));
+    const commonDates = members[0].rows.map((row) => row.date).filter((day) => memberMaps.every((values) => values.has(day)));
+    const rows = commonDates.map((day) => ({
+      date: day,
+      close: memberMaps.reduce((total, values) => total + Number(values.get(day)), 0) / members.length
+    }));
+    return {
+      key: group.key,
+      tenor: group.tenor,
+      tenorMonths: group.key === "group-short" ? 12 : group.key === "group-mid" ? 60 : 360,
+      label: `${group.tenor}等权平均`,
+      legendLabel: group.legendLabel,
+      color: group.color,
+      rows,
+      members,
+      groupKey: group.key
+    };
+  }).filter(Boolean);
+
   const allBondSelection = () => {
     const country = selectedAllBondCountry();
-    const bonds = (country?.bonds || []).map((bond, index) => {
+    const tenorBonds = (country?.bonds || []).map((bond, index) => {
       const rows = (ohlcData[bond.key]?.ohlc || [])
         .map((row) => ({ date: row.date, close: Number(row.close) }))
         .filter((row) => row.date && Number.isFinite(row.close));
-      return { ...bond, color: allBondColors[index % allBondColors.length], rows };
+      return { ...bond, legendLabel: bond.tenor, color: allBondColors[index % allBondColors.length], rows };
     });
+    const bonds = allBondMode === "grouped" ? buildAllBondGroups(tenorBonds) : tenorBonds;
     const dates = [...new Set(bonds.flatMap((bond) => bond.rows.map((row) => row.date)))].sort();
     const selectedDates = dates.slice(-Math.min(dates.length, allBondWindow));
     const dateSet = new Set(selectedDates);
@@ -5790,7 +5832,7 @@ JS = """
     allBondLegend.innerHTML = bonds.map((bond) => {
       const hidden = hiddenAllBondKeys.has(bond.key);
       return `<button type="button" data-all-bond-key="${esc(bond.key)}" class="${hidden ? "is-hidden" : ""}" aria-pressed="${hidden ? "false" : "true"}">`
-        + `<i class="all-bond-swatch" style="--swatch:${bond.color}"></i>${esc(bond.tenor)}</button>`;
+        + `<i class="all-bond-swatch" style="--swatch:${bond.color}"></i>${esc(bond.legendLabel || bond.tenor)}</button>`;
     }).join("");
     Array.from(allBondLegend.querySelectorAll("[data-all-bond-key]")).forEach((button) => {
       button.addEventListener("click", () => {
@@ -5800,6 +5842,39 @@ JS = """
         renderAllBondChart();
       });
     });
+  };
+
+  const groupedSpread = (series, firstKey, secondKey, dates) => {
+    const first = series.find((item) => item.groupKey === firstKey);
+    const second = series.find((item) => item.groupKey === secondKey);
+    if (!first || !second) return null;
+    const firstByDate = new Map(first.rows.map((row) => [row.date, row.close]));
+    const secondByDate = new Map(second.rows.map((row) => [row.date, row.close]));
+    const commonDates = dates.filter((day) => firstByDate.has(day) && secondByDate.has(day));
+    if (!commonDates.length) return null;
+    const startDate = commonDates[0];
+    const endDate = commonDates[commonDates.length - 1];
+    const start = (firstByDate.get(startDate) - secondByDate.get(startDate)) * 100;
+    const end = (firstByDate.get(endDate) - secondByDate.get(endDate)) * 100;
+    return { startDate, endDate, start, end, delta: end - start };
+  };
+
+  const groupedSpreadCard = (label, spread) => {
+    if (!spread) return `<div class="all-bond-spread"><span>${esc(label)}</span><b>缺失</b><small>缺少共同日期</small></div>`;
+    const direction = spread.delta > 0 ? "走阔" : spread.delta < 0 ? "收窄" : "持平";
+    return `<div class="all-bond-spread"><span>${esc(label)}</span><b>${signed(spread.end, 1)}bp</b>`
+      + `<small>${spread.startDate.slice(5)} 至 ${spread.endDate.slice(5)}：${signed(spread.delta, 1)}bp · ${direction}</small></div>`;
+  };
+
+  const renderGroupedBondSummary = (country, series, dates) => {
+    if (!allBondSummary) return;
+    const longShort = groupedSpread(series, "group-long", "group-short", dates);
+    const longMid = groupedSpread(series, "group-long", "group-mid", dates);
+    const midShort = groupedSpread(series, "group-mid", "group-short", dates);
+    const start = dates[0] || "";
+    const end = dates[dates.length - 1] || "";
+    allBondSummary.innerHTML = `<div class="all-bond-summary-title">${esc(country?.name || "")}｜${allBondWindow}D｜${esc(start)} 至 ${esc(end)}｜组内期限等权平均</div>`
+      + `<div class="all-bond-spreads">${groupedSpreadCard("长-短", longShort)}${groupedSpreadCard("长-中", longMid)}${groupedSpreadCard("中-短", midShort)}</div>`;
   };
 
   const renderAllBondChart = () => {
@@ -5886,7 +5961,9 @@ JS = """
     }).join("");
     allBondChart.innerHTML = `<rect width="${width}" height="${height}" fill="#fff" />${grid}${bands}${paths}${dateTicks}${hits}`;
     const latestComparable = dateStats.slice().reverse().find((row) => row.low && row.high);
-    if (allBondSummary) {
+    if (allBondMode === "grouped") {
+      renderGroupedBondSummary(country, bonds, dates);
+    } else if (allBondSummary) {
       if (latestComparable?.low && latestComparable?.high) {
         const gap = (latestComparable.high.close - latestComparable.low.close) * 100;
         allBondSummary.textContent = `${country?.name || ""}｜${allBondWindow}D｜${latestComparable.date} 期限范围差 ${latestComparable.high.bond.tenor}-${latestComparable.low.bond.tenor} ${signed(gap, 1)}bp`;
@@ -5903,12 +5980,21 @@ JS = """
         const bounds = allBondChart.parentElement.getBoundingClientRect();
         const ordered = stat.points.slice().sort((a, b) => Number(a.bond.tenorMonths) - Number(b.bond.tenorMonths));
         const gap = stat.low && stat.high ? (stat.high.close - stat.low.close) * 100 : null;
+        const pointByGroup = new Map(stat.points.map((point) => [point.bond.groupKey, point]));
+        const tooltipSpread = (firstKey, secondKey, label) => {
+          const first = pointByGroup.get(firstKey);
+          const second = pointByGroup.get(secondKey);
+          if (!first || !second) return "";
+          return `<div>${esc(label)}：<b>${signed((first.close - second.close) * 100, 1)}bp</b></div>`;
+        };
         allBondTooltip.style.display = "block";
         allBondTooltip.style.left = `${Math.min(bounds.width - 250, Math.max(8, event.clientX - bounds.left + 14))}px`;
         allBondTooltip.style.top = `${Math.max(8, event.clientY - bounds.top - 72)}px`;
         allBondTooltip.innerHTML = `<strong>${esc(stat.date)}</strong>`
           + ordered.map((point) => `<div class="tenor-row"><span><i class="tenor-dot" style="--dot:${point.bond.color}"></i>${esc(point.bond.tenor)}</span><b>${fmt(point.close)}%</b></div>`).join("")
-          + `<div class="muted">期限范围差：${gap === null ? "缺失" : `${signed(gap, 1)}bp（${esc(stat.high.bond.tenor)}-${esc(stat.low.bond.tenor)}）`}</div>`;
+          + (allBondMode === "grouped"
+            ? `<div class="muted">${tooltipSpread("group-long", "group-short", "长-短")}${tooltipSpread("group-long", "group-mid", "长-中")}${tooltipSpread("group-mid", "group-short", "中-短")}</div>`
+            : `<div class="muted">期限范围差：${gap === null ? "缺失" : `${signed(gap, 1)}bp（${esc(stat.high.bond.tenor)}-${esc(stat.low.bond.tenor)}）`}</div>`);
       });
       node.addEventListener("mouseleave", () => {
         setSharedHoverDate(null);
@@ -6476,6 +6562,14 @@ JS = """
   allBondCountrySelect?.addEventListener("change", () => {
     hiddenAllBondKeys.clear();
     renderAllBondChart();
+  });
+  allBondModeButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      allBondMode = button.dataset.allBondMode || "grouped";
+      hiddenAllBondKeys.clear();
+      allBondModeButtons.forEach((item) => item.classList.toggle("active", item === button));
+      renderAllBondChart();
+    });
   });
   allBondWindowButtons.forEach((button) => {
     button.addEventListener("click", () => {

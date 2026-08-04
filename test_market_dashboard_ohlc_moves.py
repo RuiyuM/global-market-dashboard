@@ -269,6 +269,8 @@ def test_all_bond_tenors_chart_is_interactive_and_uses_exact_date_values() -> No
     assert '<section class="panel all-bond-panel" id="all-bond-panel">' in html
     assert "<h2>全期限债券</h2>" in html
     assert 'id="all-bond-country-select"' in html
+    assert 'class="all-bond-mode active" data-all-bond-mode="grouped">分组</button>' in html
+    assert 'class="all-bond-mode" data-all-bond-mode="tenors">全部期限</button>' in html
     assert 'data-all-bond-window="30"' in html
     assert 'data-all-bond-window="90"' in html
     assert 'data-all-bond-window="180"' in html
@@ -277,6 +279,15 @@ def test_all_bond_tenors_chart_is_interactive_and_uses_exact_date_values() -> No
     assert 'id="all-bond-chart"' in html
     assert 'id="all-bond-tooltip"' in html
     assert "const allBondSelection = () =>" in JS
+    assert 'let allBondMode = "grouped";' in JS
+    assert "const buildAllBondGroups = (bonds) =>" in JS
+    assert 'key: "group-short"' in JS
+    assert 'key: "group-mid"' in JS
+    assert 'key: "group-long"' in JS
+    assert "const groupedSpread = (series, firstKey, secondKey, dates) =>" in JS
+    assert 'groupedSpreadCard("长-短", longShort)' in JS
+    assert 'groupedSpreadCard("长-中", longMid)' in JS
+    assert 'groupedSpreadCard("中-短", midShort)' in JS
     assert "const renderAllBondChart = () =>" in JS
     assert "const exactByDate = new Map" in JS
     assert "期限范围差" in JS
