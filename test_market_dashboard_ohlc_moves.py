@@ -231,6 +231,60 @@ def test_spread_calculator_is_separate_interactive_block() -> None:
     assert "spread-short-line" in JS
 
 
+def test_all_bond_tenors_chart_is_interactive_and_uses_exact_date_values() -> None:
+    html = render_html(
+        {
+            "countries": [],
+            "volatility_rankings": {"bond": [], "equity": [], "fx": []},
+            "fx_rank_details": {},
+            "second_order_monitor": [
+                {
+                    "key": "US_2Y",
+                    "country": "美国",
+                    "group": "债券",
+                    "label": "美国2年国债",
+                    "unit": "bp",
+                    "metrics": {},
+                    "summary": {},
+                    "ohlc": [{"date": "2026-06-25", "open": 4, "high": 4, "low": 4, "close": 4}],
+                },
+                {
+                    "key": "US_10Y",
+                    "country": "美国",
+                    "group": "债券",
+                    "label": "美国10年国债",
+                    "unit": "bp",
+                    "metrics": {},
+                    "summary": {},
+                    "ohlc": [{"date": "2026-06-25", "open": 5, "high": 5, "low": 5, "close": 5}],
+                },
+            ],
+            "fx_flows": [],
+            "series_status": [],
+            "notes": [],
+            "generated_at": "2026-06-26T00:00:00",
+        }
+    )
+
+    assert '<section class="panel all-bond-panel" id="all-bond-panel">' in html
+    assert "<h2>全期限债券</h2>" in html
+    assert 'id="all-bond-country-select"' in html
+    assert 'data-all-bond-window="30"' in html
+    assert 'data-all-bond-window="90"' in html
+    assert 'data-all-bond-window="180"' in html
+    assert 'data-all-bond-window="360"' in html
+    assert 'id="all-bond-legend"' in html
+    assert 'id="all-bond-chart"' in html
+    assert 'id="all-bond-tooltip"' in html
+    assert "const allBondSelection = () =>" in JS
+    assert "const renderAllBondChart = () =>" in JS
+    assert "const exactByDate = new Map" in JS
+    assert "期限范围差" in JS
+    assert "all-bond-crosshair" in JS
+    assert "maxGapMs" in JS
+    assert "initAllBondChart();" in JS
+
+
 def test_spread_calculator_orders_long_and_short_by_selected_tenor() -> None:
     html = render_html(
         {
