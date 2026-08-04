@@ -205,9 +205,11 @@ def test_spread_calculator_is_separate_interactive_block() -> None:
 
     assert '<section class="panel spread-panel" id="spread-panel">' in html
     assert 'id="spread-country-select"' in html
-    assert 'data-spread-window="1"' in html
-    assert 'data-spread-window="7"' in html
     assert 'data-spread-window="30"' in html
+    assert 'data-spread-window="60"' in html
+    assert 'data-spread-window="90"' in html
+    assert 'data-spread-window="1"' not in html
+    assert 'data-spread-window="7"' not in html
     assert 'id="spread-start-date"' in html
     assert 'id="spread-exact-date"' in html
     assert 'id="spread-align-ohlc"' in html
