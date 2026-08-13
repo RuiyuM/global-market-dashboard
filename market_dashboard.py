@@ -5793,27 +5793,63 @@ JS = """
 
   const selectedAllBondCountry = () => spreadData.find((item) => item.code === allBondCountrySelect?.value) || spreadData[0];
 
-  const buildAllBondGroups = (bonds) => allBondGroups.map((group) => {
+  const buildAllBondGroups = (bonds, windowDates) => allBondGroups.map((group) => {
     const members = bonds.filter((bond) => group.matches(Number(bond.tenorMonths)));
     if (!members.length) return null;
-    const memberMaps = members.map((bond) => new Map(bond.rows.map((row) => [row.date, row.close])));
-    const commonDates = members[0].rows.map((row) => row.date).filter((day) => memberMaps.every((values) => values.has(day)));
-    const rows = commonDates.map((day) => ({
-      date: day,
-      close: memberMaps.reduce((total, values) => total + Number(values.get(day)), 0) / members.length
+    const memberMaps = members.map((bond) => ({
+      bond,
+      values: new Map(bond.rows.map((row) => [row.date, row.close]))
     }));
+    const requiredCoverage = Math.max(1, Math.ceil(windowDates.length * 0.8));
+    const rankedMembers = memberMaps
+      .map((item) => ({ ...item, coverage: windowDates.filter((day) => item.values.has(day)).length }))
+      .sort((a, b) => b.coverage - a.coverage);
+    const stableMembers = rankedMembers.filter((item) => item.coverage >= requiredCoverage);
+    const selectedMembers = stableMembers.length ? stableMembers : rankedMembers.slice(0, 1);
+    const rows = windowDates.map((day) => {
+      const available = selectedMembers
+        .filter((item) => item.values.has(day))
+        .map((item) => ({ key: item.bond.key, value: Number(item.values.get(day)) }))
+        .filter((item) => Number.isFinite(item.value));
+      if (available.length !== selectedMembers.length) return null;
+      return {
+        date: day,
+        close: available.reduce((total, item) => total + item.value, 0) / available.length,
+        memberValues: Object.fromEntries(available.map((item) => [item.key, item.value])),
+        memberCount: available.length,
+        totalMembers: selectedMembers.length
+      };
+    }).filter(Boolean);
+    const selectedTenors = selectedMembers
+      .map((item) => item.bond)
+      .sort((a, b) => Number(a.tenorMonths) - Number(b.tenorMonths))
+      .map((bond) => bond.tenor)
+      .join("/");
     return {
       key: group.key,
       tenor: group.tenor,
       tenorMonths: group.key === "group-short" ? 12 : group.key === "group-mid" ? 60 : 360,
       label: `${group.tenor}等权平均`,
-      legendLabel: group.legendLabel,
+      legendLabel: `${group.tenor} ${selectedTenors}`,
       color: group.color,
       rows,
-      members,
+      members: selectedMembers.map((item) => item.bond),
       groupKey: group.key
     };
   }).filter(Boolean);
+
+  const calendarWindowDates = (dates, days) => {
+    if (!dates.length) return [];
+    const endMs = dateMs(dates[dates.length - 1]);
+    if (!Number.isFinite(endMs)) return dates.slice();
+    const cutoffMs = endMs - Number(days) * 24 * 60 * 60 * 1000;
+    let startIndex = 0;
+    dates.forEach((day, index) => {
+      const currentMs = dateMs(day);
+      if (Number.isFinite(currentMs) && currentMs <= cutoffMs) startIndex = index;
+    });
+    return dates.slice(startIndex);
+  };
 
   const allBondSelection = () => {
     const country = selectedAllBondCountry();
@@ -5823,14 +5859,14 @@ JS = """
         .filter((row) => row.date && Number.isFinite(row.close));
       return { ...bond, legendLabel: bond.tenor, color: allBondColors[index % allBondColors.length], rows };
     });
-    const bonds = allBondMode === "grouped" ? buildAllBondGroups(tenorBonds) : tenorBonds;
-    const dates = [...new Set(bonds.flatMap((bond) => bond.rows.map((row) => row.date)))].sort();
-    const selectedDates = dates.slice(-Math.min(dates.length, allBondWindow));
+    const allDates = [...new Set(tenorBonds.flatMap((bond) => bond.rows.map((row) => row.date)))].sort();
+    const selectedDates = calendarWindowDates(allDates, allBondWindow);
+    const bonds = allBondMode === "grouped" ? buildAllBondGroups(tenorBonds, selectedDates) : tenorBonds;
     const dateSet = new Set(selectedDates);
     const visibleBonds = bonds
       .filter((bond) => !hiddenAllBondKeys.has(bond.key))
       .map((bond) => ({ ...bond, rows: bond.rows.filter((row) => dateSet.has(row.date)) }));
-    return { country, bonds, visibleBonds, dates: selectedDates };
+    return { country, bonds, tenorBonds, visibleBonds, dates: selectedDates };
   };
 
   const renderAllBondLegend = (bonds) => {
@@ -5850,6 +5886,18 @@ JS = """
     });
   };
 
+  const groupedEndpointPair = (item, startDate, endDate) => {
+    const startRow = item?.rows.find((row) => row.date === startDate);
+    const endRow = item?.rows.find((row) => row.date === endDate);
+    if (!startRow || !endRow) return null;
+    const startValues = startRow.memberValues || { [item.key]: startRow.close };
+    const endValues = endRow.memberValues || { [item.key]: endRow.close };
+    const comparableKeys = Object.keys(startValues).filter((key) => Number.isFinite(Number(endValues[key])));
+    if (!comparableKeys.length) return null;
+    const average = (values) => comparableKeys.reduce((total, key) => total + Number(values[key]), 0) / comparableKeys.length;
+    return { start: average(startValues), end: average(endValues), memberCount: comparableKeys.length };
+  };
+
   const groupedSpread = (series, firstKey, secondKey, dates) => {
     const first = series.find((item) => item.groupKey === firstKey);
     const second = series.find((item) => item.groupKey === secondKey);
@@ -5860,8 +5908,11 @@ JS = """
     if (!commonDates.length) return null;
     const startDate = commonDates[0];
     const endDate = commonDates[commonDates.length - 1];
-    const start = (firstByDate.get(startDate) - secondByDate.get(startDate)) * 100;
-    const end = (firstByDate.get(endDate) - secondByDate.get(endDate)) * 100;
+    const firstPair = groupedEndpointPair(first, startDate, endDate);
+    const secondPair = groupedEndpointPair(second, startDate, endDate);
+    if (!firstPair || !secondPair) return null;
+    const start = (firstPair.start - secondPair.start) * 100;
+    const end = (firstPair.end - secondPair.end) * 100;
     return { startDate, endDate, start, end, delta: end - start };
   };
 
@@ -5879,19 +5930,27 @@ JS = """
       + `<span>${groupedSpreadCell(midShort, field)}</span></div>`;
   };
 
-  const renderGroupedBondSummary = (country, series) => {
+  const renderGroupedBondSummary = (country, tenorBonds, displaySeries) => {
     if (!allBondSummary) return;
-    const groupDateSets = series.map((item) => new Set(item.rows.map((row) => row.date)));
-    const commonDates = series[0]?.rows.map((row) => row.date).filter((day) => groupDateSets.every((dates) => dates.has(day))) || [];
-    const latest = commonDates.length ? [commonDates[commonDates.length - 1]] : [];
+    const allDates = [...new Set(tenorBonds.flatMap((bond) => bond.rows.map((row) => row.date)))].sort();
+    const summaryWindow = (days) => {
+      const requestedDates = calendarWindowDates(allDates, days);
+      const series = buildAllBondGroups(tenorBonds, requestedDates);
+      const groupDateSets = series.map((item) => new Set(item.rows.map((row) => row.date)));
+      const commonDates = series[0]?.rows.map((row) => row.date).filter((day) => groupDateSets.every((dates) => dates.has(day))) || [];
+      return { series, commonDates };
+    };
+    const displayDateSets = displaySeries.map((item) => new Set(item.rows.map((row) => row.date)));
+    const displayCommonDates = displaySeries[0]?.rows.map((row) => row.date).filter((day) => displayDateSets.every((dates) => dates.has(day))) || [];
+    const latest = displayCommonDates.length ? [displayCommonDates[displayCommonDates.length - 1]] : [];
     const horizonRows = [90, 60, 30, 7].map((days) => {
-      const selected = commonDates.slice(-Math.min(commonDates.length, days + 1));
-      return groupedMatrixRow(`${days}D变化`, selected, series, "delta");
+      const window = summaryWindow(days);
+      return groupedMatrixRow(`${days}D变化`, window.commonDates, window.series, "delta");
     }).join("");
-    allBondSummary.innerHTML = `<div class="all-bond-summary-title">${esc(country?.name || "")}｜组内期限等权平均｜价差单位 bp</div>`
+    allBondSummary.innerHTML = `<div class="all-bond-summary-title">${esc(country?.name || "")}｜窗口内稳定期限等权平均｜价差单位 bp</div>`
       + `<div class="all-bond-spread-matrix">`
       + `<div class="all-bond-matrix-row all-bond-matrix-head"><span>窗口</span><span>长-中</span><span>中-短</span></div>`
-      + groupedMatrixRow("当前价差", latest, series, "end")
+      + groupedMatrixRow("当前价差", latest, displaySeries, "end")
       + horizonRows
       + `</div>`;
   };
@@ -5899,7 +5958,7 @@ JS = """
   const renderAllBondChart = () => {
     if (!allBondChart) return;
     const selection = allBondSelection();
-    const { country, bonds, visibleBonds, dates } = selection;
+    const { country, bonds, tenorBonds, visibleBonds, dates } = selection;
     renderAllBondLegend(bonds);
     const width = 980;
     const height = 300;
@@ -5981,7 +6040,7 @@ JS = """
     allBondChart.innerHTML = `<rect width="${width}" height="${height}" fill="#fff" />${grid}${bands}${paths}${dateTicks}${hits}`;
     const latestComparable = dateStats.slice().reverse().find((row) => row.low && row.high);
     if (allBondMode === "grouped") {
-      renderGroupedBondSummary(country, bonds);
+      renderGroupedBondSummary(country, tenorBonds, bonds);
     } else if (allBondSummary) {
       if (latestComparable?.low && latestComparable?.high) {
         const gap = (latestComparable.high.close - latestComparable.low.close) * 100;

@@ -282,17 +282,27 @@ def test_all_bond_tenors_chart_is_interactive_and_uses_exact_date_values() -> No
     assert 'id="all-bond-tooltip"' in html
     assert "const allBondSelection = () =>" in JS
     assert 'let allBondMode = "grouped";' in JS
-    assert "const buildAllBondGroups = (bonds) =>" in JS
+    assert "const buildAllBondGroups = (bonds, windowDates) =>" in JS
+    assert "const requiredCoverage = Math.max(1, Math.ceil(windowDates.length * 0.8));" in JS
+    assert "const stableMembers = rankedMembers.filter" in JS
+    assert "memberValues: Object.fromEntries" in JS
+    assert "const calendarWindowDates = (dates, days) =>" in JS
+    assert "const selectedDates = calendarWindowDates(allDates, allBondWindow);" in JS
+    assert "const groupedEndpointPair = (item, startDate, endDate) =>" in JS
+    assert "const summaryWindow = (days) =>" in JS
+    assert "窗口内稳定期限等权平均" in JS
+    assert "memberMaps.every" not in JS
+    assert "dates.slice(-Math.min(dates.length, allBondWindow))" not in JS
     assert 'key: "group-short"' in JS
     assert 'key: "group-mid"' in JS
     assert 'key: "group-long"' in JS
     assert "const groupedSpread = (series, firstKey, secondKey, dates) =>" in JS
     assert "const groupedMatrixRow = (label, dates, series, field) =>" in JS
     assert '[90, 60, 30, 7].map' in JS
-    assert 'groupedMatrixRow("当前价差", latest, series, "end")' in JS
+    assert 'groupedMatrixRow("当前价差", latest, displaySeries, "end")' in JS
     assert '<span>窗口</span><span>长-中</span><span>中-短</span>' in JS
     assert '<span>长-短</span>' not in JS
-    assert 'groupedMatrixRow(`${days}D变化`, selected, series, "delta")' in JS
+    assert 'groupedMatrixRow(`${days}D变化`, window.commonDates, window.series, "delta")' in JS
     assert '当日${esc(label)}：${Number(first.close).toFixed(4)}% - ${Number(second.close).toFixed(4)}%' in JS
     assert "const renderAllBondChart = () =>" in JS
     assert "const exactByDate = new Map" in JS
