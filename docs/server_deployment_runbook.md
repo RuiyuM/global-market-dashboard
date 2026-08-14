@@ -222,11 +222,12 @@ net = realizedPnl - stable-asset commission
 
 3. Accumulate net PnL by date.
 4. Divide cumulative PnL by the futures base capital.
-5. On every run, fetch all BTCUSDT fills from `QUANT_FUND_START_DATE` through today and rebuild the full curve.
-6. Require the rebuilt curve to contain every previously published trade date and to end no earlier than the current public curve.
-7. Write only `{date, pct}` points to `dashboard/quant_fund_snapshot.json`.
+5. On every run, request BTCUSDT fills from `QUANT_FUND_START_DATE` through today and rebuild every date still available from the API.
+6. If the API still returns the configured start date, require a complete full-history rebuild. If Binance has aged older fills out of its user-trade retention window, preserve the verified pre-window percentage points and anchor the fresh retained-window PnL to the final preceding point.
+7. A retention-window merge is allowed only when all previously published dates inside the returned window are present, overlapping values agree within `0.01` percentage points, and the rebuilt window ends no earlier than the current public curve. Otherwise fail closed and preserve the existing curve.
+8. Write only `{date, pct}` points to `dashboard/quant_fund_snapshot.json`.
 
-The private April CSV is an audit/backup reference only; production does not splice it into the public curve. Do not use any published percentage as an API anchor. Recomputing directly from the complete raw fill history avoids cumulative rounding drift and lets a later run finalize an intraday point. If the API response omits a previously published trade date or is stale, the updater preserves the current public curve and reports an error instead of deleting or shifting history.
+The private April CSV is an audit/backup reference only; production does not read or upload it during routine updates. A published percentage may be used as a retention boundary anchor only after the returned API window overlaps the existing curve and passes the date/value checks above. This introduces at most the existing four-decimal publication rounding at one boundary, while avoiding loss of older history after Binance stops returning those raw fills. If the response has no verified overlap, omits a published date inside the retained window, disagrees with overlapping values, or is stale, the updater preserves the current public curve and reports an error instead of deleting or shifting history.
 
 The raw trade list is not written by the dashboard pipeline. It should only exist in memory while `quant_fund_snapshot.py` runs, unless using a one-time private CSV import path outside the public repo.
 

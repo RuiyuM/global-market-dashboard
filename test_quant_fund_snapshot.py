@@ -18,6 +18,7 @@ from quant_fund_snapshot import (
     env_float,
     fetch_futures_trades,
     load_futures_trades_csv,
+    merge_retained_futures_rebuild,
     require_complete_futures_rebuild,
     require_lead_futures_context,
     update_options_percent_points,
@@ -166,6 +167,56 @@ def test_complete_futures_rebuild_rejects_empty_history() -> None:
 
     with pytest.raises(ValueError, match="empty futures API rebuild"):
         require_complete_futures_rebuild(existing, [])
+
+
+def test_retained_futures_rebuild_preserves_prefix_and_reanchors_window() -> None:
+    existing = [
+        {"date": "2026-04-23", "pct": -0.5},
+        {"date": "2026-05-12", "pct": 1.0},
+        {"date": "2026-05-14", "pct": 1.5},
+        {"date": "2026-06-01", "pct": 2.0},
+    ]
+    retained_window = [
+        {"date": "2026-05-14", "pct": 0.5},
+        {"date": "2026-06-01", "pct": 1.0},
+        {"date": "2026-08-14", "pct": 1.25},
+    ]
+
+    assert merge_retained_futures_rebuild(existing, retained_window) == [
+        {"date": "2026-04-23", "pct": -0.5},
+        {"date": "2026-05-12", "pct": 1.0},
+        {"date": "2026-05-14", "pct": 1.5},
+        {"date": "2026-06-01", "pct": 2.0},
+        {"date": "2026-08-14", "pct": 2.25},
+    ]
+
+
+def test_retained_futures_rebuild_rejects_overlap_value_mismatch() -> None:
+    existing = [
+        {"date": "2026-04-23", "pct": -0.5},
+        {"date": "2026-05-12", "pct": 1.0},
+        {"date": "2026-05-14", "pct": 1.8},
+    ]
+    retained_window = [{"date": "2026-05-14", "pct": 0.5}]
+
+    with pytest.raises(ValueError, match="overlap mismatch"):
+        merge_retained_futures_rebuild(existing, retained_window)
+
+
+def test_retained_futures_rebuild_rejects_missing_overlap_date() -> None:
+    existing = [
+        {"date": "2026-04-23", "pct": -0.5},
+        {"date": "2026-05-12", "pct": 1.0},
+        {"date": "2026-05-14", "pct": 1.5},
+        {"date": "2026-05-20", "pct": 1.7},
+    ]
+    retained_window = [
+        {"date": "2026-05-14", "pct": 0.5},
+        {"date": "2026-08-14", "pct": 1.0},
+    ]
+
+    with pytest.raises(ValueError, match="incomplete futures retained-window rebuild"):
+        merge_retained_futures_rebuild(existing, retained_window)
 
 
 def test_options_total_is_rendered_as_percent_of_configured_base() -> None:

@@ -342,6 +342,64 @@ def require_complete_futures_rebuild(
         raise ValueError("stale futures API rebuild")
 
 
+def merge_retained_futures_rebuild(
+    existing: list[dict[str, Any]],
+    rebuilt: list[dict[str, Any]],
+    *,
+    overlap_tolerance_pct_points: float = 0.01,
+) -> list[dict[str, Any]]:
+    """Merge a retention-limited API rebuild without losing verified history.
+
+    Binance may stop returning fills older than its retained user-trade window.
+    When that happens, anchor the freshly rebuilt window to the last published
+    point before it, but only after every overlapping trade date and value agree.
+    """
+    existing_rows = public_points({"points": existing})
+    rebuilt_rows = public_points({"points": rebuilt})
+    if not existing_rows:
+        return rebuilt_rows
+    if not rebuilt_rows:
+        raise ValueError("empty futures API rebuild")
+
+    if rebuilt_rows[0]["date"] <= existing_rows[0]["date"]:
+        require_complete_futures_rebuild(existing_rows, rebuilt_rows)
+        return rebuilt_rows
+    if rebuilt_rows[-1]["date"] < existing_rows[-1]["date"]:
+        raise ValueError("stale futures API rebuild")
+
+    first_rebuilt_date = rebuilt_rows[0]["date"]
+    anchors = [row for row in existing_rows if row["date"] < first_rebuilt_date]
+    if not anchors:
+        raise ValueError("missing futures retention anchor")
+    anchor = anchors[-1]
+
+    rebuilt_dates = {row["date"] for row in rebuilt_rows}
+    expected_overlap_dates = {
+        row["date"]
+        for row in existing_rows
+        if first_rebuilt_date <= row["date"] <= rebuilt_rows[-1]["date"]
+    }
+    if expected_overlap_dates - rebuilt_dates:
+        raise ValueError("incomplete futures retained-window rebuild")
+    if not expected_overlap_dates:
+        raise ValueError("missing futures retained-window overlap")
+
+    aligned_rows = [
+        {"date": row["date"], "pct": round(anchor["pct"] + row["pct"], 4)}
+        for row in rebuilt_rows
+    ]
+    existing_by_date = {row["date"]: row["pct"] for row in existing_rows}
+    aligned_by_date = {row["date"]: row["pct"] for row in aligned_rows}
+    if any(
+        abs(existing_by_date[day] - aligned_by_date[day]) > overlap_tolerance_pct_points
+        for day in expected_overlap_dates
+    ):
+        raise ValueError("futures retained-window overlap mismatch")
+
+    prefix = [row for row in existing_rows if row["date"] < first_rebuilt_date]
+    return prefix + aligned_rows
+
+
 def default_quant_fund_snapshot() -> dict[str, Any]:
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -420,8 +478,7 @@ def build_snapshot() -> dict[str, Any]:
             require_lead_futures_context(futures_key, futures_secret, symbol)
             trades = fetch_futures_trades(futures_key, futures_secret, symbol, start, now.date())
             fetched_points = aggregate_futures_trade_curve(trades, base_usd=futures_base, start=start)
-            require_complete_futures_rebuild(existing_futures_points, fetched_points)
-            futures_points = fetched_points
+            futures_points = merge_retained_futures_rebuild(existing_futures_points, fetched_points)
             snapshot["futures"] = {
                 "label": "期货",
                 "status": "ok" if futures_points else "no_trades",
