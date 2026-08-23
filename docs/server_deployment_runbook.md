@@ -180,7 +180,8 @@ Expected variable categories:
 - lead-futures API key and secret: the dedicated Binance Futures Copy Trading key bound to the BTCUSDT lead portfolio.
 - option API key and secret: Binance options account used by the options account-status publisher.
 - option-futures API key and secret: Binance USD-M futures account used by the options account-status publisher for its futures USDC component.
-- futures symbol
+- primary futures symbol and optional comma-separated extra symbols
+- extra-symbol effective date, which must be later than the last verified primary-only curve date when a new symbol is first introduced
 - futures base capital
 - futures seed end date: the final date already verified from the private initialization CSV
 - options base capital
@@ -196,8 +197,9 @@ Important credential rule:
 - `BINANCE_LEAD_FUTURES_API_KEY` / `BINANCE_LEAD_FUTURES_API_SECRET` must be the dedicated Futures Copy Trading key used by the local BTCUSDT lead-trading script.
 - `BINANCE_OPTION_API_KEY` / `BINANCE_OPTION_API_SECRET` must be the options account API, the same account used by `account_status_publisher/publish_account_status.py`.
 - `BINANCE_OPTION_FUTURES_API_KEY` / `BINANCE_OPTION_FUTURES_API_SECRET` must be the futures-balance API used by the options account-status publisher. This is not the BTCUSDT futures trading API unless the publisher really uses the same account.
-- The futures curve only reads futures trade/PnL data for `QUANT_FUND_SYMBOL`, normally `BTCUSDT`.
-- Before reading any futures fills, the updater checks Binance Copy Trading `userStatus` and `leadSymbol`. It must see `isLeadTrader=true` and the configured symbol in the lead-trading whitelist; a regular USD-M or options-related key fails closed.
+- The futures curve reads the primary `QUANT_FUND_SYMBOL`, normally `BTCUSDT`, plus optional `QUANT_FUND_EXTRA_SYMBOLS`, currently `ETHUSDT`, from the same lead portfolio.
+- Newly added symbols must set `QUANT_FUND_EXTRA_SYMBOLS_START_DATE`. Existing primary-only history remains unchanged; extra-symbol realized PnL is included only from that UTC date forward.
+- Before reading any futures fills, the updater checks Binance Copy Trading `userStatus` and `leadSymbol`. It must see `isLeadTrader=true` and every configured symbol in the lead-trading whitelist; a regular USD-M or options-related key fails closed.
 - The options curve reads option wallet value from `BINANCE_OPTION_API_*` and reads the stable futures balance component from `BINANCE_OPTION_FUTURES_API_*`.
 - Never paste any API key into Git, public HTML, public JSON, shell history, or this document.
 
@@ -213,7 +215,7 @@ Use that local script only to identify which futures API account should be confi
 
 `quant_fund_snapshot.py` builds the futures curve from raw trades in memory:
 
-1. Fetch or load raw futures trades from the futures API account only.
+1. Fetch or load raw futures trades from the dedicated lead-futures API account only. Aggregate the primary BTCUSDT stream and configured extra streams such as ETHUSDT.
 2. Compute net daily realized PnL:
 
 ```text
@@ -222,7 +224,7 @@ net = realizedPnl - stable-asset commission
 
 3. Accumulate net PnL by date.
 4. Divide cumulative PnL by the futures base capital.
-5. On every run, request BTCUSDT fills from `QUANT_FUND_START_DATE` through today and rebuild every date still available from the API.
+5. On every run, request BTCUSDT fills from `QUANT_FUND_START_DATE` through today. Request each extra symbol only from `QUANT_FUND_EXTRA_SYMBOLS_START_DATE`, then rebuild the combined realized-PnL curve for every date still available from the API.
 6. If the API still returns the configured start date, require a complete full-history rebuild. If Binance has aged older fills out of its user-trade retention window, preserve the verified pre-window percentage points and anchor the fresh retained-window PnL to the final preceding point.
 7. A retention-window merge is allowed only when all previously published dates inside the returned window are present, overlapping values agree within `0.01` percentage points, and the rebuilt window ends no earlier than the current public curve. Otherwise fail closed and preserve the existing curve.
 8. Write only `{date, pct}` points to `dashboard/quant_fund_snapshot.json`.

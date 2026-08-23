@@ -19,6 +19,7 @@ from quant_fund_snapshot import (
     fetch_futures_trades,
     load_futures_trades_csv,
     merge_retained_futures_rebuild,
+    parse_futures_symbols,
     require_complete_futures_rebuild,
     require_lead_futures_context,
     update_options_percent_points,
@@ -27,6 +28,12 @@ from quant_fund_snapshot import (
 
 def utc_ms(year: int, month: int, day: int) -> int:
     return int(datetime(year, month, day, tzinfo=timezone.utc).timestamp() * 1000)
+
+
+@pytest.fixture(autouse=True)
+def clear_optional_futures_symbols(monkeypatch) -> None:
+    monkeypatch.delenv("QUANT_FUND_EXTRA_SYMBOLS", raising=False)
+    monkeypatch.delenv("QUANT_FUND_EXTRA_SYMBOLS_START_DATE", raising=False)
 
 
 def test_futures_trades_are_rendered_as_percent_of_configured_base() -> None:
@@ -113,6 +120,21 @@ def test_futures_source_requires_lead_trader_and_symbol_whitelist(monkeypatch) -
         "/sapi/v1/copyTrading/futures/userStatus",
         "/sapi/v1/copyTrading/futures/leadSymbol",
     ]
+
+
+def test_futures_source_requires_every_configured_symbol(monkeypatch) -> None:
+    def fake_signed_get(_base, path, _api_key, _api_secret, _params=None):
+        if path.endswith("/userStatus"):
+            return {"success": True, "data": {"isLeadTrader": True}}
+        return {"success": True, "data": [{"symbol": "BTCUSDT"}, {"symbol": "ETHUSDT"}]}
+
+    monkeypatch.setattr(qfs, "signed_get", fake_signed_get)
+
+    require_lead_futures_context("lead-key", "lead-secret", ["BTCUSDT", "ETHUSDT"])
+
+
+def test_futures_symbols_are_normalized_and_deduplicated() -> None:
+    assert parse_futures_symbols("btcusdt", " ethusdt, BTCUSDT,ethusdt ") == ["BTCUSDT", "ETHUSDT"]
 
 
 def test_futures_source_rejects_regular_futures_credentials(monkeypatch) -> None:
@@ -360,6 +382,64 @@ def test_api_futures_update_writes_only_public_percent_points(monkeypatch, tmp_p
         "test-secret",
     ]:
         assert marker not in text
+
+
+def test_api_futures_update_combines_extra_symbol_from_effective_date(monkeypatch) -> None:
+    for name in [
+        "QUANT_FUND_OPTIONS_BASE_USD",
+        "BINANCE_OPTION_API_KEY",
+        "BINANCE_OPTION_API_SECRET",
+        "QUANT_FUND_FUTURES_TRADES_CSV",
+    ]:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("QUANT_FUND_START_DATE", "2026-04-01")
+    monkeypatch.setenv("QUANT_FUND_FUTURES_BASE_USD", "1000")
+    monkeypatch.setenv("QUANT_FUND_SYMBOL", "BTCUSDT")
+    monkeypatch.setenv("QUANT_FUND_EXTRA_SYMBOLS", "ETHUSDT")
+    monkeypatch.setenv("QUANT_FUND_EXTRA_SYMBOLS_START_DATE", "2026-08-22")
+    monkeypatch.setenv("BINANCE_LEAD_FUTURES_API_KEY", "test-key")
+    monkeypatch.setenv("BINANCE_LEAD_FUTURES_API_SECRET", "test-secret")
+    monkeypatch.setattr(qfs, "load_existing_public_snapshot", lambda: {})
+    checked_symbols = []
+    calls = []
+
+    def fake_context(_key, _secret, symbols):
+        checked_symbols.extend(symbols)
+
+    def fake_fetch(_key, _secret, symbol, start, _end):
+        calls.append((symbol, start))
+        if symbol == "BTCUSDT":
+            return [
+                {
+                    "time": utc_ms(2026, 4, 1),
+                    "realizedPnl": "10",
+                    "commission": "0",
+                    "commissionAsset": "USDT",
+                }
+            ]
+        return [
+            {
+                "time": utc_ms(2026, 8, 22),
+                "realizedPnl": "20",
+                "commission": "0",
+                "commissionAsset": "USDT",
+            }
+        ]
+
+    monkeypatch.setattr(qfs, "require_lead_futures_context", fake_context)
+    monkeypatch.setattr(qfs, "fetch_futures_trades", fake_fetch)
+
+    snapshot = qfs.build_snapshot()
+
+    assert checked_symbols == ["BTCUSDT", "ETHUSDT"]
+    assert calls == [("BTCUSDT", date(2026, 4, 1)), ("ETHUSDT", date(2026, 8, 22))]
+    assert snapshot["futures"]["status"] == "ok"
+    assert snapshot["futures"]["points"] == [
+        {"date": "2026-04-01", "pct": 1.0},
+        {"date": "2026-08-22", "pct": 3.0},
+    ]
+    assert "BTCUSDT" not in str(snapshot)
+    assert "ETHUSDT" not in str(snapshot)
 
 
 def test_api_futures_update_rebuilds_full_history_from_configured_start(monkeypatch) -> None:

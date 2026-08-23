@@ -134,7 +134,7 @@ def fetch_futures_trades(api_key: str, api_secret: str, symbol: str, start: date
     return trades
 
 
-def require_lead_futures_context(api_key: str, api_secret: str, symbol: str) -> None:
+def require_lead_futures_context(api_key: str, api_secret: str, symbols: str | list[str]) -> None:
     status = signed_get(
         SAPI_BASE,
         "/sapi/v1/copyTrading/futures/userStatus",
@@ -155,12 +155,24 @@ def require_lead_futures_context(api_key: str, api_secret: str, symbol: str) -> 
         api_key,
         api_secret,
     )
-    symbols = whitelist.get("data", []) if isinstance(whitelist, dict) and whitelist.get("success") is True else []
-    if not any(
-        isinstance(item, dict) and str(item.get("symbol", "")).upper() == symbol
-        for item in symbols
-    ):
+    expected = {symbols.upper()} if isinstance(symbols, str) else {symbol.upper() for symbol in symbols}
+    rows = whitelist.get("data", []) if isinstance(whitelist, dict) and whitelist.get("success") is True else []
+    allowed = {
+        str(item.get("symbol", "")).upper()
+        for item in rows
+        if isinstance(item, dict)
+    }
+    if not expected or not expected.issubset(allowed):
         raise ValueError("futures symbol is not enabled for lead trading")
+
+
+def parse_futures_symbols(primary: str, extras: str) -> list[str]:
+    symbols: list[str] = []
+    for raw in [primary, *extras.split(",")]:
+        symbol = raw.strip().upper()
+        if symbol and symbol not in symbols:
+            symbols.append(symbol)
+    return symbols
 
 
 def load_futures_trades_csv(path: Path) -> list[dict[str, Any]]:
@@ -432,6 +444,9 @@ def build_snapshot() -> dict[str, Any]:
     now = datetime.now(timezone.utc)
     start = parse_ymd(os.environ.get("QUANT_FUND_START_DATE", default_start_date(now.date()).isoformat()))
     symbol = os.environ.get("QUANT_FUND_SYMBOL", DEFAULT_SYMBOL).strip().upper()
+    futures_symbols = parse_futures_symbols(symbol, os.environ.get("QUANT_FUND_EXTRA_SYMBOLS", ""))
+    extra_symbols = futures_symbols[1:]
+    extra_symbols_start = env_date("QUANT_FUND_EXTRA_SYMBOLS_START_DATE")
     futures_base = env_float("QUANT_FUND_FUTURES_BASE_USD")
     options_base = env_float("QUANT_FUND_OPTIONS_BASE_USD")
     options_rebase_date_raw = os.environ.get("QUANT_FUND_OPTIONS_REBASE_DATE", "").strip()
@@ -475,8 +490,20 @@ def build_snapshot() -> dict[str, Any]:
         }
     elif futures_key and futures_secret and symbol:
         try:
-            require_lead_futures_context(futures_key, futures_secret, symbol)
+            if extra_symbols and extra_symbols_start is None:
+                raise ValueError("missing futures extra-symbol start date")
+            require_lead_futures_context(futures_key, futures_secret, futures_symbols)
             trades = fetch_futures_trades(futures_key, futures_secret, symbol, start, now.date())
+            for extra_symbol in extra_symbols:
+                trades.extend(
+                    fetch_futures_trades(
+                        futures_key,
+                        futures_secret,
+                        extra_symbol,
+                        max(start, extra_symbols_start),
+                        now.date(),
+                    )
+                )
             fetched_points = aggregate_futures_trade_curve(trades, base_usd=futures_base, start=start)
             futures_points = merge_retained_futures_rebuild(existing_futures_points, fetched_points)
             snapshot["futures"] = {
