@@ -421,7 +421,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--redact-quant-summary",
         action="store_true",
-        help="Do not read or print protected quant percentages in the final command summary.",
+        help="Do not read or print quant percentages in the final command summary.",
     )
     parser.add_argument("--lookback-days", type=int, default=540)
     return parser.parse_args()
