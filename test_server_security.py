@@ -37,11 +37,11 @@ def test_dashboard_nginx_has_basic_abuse_and_browser_guards() -> None:
     assert "Content-Security-Policy" in CONFIG
 
 
-def test_quant_fund_page_and_snapshot_require_server_side_authentication() -> None:
+def test_quant_fund_page_and_snapshot_are_public_read_only_resources() -> None:
     assert "location = /quant_fund.html {" in CONFIG
     assert "location = /quant_fund_snapshot.json {" in CONFIG
-    assert CONFIG.count('auth_basic "Quant Fund";') == 2
-    assert CONFIG.count("auth_basic_user_file /etc/nginx/quant_fund.htpasswd;") == 2
+    assert "auth_basic" not in CONFIG
+    assert "quant_fund.htpasswd" not in CONFIG
     assert CONFIG.count('add_header Cache-Control "private, no-store" always;') == 2
 
 

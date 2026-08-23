@@ -241,13 +241,42 @@ def main() -> int:
     if any(marker in quant_snapshot_text for marker in forbidden_public_markers):
         errors.append("quant snapshot should not expose API keys or private fields")
     if "quant_fund" in snapshot:
-        errors.append("public market snapshot should not embed password-protected quant data")
+        errors.append("public market snapshot should not embed the separate quant dataset")
     quant_fund = quant_snapshot
     if not quant_fund:
         errors.append("missing quant fund snapshot")
+    allowed_quant_top_keys = {
+        "generated_at",
+        "start_date",
+        "futures",
+        "options",
+        "options_error",
+        "equity",
+    }
+    unexpected_quant_top_keys = set(quant_fund) - allowed_quant_top_keys
+    if unexpected_quant_top_keys:
+        errors.append(f"quant snapshot has unexpected public keys: {sorted(unexpected_quant_top_keys)}")
     for key in ["futures", "options", "equity"]:
         if key not in quant_fund:
             errors.append(f"missing quant fund section: {key}")
+            continue
+        section = quant_fund.get(key)
+        if not isinstance(section, dict):
+            errors.append(f"invalid quant fund section: {key}")
+            continue
+        unexpected_section_keys = set(section) - {"label", "status", "points", "latest_pct", "error"}
+        if unexpected_section_keys:
+            errors.append(
+                f"quant section {key} has unexpected public keys: {sorted(unexpected_section_keys)}"
+            )
+        points = section.get("points", [])
+        if not isinstance(points, list):
+            errors.append(f"quant section {key} points should be a list")
+            continue
+        for point in points:
+            if not isinstance(point, dict) or set(point) != {"date", "pct"}:
+                errors.append(f"quant section {key} contains a non-sanitized point")
+                break
     if '<a class="quiet-quant-link" href="quant_fund.html">量化基金</a>' not in html:
         errors.append("missing quiet quant fund link in notes")
     if '<section class="panel quant-fund-detail">' in html:

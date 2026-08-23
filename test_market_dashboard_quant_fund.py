@@ -40,7 +40,7 @@ def quant_snapshot() -> dict:
     }
 
 
-def test_public_market_snapshot_does_not_embed_protected_quant_data() -> None:
+def test_public_market_snapshot_does_not_embed_separate_quant_data() -> None:
     snapshot = {"generated_at": "2026-06-27T00:00:00Z", "quant_fund": quant_snapshot()}
     public = public_market_snapshot(snapshot)
 

@@ -395,7 +395,7 @@ def test_upload_allowlist_rejects_private_or_unrelated_files() -> None:
             raise AssertionError(f"expected upload path rejection: {path}")
 
 
-def test_scheduled_summary_does_not_read_or_print_protected_quant_data(
+def test_scheduled_summary_does_not_read_or_print_quant_data(
     monkeypatch, capsys
 ) -> None:
     snapshot = {
@@ -408,7 +408,7 @@ def test_scheduled_summary_does_not_read_or_print_protected_quant_data(
 
     def fake_download(_args, path):
         if path == "dashboard/quant_fund_snapshot.json":
-            raise AssertionError("scheduled summary must not read protected quant snapshot")
+            raise AssertionError("scheduled summary must not read the quant snapshot")
         return snapshot
 
     monkeypatch.setattr(production_update, "download_json", fake_download)

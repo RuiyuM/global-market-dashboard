@@ -41,11 +41,12 @@ Scheduled jobs must run through `scheduled_market_update_once.sh`, which always
 enables `--redact-quant-summary`. Their command output and inbox reports must
 never include futures or options percentages, quant snapshot contents, account
 data, positions, principal, or credentials. The internal server updater may
-continue refreshing the protected quant page. Every scheduled run must verify
-that unauthenticated `quant_fund.html` and `quant_fund_snapshot.json` requests
-return `401`, and that the public `latest_market_snapshot.json` has no
-`quant_fund` key. Scheduled jobs do not authenticate to or inspect the protected
-quant endpoints.
+continue refreshing the public, sanitized quant page. Every scheduled run must
+verify that unauthenticated `quant_fund.html` and `quant_fund_snapshot.json`
+requests return `200`, neither endpoint advertises `WWW-Authenticate`, the quant
+snapshot contains only the allowlisted date/percentage schema, and the public
+`latest_market_snapshot.json` has no `quant_fund` key. Scheduled reports still do
+not read or print quant percentages.
 
 The public snapshot keeps both tri-currency views. `fx_flows` remains the backward-compatible result for the current run, while `fx_flow_views.closed` is rebuilt from completed New York sessions and `fx_flow_views.asia_intraday` is a retained morning snapshot. A partial morning update must preserve the previous valid Asia snapshot instead of publishing mixed-date legs. The dashboard defaults to the Asia view immediately after a complete morning capture and to the U.S.-close view after the close; users can switch between them without recomputation.
 
