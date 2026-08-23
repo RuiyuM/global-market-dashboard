@@ -39,9 +39,19 @@ OPTIONS_SEED_POINTS = [
     {"date": "2026-06-26", "pct": -3.5040},
 ]
 
+OPTIONS_2_SEED_POINTS = [
+    {"date": "2026-08-21", "pct": 12.2694},
+    {"date": "2026-08-22", "pct": 12.3684},
+    {"date": "2026-08-23", "pct": 12.7876},
+]
+
 
 def built_in_options_seed_points() -> list[dict[str, Any]]:
     return [dict(point) for point in OPTIONS_SEED_POINTS]
+
+
+def built_in_options_2_seed_points() -> list[dict[str, Any]]:
+    return [dict(point) for point in OPTIONS_2_SEED_POINTS]
 
 
 def today_utc() -> date:
@@ -422,7 +432,12 @@ def default_quant_fund_snapshot() -> dict[str, Any]:
             "points": [],
         },
         "options": {
-            "label": "期权",
+            "label": "期权一",
+            "status": "missing_base",
+            "points": [],
+        },
+        "options_2": {
+            "label": "期权二",
             "status": "missing_base",
             "points": [],
         },
@@ -457,17 +472,33 @@ def build_snapshot() -> dict[str, Any]:
     options_rebase_valid = not options_rebase_requested or (
         options_rebase_date is not None and options_rebase_total is not None
     )
+    options_2_base = env_float("QUANT_FUND_OPTIONS_2_BASE_USD")
+    options_2_rebase_date_raw = os.environ.get("QUANT_FUND_OPTIONS_2_REBASE_DATE", "").strip()
+    options_2_rebase_total_raw = os.environ.get("QUANT_FUND_OPTIONS_2_REBASE_TOTAL_USD", "").strip()
+    options_2_rebase_date = env_date("QUANT_FUND_OPTIONS_2_REBASE_DATE")
+    options_2_rebase_total = env_float("QUANT_FUND_OPTIONS_2_REBASE_TOTAL_USD")
+    options_2_rebase_requested = bool(options_2_rebase_date_raw or options_2_rebase_total_raw)
+    options_2_rebase_valid = not options_2_rebase_requested or (
+        options_2_rebase_date is not None and options_2_rebase_total is not None
+    )
     futures_key = os.environ.get("BINANCE_LEAD_FUTURES_API_KEY", "")
     futures_secret = os.environ.get("BINANCE_LEAD_FUTURES_API_SECRET", "")
     option_key = os.environ.get("BINANCE_OPTION_API_KEY", "")
     option_secret = os.environ.get("BINANCE_OPTION_API_SECRET", "")
     option_futures_key = os.environ.get("BINANCE_OPTION_FUTURES_API_KEY", "")
     option_futures_secret = os.environ.get("BINANCE_OPTION_FUTURES_API_SECRET", "")
+    options_2_key = os.environ.get("NELSON_BINANCE_OPTION_API_KEY", "")
+    options_2_secret = os.environ.get("NELSON_BINANCE_OPTION_API_SECRET", "")
+    options_2_futures_key = os.environ.get("NELSON_BINANCE_FUTURES_API_KEY", "")
+    options_2_futures_secret = os.environ.get("NELSON_BINANCE_FUTURES_API_SECRET", "")
     futures_csv_raw = os.environ.get("QUANT_FUND_FUTURES_TRADES_CSV", "").strip()
     futures_csv = Path(futures_csv_raw).expanduser() if futures_csv_raw else None
     existing = load_existing_public_snapshot()
     existing_futures_points = public_points(existing.get("futures") if isinstance(existing.get("futures"), dict) else None)
     existing_options_points = public_points(existing.get("options") if isinstance(existing.get("options"), dict) else None)
+    existing_options_2_points = public_points(
+        existing.get("options_2") if isinstance(existing.get("options_2"), dict) else None
+    )
 
     snapshot = default_quant_fund_snapshot()
     snapshot["generated_at"] = now.isoformat(timespec="seconds")
@@ -557,10 +588,47 @@ def build_snapshot() -> dict[str, Any]:
         option_status = "stale" if option_points else "missing_credentials"
 
     snapshot["options"] = {
-        "label": "期权",
+        "label": "期权一",
         "status": option_status,
         "points": option_points,
         "latest_pct": latest_pct(option_points),
+    }
+
+    options_2_initial_points = existing_options_2_points or built_in_options_2_seed_points()
+    if options_2_base is None:
+        option_2_points = options_2_initial_points
+        option_2_status = "seeded" if option_2_points else "missing_base"
+    elif not options_2_rebase_valid:
+        option_2_points = options_2_initial_points
+        option_2_status = "rebase_config_error"
+    elif options_2_key and options_2_secret and options_2_futures_key and options_2_futures_secret:
+        try:
+            total = fetch_option_wallet_total(options_2_key, options_2_secret) + fetch_futures_stable_balance(
+                options_2_futures_key,
+                options_2_futures_secret,
+            )
+            option_2_points = update_options_percent_points(
+                options_2_initial_points,
+                day=now.date(),
+                total=total,
+                base_usd=options_2_base,
+                rebase_date=options_2_rebase_date,
+                rebase_total_usd=options_2_rebase_total,
+            )
+            option_2_status = "ok" if option_2_points else "no_history"
+        except Exception as exc:  # noqa: BLE001
+            option_2_points = options_2_initial_points
+            option_2_status = "error"
+            snapshot["options_2_error"] = exc.__class__.__name__
+    else:
+        option_2_points = options_2_initial_points
+        option_2_status = "stale" if option_2_points else "missing_credentials"
+
+    snapshot["options_2"] = {
+        "label": "期权二",
+        "status": option_2_status,
+        "points": option_2_points,
+        "latest_pct": latest_pct(option_2_points),
     }
     snapshot["equity"] = {"label": "股指", "status": "pending", "points": []}
     return snapshot

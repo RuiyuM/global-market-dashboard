@@ -251,12 +251,14 @@ def main() -> int:
         "futures",
         "options",
         "options_error",
+        "options_2",
+        "options_2_error",
         "equity",
     }
     unexpected_quant_top_keys = set(quant_fund) - allowed_quant_top_keys
     if unexpected_quant_top_keys:
         errors.append(f"quant snapshot has unexpected public keys: {sorted(unexpected_quant_top_keys)}")
-    for key in ["futures", "options", "equity"]:
+    for key in ["futures", "options", "options_2", "equity"]:
         if key not in quant_fund:
             errors.append(f"missing quant fund section: {key}")
             continue
@@ -285,7 +287,7 @@ def main() -> int:
         errors.append("missing quant fund detail section page")
     if '<a class="quant-back" href="index.html">返回</a>' not in quant_html:
         errors.append("missing quant fund back link")
-    for key in ["futures", "options", "equity"]:
+    for key in ["futures", "options", "options_2", "equity"]:
         if f'<a class="quant-card" href="#quant-detail-{key}">' not in quant_html:
             errors.append(f"missing clickable quant fund card: {key}")
         if f'id="quant-detail-{key}"' not in quant_html:
@@ -311,7 +313,7 @@ def main() -> int:
     for marker in ["期货", "期权"]:
         if marker in html:
             errors.append(f"main HTML should not render quant fund marker: {marker}")
-    for marker in ["量化基金", "期货", "期权", "股指"]:
+    for marker in ["量化基金", "期货", "期权一", "期权二", "股指"]:
         if marker not in quant_html:
             errors.append(f"missing quant fund marker: {marker}")
     policy_news = snapshot.get("policy_news", {})

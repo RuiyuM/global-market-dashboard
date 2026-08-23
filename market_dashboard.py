@@ -2990,7 +2990,8 @@ def load_quant_fund_snapshot() -> dict[str, Any]:
     fallback = {
         "generated_at": "",
         "futures": {"label": "期货", "status": "missing_base", "points": []},
-        "options": {"label": "期权", "status": "missing_base", "points": []},
+        "options": {"label": "期权一", "status": "missing_base", "points": []},
+        "options_2": {"label": "期权二", "status": "missing_base", "points": []},
         "equity": {"label": "股指", "status": "pending", "points": []},
     }
     if not QUANT_FUND_JSON.exists():
@@ -3000,6 +3001,7 @@ def load_quant_fund_snapshot() -> dict[str, Any]:
     except json.JSONDecodeError:
         fallback["futures"]["status"] = "error"
         fallback["options"]["status"] = "error"
+        fallback["options_2"]["status"] = "error"
         return fallback
     return data if isinstance(data, dict) else fallback
 
@@ -3234,13 +3236,15 @@ def render_quant_fund(snapshot: dict[str, Any]) -> str:
         "</div>"
         '<div class="quant-fund-grid">'
         f'{render_quant_card("futures", "期货", fund.get("futures", {}))}'
-        f'{render_quant_card("options", "期权", fund.get("options", {}))}'
+        f'{render_quant_card("options", "期权一", fund.get("options", {}))}'
+        f'{render_quant_card("options_2", "期权二", fund.get("options_2", {}))}'
         f'{render_quant_card("equity", "股指", fund.get("equity", {"label": "股指", "status": "pending", "points": []}))}'
         "</div>"
         "</section>"
         '<div class="quant-detail-stack">'
         f'{render_quant_detail_panel("futures", "期货", fund.get("futures", {}))}'
-        f'{render_quant_detail_panel("options", "期权", fund.get("options", {}))}'
+        f'{render_quant_detail_panel("options", "期权一", fund.get("options", {}))}'
+        f'{render_quant_detail_panel("options_2", "期权二", fund.get("options_2", {}))}'
         f'{render_quant_detail_panel("equity", "股指", fund.get("equity", {"label": "股指", "status": "pending", "points": []}))}'
         "</div>"
     )
@@ -4378,7 +4382,7 @@ h3 { margin: 0 0 10px; font-size: 15px; letter-spacing: 0; }
 .quant-fund-head p { margin: 0; color: var(--muted); font-weight: 650; }
 .quant-back { border: 1px solid #cfd8e3; border-radius: 999px; padding: 4px 8px; color: var(--muted); font-size: 11px; font-weight: 750; text-decoration: none; white-space: nowrap; }
 .quant-back:hover { background: #f8fafc; }
-.quant-fund-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.quant-fund-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
 .quant-card { border: 1px solid #e5eaf1; border-radius: 8px; padding: 8px; background: #fff; color: inherit; display: block; text-decoration: none; transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease; }
 .quant-card:hover { border-color: #b9c9df; box-shadow: 0 8px 18px rgba(18, 38, 63, 0.08); transform: translateY(-1px); }
 .quant-card-head, .quant-card-main { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }

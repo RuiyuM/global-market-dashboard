@@ -402,6 +402,7 @@ def print_final_summary(args: argparse.Namespace) -> None:
             quant.get("generated_at", ""),
             quant.get("futures", {}).get("latest_pct"),
             quant.get("options", {}).get("latest_pct"),
+            quant.get("options_2", {}).get("latest_pct"),
         )
     report = audit_sources(snapshot, load_json(POLICY_PATH))
     print("FINAL source_audit", "PASS" if report["ok"] else "FAIL", "warnings", len(report["warnings"]))

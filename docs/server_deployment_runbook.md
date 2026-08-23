@@ -164,14 +164,16 @@ The systemd drop-in may contain only `EnvironmentFile=/opt/global-market-dashboa
 Expected variable categories:
 
 - lead-futures API key and secret: the dedicated Binance Futures Copy Trading key bound to the BTCUSDT lead portfolio.
-- option API key and secret: Binance options account used by the options account-status publisher.
-- option-futures API key and secret: Binance USD-M futures account used by the options account-status publisher for its futures USDC component.
+- option-one API key and secret: Binance options account used by `publish_account_status.py`.
+- option-one futures API key and secret: Binance USD-M futures account used by that publisher for its futures USDC component.
+- option-two API key and secret: the separate Nelson Binance options account used by `publish_account_status_nelson.py`.
+- option-two futures API key and secret: the separate Nelson USD-M futures account used by that publisher.
 - primary futures symbol and optional comma-separated extra symbols
 - extra-symbol effective date, which must be later than the last verified primary-only curve date when a new symbol is first introduced
 - futures base capital
 - futures seed end date: the final date already verified from the private initialization CSV
-- options base capital
-- optional options rebase date and post-funding account-value anchor
+- separate base capital for options one and options two
+- optional per-account options rebase date and post-funding account-value anchor
 - optional start date
 - optional local CSV path for one-time initialization
 
@@ -183,10 +185,13 @@ Important credential rule:
 - `BINANCE_LEAD_FUTURES_API_KEY` / `BINANCE_LEAD_FUTURES_API_SECRET` must be the dedicated Futures Copy Trading key used by the local BTCUSDT lead-trading script.
 - `BINANCE_OPTION_API_KEY` / `BINANCE_OPTION_API_SECRET` must be the options account API, the same account used by `account_status_publisher/publish_account_status.py`.
 - `BINANCE_OPTION_FUTURES_API_KEY` / `BINANCE_OPTION_FUTURES_API_SECRET` must be the futures-balance API used by the options account-status publisher. This is not the BTCUSDT futures trading API unless the publisher really uses the same account.
+- `NELSON_BINANCE_OPTION_API_KEY` / `NELSON_BINANCE_OPTION_API_SECRET` must be the separate options-two account used by `account_status_publisher/publish_account_status_nelson.py`.
+- `NELSON_BINANCE_FUTURES_API_KEY` / `NELSON_BINANCE_FUTURES_API_SECRET` must be the matching Nelson futures-balance account. Never reuse the options-one or lead-futures credentials for options two.
 - The futures curve reads the primary `QUANT_FUND_SYMBOL`, normally `BTCUSDT`, plus optional `QUANT_FUND_EXTRA_SYMBOLS`, currently `ETHUSDT`, from the same lead portfolio.
 - Newly added symbols must set `QUANT_FUND_EXTRA_SYMBOLS_START_DATE`. Existing primary-only history remains unchanged; extra-symbol realized PnL is included only from that UTC date forward.
 - Before reading any futures fills, the updater checks Binance Copy Trading `userStatus` and `leadSymbol`. It must see `isLeadTrader=true` and every configured symbol in the lead-trading whitelist; a regular USD-M or options-related key fails closed.
-- The options curve reads option wallet value from `BINANCE_OPTION_API_*` and reads the stable futures balance component from `BINANCE_OPTION_FUTURES_API_*`.
+- Options one reads option wallet value from `BINANCE_OPTION_API_*` and the stable futures balance component from `BINANCE_OPTION_FUTURES_API_*`.
+- Options two reads the same two account components from the independent `NELSON_BINANCE_OPTION_API_*` and `NELSON_BINANCE_FUTURES_API_*` roles.
 - Never paste any API key into Git, public HTML, public JSON, shell history, or this document.
 
 Local futures API reference:
@@ -223,12 +228,18 @@ If the website does not show a closed BTCUSDT trade that is visible in the tradi
 
 ## Options Curve Logic
 
-`quant_fund_snapshot.py` builds the options curve from account totals in memory:
+`quant_fund_snapshot.py` builds the options-one and options-two curves independently from account totals in memory:
 
 1. Fetch option wallet total using the options API account.
 2. Fetch futures stable balance using the dedicated option-futures API account when needed for combined option account value.
-3. Compute percent return against the options base capital.
+3. Compute percent return against that account's own private options base capital.
 4. Upsert only today's `{date, pct}` point into the public snapshot.
+
+Options two is initialized from a sanitized percentage-only history derived
+locally from `publish_account_status_nelson.py`. The raw Nelson CSV, balances,
+positions, credentials, and base capital are never uploaded or committed. Its
+first public point therefore reflects the account's existing cumulative return
+instead of being reset to zero on the integration date.
 
 When option capital changes, never recalculate the historical percentage curve with the new denominator. Configure the new current base and a private post-funding anchor:
 
@@ -247,6 +258,11 @@ new published pct = funding-day published pct
 ```
 
 All three values remain only in `.private/quant_fund.env`. Only `{date, pct}` is public. Capture the post-funding total from the correct options and option-futures API accounts after the transfer is complete; otherwise the cash flow would be misclassified as investment return. A partial or invalid rebase configuration must preserve the existing public curve with `rebase_config_error`, never fall back to recomputing history.
+
+Options two uses the parallel private names
+`QUANT_FUND_OPTIONS_2_BASE_USD`, `QUANT_FUND_OPTIONS_2_REBASE_DATE`, and
+`QUANT_FUND_OPTIONS_2_REBASE_TOTAL_USD`. Apply the same chain-link rule per
+account; never use one options account's funding anchor for the other.
 
 Raw account totals, stablecoin balances, and position strings are not written to public HTML/snapshot.
 

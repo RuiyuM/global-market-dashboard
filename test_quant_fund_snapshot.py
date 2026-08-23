@@ -12,6 +12,7 @@ import quant_fund_snapshot as qfs
 from quant_fund_snapshot import (
     aggregate_futures_trade_curve,
     build_options_percent_history,
+    built_in_options_2_seed_points,
     built_in_options_seed_points,
     default_quant_fund_snapshot,
     env_date,
@@ -34,6 +35,16 @@ def utc_ms(year: int, month: int, day: int) -> int:
 def clear_optional_futures_symbols(monkeypatch) -> None:
     monkeypatch.delenv("QUANT_FUND_EXTRA_SYMBOLS", raising=False)
     monkeypatch.delenv("QUANT_FUND_EXTRA_SYMBOLS_START_DATE", raising=False)
+    for name in [
+        "QUANT_FUND_OPTIONS_2_BASE_USD",
+        "QUANT_FUND_OPTIONS_2_REBASE_DATE",
+        "QUANT_FUND_OPTIONS_2_REBASE_TOTAL_USD",
+        "NELSON_BINANCE_OPTION_API_KEY",
+        "NELSON_BINANCE_OPTION_API_SECRET",
+        "NELSON_BINANCE_FUTURES_API_KEY",
+        "NELSON_BINANCE_FUTURES_API_SECRET",
+    ]:
+        monkeypatch.delenv(name, raising=False)
 
 
 def test_futures_trades_are_rendered_as_percent_of_configured_base() -> None:
@@ -305,7 +316,8 @@ def test_default_snapshot_is_public_and_sanitized() -> None:
     text = str(snapshot)
 
     assert snapshot["futures"]["label"] == "期货"
-    assert snapshot["options"]["label"] == "期权"
+    assert snapshot["options"]["label"] == "期权一"
+    assert snapshot["options_2"]["label"] == "期权二"
     assert snapshot["futures"]["status"] == "missing_base"
     assert "base_configured" not in text
     assert "trade_count" not in text
@@ -610,6 +622,79 @@ def test_api_options_update_uses_dedicated_option_futures_credentials(monkeypatc
     assert "option_usdt_value" not in text
     assert "futures_usdc" not in text
     assert "total_usdt_usdc" not in text
+
+
+def test_api_options_2_update_uses_nelson_credentials_and_keeps_real_return_level(monkeypatch) -> None:
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            value = cls(2026, 8, 24, 12, 0, tzinfo=timezone.utc)
+            return value if tz is not None else value.replace(tzinfo=None)
+
+    monkeypatch.setenv("QUANT_FUND_OPTIONS_2_BASE_USD", "1000")
+    monkeypatch.setenv("NELSON_BINANCE_OPTION_API_KEY", "nelson-option-key")
+    monkeypatch.setenv("NELSON_BINANCE_OPTION_API_SECRET", "nelson-option-secret")
+    monkeypatch.setenv("NELSON_BINANCE_FUTURES_API_KEY", "nelson-futures-key")
+    monkeypatch.setenv("NELSON_BINANCE_FUTURES_API_SECRET", "nelson-futures-secret")
+    monkeypatch.setattr(qfs, "datetime", FixedDateTime)
+    monkeypatch.setattr(
+        qfs,
+        "load_existing_public_snapshot",
+        lambda: {
+            "options_2": {
+                "points": [
+                    {"date": "2026-08-21", "pct": 12.2},
+                    {"date": "2026-08-23", "pct": 12.8},
+                ]
+            }
+        },
+    )
+    calls = []
+
+    def fake_option_total(api_key, api_secret):
+        calls.append(("option", api_key, api_secret))
+        return 1080.0
+
+    def fake_futures_balance(api_key, api_secret):
+        calls.append(("futures", api_key, api_secret))
+        return 60.0
+
+    monkeypatch.setattr(qfs, "fetch_option_wallet_total", fake_option_total)
+    monkeypatch.setattr(qfs, "fetch_futures_stable_balance", fake_futures_balance)
+
+    snapshot = qfs.build_snapshot()
+    serialized = json.dumps(snapshot, ensure_ascii=False)
+
+    assert snapshot["options_2"]["label"] == "期权二"
+    assert snapshot["options_2"]["status"] == "ok"
+    assert snapshot["options_2"]["points"] == [
+        {"date": "2026-08-21", "pct": 12.2},
+        {"date": "2026-08-23", "pct": 12.8},
+        {"date": "2026-08-24", "pct": 14.0},
+    ]
+    assert calls == [
+        ("option", "nelson-option-key", "nelson-option-secret"),
+        ("futures", "nelson-futures-key", "nelson-futures-secret"),
+    ]
+    for marker in [
+        "nelson-option-key",
+        "nelson-option-secret",
+        "nelson-futures-key",
+        "nelson-futures-secret",
+        "1080.0",
+        "60.0",
+        "1140.0",
+    ]:
+        assert marker not in serialized
+
+
+def test_options_2_seed_points_start_at_the_existing_profit_level() -> None:
+    points = built_in_options_2_seed_points()
+
+    assert len(points) >= 2
+    assert points[0]["pct"] > 10.0
+    assert all(set(point) == {"date", "pct"} for point in points)
+    assert "30000" not in json.dumps(points)
 
 
 def test_api_options_rebase_chain_links_without_changing_history(monkeypatch) -> None:

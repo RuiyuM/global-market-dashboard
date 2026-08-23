@@ -27,13 +27,22 @@ def quant_snapshot() -> dict:
             ],
         },
         "options": {
-            "label": "期权",
+            "label": "期权一",
             "status": "ok",
             "base_configured": True,
             "points": [
                 {"date": "2026-04-01", "pct": 0.0},
                 {"date": "2026-04-02", "pct": -1.0},
                 {"date": "2026-04-03", "pct": 3.0},
+            ],
+        },
+        "options_2": {
+            "label": "期权二",
+            "status": "ok",
+            "points": [
+                {"date": "2026-08-21", "pct": 12.2},
+                {"date": "2026-08-22", "pct": 12.4},
+                {"date": "2026-08-23", "pct": 12.8},
             ],
         },
         "equity": {"label": "股指", "status": "pending", "points": []},
@@ -92,14 +101,17 @@ def test_quant_fund_separate_page_contains_curves_and_back_link() -> None:
     assert '<section class="panel quant-fund-detail">' in html
     assert '<a class="quant-card" href="#quant-detail-futures">' in html
     assert '<a class="quant-card" href="#quant-detail-options">' in html
+    assert '<a class="quant-card" href="#quant-detail-options_2">' in html
     assert '<a class="quant-card" href="#quant-detail-equity">' in html
     assert '<section class="panel quant-detail-panel" id="quant-detail-futures">' in html
     assert '<section class="panel quant-detail-panel" id="quant-detail-options">' in html
+    assert '<section class="panel quant-detail-panel" id="quant-detail-options_2">' in html
     assert '<section class="panel quant-detail-panel quant-detail-empty" id="quant-detail-equity">' in html
     assert ".quant-detail-panel { display: none;" in html
     assert ".quant-detail-panel:target { display: block;" in html
     assert "期货" in html
-    assert "期权" in html
+    assert "期权一" in html
+    assert "期权二" in html
     assert "股指" in html
     assert "待定" in html
     assert "coming soon in 2026 3季度末" in html
