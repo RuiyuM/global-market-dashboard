@@ -417,6 +417,14 @@ def fetch_yahoo_ohlc(symbol: str, start: date, end: date) -> list[dict[str, Any]
         return []
 
     meta = result.get("meta") or {}
+    bar_timezone = timezone.utc
+    is_currency = meta.get("instrumentType") == "CURRENCY"
+    if is_currency:
+        # FX bars start at venue midnight, which is the prior UTC date in BST.
+        venue_timezone = meta.get("exchangeTimezoneName")
+        if not venue_timezone:
+            raise ValueError(f"Missing Yahoo currency timezone for {symbol}")
+        bar_timezone = ZoneInfo(venue_timezone)
     timestamps = result.get("timestamp") or []
     quote_data = ((result.get("indicators") or {}).get("quote") or [{}])[0]
     rows: list[dict[str, Any]] = []
@@ -435,7 +443,7 @@ def fetch_yahoo_ohlc(symbol: str, start: date, end: date) -> list[dict[str, Any]
             continue
         rows.append(
             {
-                "date": datetime.fromtimestamp(int(timestamp), tz=timezone.utc).date().isoformat(),
+                "date": datetime.fromtimestamp(int(timestamp), tz=bar_timezone).date().isoformat(),
                 "timestamp": int(timestamp),
                 "open": float(open_px),
                 "high": float(high_px),
@@ -446,7 +454,8 @@ def fetch_yahoo_ohlc(symbol: str, start: date, end: date) -> list[dict[str, Any]
                 "source": "Yahoo Finance chart API",
             }
         )
-    return rows
+    # Yahoo can append a live quote to the daily bar for the same FX session.
+    return merge_ohlc_rows([], rows) if is_currency else rows
 
 
 def rows_from_moex_cnyrub_response(payload: dict[str, Any], symbol: str) -> list[dict[str, Any]]:

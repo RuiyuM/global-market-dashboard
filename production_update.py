@@ -140,6 +140,37 @@ def fetch_server_snapshot(args: argparse.Namespace) -> tuple[int, dict[str, Any]
     return result.returncode, snapshot
 
 
+def sync_server_ohlc_caches(args: argparse.Namespace, keys: Iterable[str]) -> None:
+    specs = dashboard_spec_map()
+    paths = validate_public_upload_paths(
+        str((DASHBOARD_DATA / specs[key].cache_file).relative_to(ROOT))
+        for key in sorted(set(keys))
+    )
+    if not paths:
+        return
+    with tempfile.TemporaryDirectory(prefix="market-dashboard-ohlc-") as temporary:
+        staging = Path(temporary)
+        manifest = staging / "files.txt"
+        manifest.write_text("\n".join(paths) + "\n", encoding="utf-8")
+        run_command(
+            [
+                "rsync", "-az", "--no-owner", "--no-group",
+                f"--files-from={manifest}",
+                "-e", shlex.join(ssh_base(args)[:-1]),
+                f"{args.server}:{args.server_dir.rstrip('/')}/", f"{staging}/",
+            ],
+            check=True,
+        )
+        for relative in paths:
+            server_rows = read_ohlc(staging / relative)
+            if not server_rows:
+                raise ValueError(f"Empty server OHLC cache: {relative}")
+            local_path = ROOT / relative
+            local_rows = read_ohlc(local_path) if local_path.exists() else []
+            write_ohlc(local_path, merge_ohlc_rows(local_rows, server_rows))
+    print(f"SYNC preserved current server OHLC for {len(paths)} series", flush=True)
+
+
 def patch_yahoo(keys: Iterable[str], start: date, end: date) -> tuple[list[dict[str, Any]], list[str]]:
     specs = {spec.key: spec for spec in YAHOO_SPECS}
     patched: list[dict[str, Any]] = []
@@ -465,6 +496,9 @@ def main() -> int:
         override_keys = investing_keys & set(policy.get("local_source_overrides", {}))
         investing_keys -= override_keys
 
+        # Local history may end yesterday while the server already has today's
+        # Asia bars. Seed the merge from current production before gap filling.
+        sync_server_ohlc_caches(args, investing_keys | override_keys)
         end = date.today()
         start = end - timedelta(days=args.lookback_days)
         yahoo_patched, yahoo_failures = patch_yahoo(yahoo_keys, start, end)

@@ -96,9 +96,22 @@ Germany uses verified Investing IDs `23681`, `23682`, `23684`, `23685`, `23686`,
 - Refresh SMBS KORIBOR 1M/3M/6M locally only when the server records an actual timeout, error, or empty response.
 - Refresh `RU_EQUITY` from the official Moscow Exchange ISS `IMOEX` candle endpoint on each local production run.
 - With `--weekly`, refresh the public Investing OHLC list in `local_weekly_ohlc` from the policy file. This includes Japan 1Y/7Y, gap fills for Japan 2Y/3Y/5Y/10Y/30Y, and Germany 3M/6M/1Y/2Y/3Y/5Y/7Y/10Y/30Y.
+- Before merging local OHLC or MOEX patches, download only their allowlisted public target caches from the current server pass. Preserve newer server dates and complete candles; the local calendar date can still be yesterday while Japan already has a new intraday bar.
 - Upload only files produced successfully in that run.
 
 An empty response, exception, or incoming dataset older than the local cache is rejected. A required local failure stops the run before deployment.
+
+Yahoo currency daily timestamps must use the source's `exchangeTimezoneName`
+trading date, not the UTC date. London midnight during summer time is 23:00 UTC
+on the preceding day; truncating to UTC creates spurious Sunday bars and missing
+Fridays. Deduplicate an appended live quote for the same trading session while
+preserving complete OHLC over close-only data. This does not change the New York
+cutoff used to classify the dashboard's closed and intraday flow views.
+
+A successful history fetch does not guarantee four independently quoted prices.
+Official China short-tenor curves, KORIBOR fixings, and some Investing Russia
+bond rows remain close-only. Report those source limitations; never interpolate
+missing opens/highs/lows or relabel a source's date to fabricate coverage.
 
 ## Update Sequence
 
