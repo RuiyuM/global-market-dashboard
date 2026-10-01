@@ -2171,7 +2171,11 @@ def build_flow_sections(
         period_rows = []
         triad_keys = [key for key, _ in triad["pairs"]]
         common_dates = common_series_dates(series, triad_keys, closed_end_cap)
-        anchor = closed_end_cap
+        # Calendar windows must follow the latest common market observation.
+        # On a holiday at a week/month boundary, the requested U.S. close date
+        # can be newer than every shared FX leg; anchoring to that empty period
+        # would drop otherwise valid current-week/current-month route results.
+        anchor = common_dates[-1] if common_dates else closed_end_cap
         intraday_date = None
         if include_intraday and intraday_cap.weekday() < 5:
             available_common_dates = common_series_dates(series, triad_keys, intraday_cap)

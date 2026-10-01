@@ -344,6 +344,22 @@ def test_build_flow_sections_current_month_first_day_uses_previous_close_as_base
     assert periods["当月"]["result"]["best_route"]
 
 
+def test_build_flow_sections_anchors_calendar_windows_to_latest_common_close() -> None:
+    rows_by_key = {
+        "USDCNY": [dated(8, 1, 6.9), dated(8, 31, 7.0), dated(9, 1, 7.1), dated(9, 30, 7.2)],
+        "JPYCNY": [dated(8, 1, 0.049), dated(8, 31, 0.050), dated(9, 1, 0.051), dated(9, 30, 0.052)],
+        "USDJPY": [dated(8, 1, 139.0), dated(8, 31, 140.0), dated(9, 1, 141.0), dated(9, 30, 142.0)],
+    }
+
+    sections = build_flow_sections(rows_by_key, us_close_date=date(2026, 10, 1))
+    periods = {item["period"]: item for item in sections[0]["periods"]}
+
+    assert periods["当月"]["date_range"] == "2026-09-01 → 2026-09-30"
+    assert {item["base_date"] for item in periods["当月"]["changes"]} == {"2026-09-01"}
+    assert {item["latest_date"] for item in periods["当月"]["changes"]} == {"2026-09-30"}
+    assert periods["当月"]["result"]["best_route"]
+
+
 def test_build_flow_sections_current_week_first_day_uses_previous_close_as_base() -> None:
     rows_by_key = {
         "USDCNY": [dated(7, 3, 7.0), dated(7, 6, 7.1)],
