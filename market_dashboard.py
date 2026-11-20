@@ -3417,6 +3417,17 @@ def render_policy_news(policy_news: dict[str, Any]) -> str:
             f'<span>政策工具：{escape(region.get("policy_tool", ""))}</span>'
             "</div>"
         )
+        confirmation = region.get("official_confirmation")
+        if confirmation:
+            html.append(
+                '<div class="policy-action-meta policy-official-confirmation">'
+                f'<a href="{escape(confirmation["url"])}" target="_blank" rel="noreferrer">官方公告</a>'
+                f'<span>{escape(confirmation["date"])}</span>'
+                f'<strong>{escape(confirmation["rate"])}</strong>'
+                f'<span>{escape(confirmation["summary"])}</span>'
+                '</div>'
+            )
+        html.append('<div class="policy-action-meta"><span>下列利率变动按生效日期列示。</span></div>')
         html.append(render_policy_action_rows(actions[:3], empty_text="暂无可显示的加息/降息记录。"))
         html.append(
             '<div class="policy-action-meta">'

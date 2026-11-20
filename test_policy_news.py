@@ -103,6 +103,35 @@ def test_missing_regional_headlines_use_dated_official_releases(tmp_path: Path) 
         assert rate in item["summary_cn"]
 
 
+def test_official_confirmation_is_separate_from_effective_rate_history(tmp_path: Path) -> None:
+    from market_dashboard import render_policy_news
+
+    action = {"date": "2026-09-17", "rate_after": "3.75-4.00%", "type": "加息", "change_bp": 25}
+    snapshot = build_policy_news_snapshot(
+        cache_path=tmp_path / "empty.json",
+        now=datetime(2026, 11, 20, 20, tzinfo=timezone.utc),
+        action_builder=lambda: {"US": {"actions": [action], "recent_year_actions": [action]}},
+    )
+    regions = snapshot["regions"]
+    assert regions["US"]["recent_year_actions"] == [action]
+    assert regions["US"]["official_confirmation"]["date"] == "2026-10-28"
+    assert "5 年期以上 3.50%" in regions["CN"]["official_confirmation"]["rate"]
+    html = render_policy_news(snapshot)
+    assert html.count("policy-official-confirmation") == 6
+    assert "下列利率变动按生效日期列示" in html
+
+
+def test_older_official_confirmation_does_not_mask_a_newer_rate(tmp_path: Path) -> None:
+    action = {"date": "2026-12-10", "rate_after": "4.00-4.25%"}
+    snapshot = build_policy_news_snapshot(
+        cache_path=tmp_path / "empty.json",
+        now=datetime(2026, 12, 10, 20, tzinfo=timezone.utc),
+        action_builder=lambda: {"US": {"actions": [action]}},
+    )
+    assert snapshot["regions"]["US"]["official_confirmation"] is None
+    assert snapshot["regions"]["US"]["actions"] == [action]
+
+
 def test_snapshot_includes_recent_policy_actions() -> None:
     def fake_action_builder():
         return {

@@ -64,6 +64,45 @@ POLICY_REGIONS = [
 
 _REGION_BY_CODE = {region["code"]: region for region in POLICY_REGIONS}
 
+OFFICIAL_POLICY_CONFIRMATIONS = {
+    "US": {
+        "date": "2026-10-28",
+        "rate": "3.75%–4.00%",
+        "summary": "联邦基金目标区间维持不变。",
+        "url": "https://www.federalreserve.gov/newsevents/pressreleases/monetary20261028a.htm",
+    },
+    "EU": {
+        "date": "2026-10-29",
+        "rate": "2.50%",
+        "summary": "存款便利利率维持不变，主要再融资利率为 2.65%，边际贷款利率为 2.90%。",
+        "url": "https://www.ecb.europa.eu/press/pr/date/2026/html/ecb.mp261029~9a493adf17.en.html",
+    },
+    "JP": {
+        "date": "2026-10-30",
+        "rate": "约 1.25%",
+        "summary": "维持无担保隔夜拆借利率目标。",
+        "url": "https://www.boj.or.jp/en/mopo/mpmdeci/mpr_2026/k261030a.pdf",
+    },
+    "CN": {
+        "date": "2026-11-20",
+        "rate": "1 年期 3.00% · 5 年期以上 3.50%",
+        "summary": "当月贷款市场报价利率（LPR）与上月一致。",
+        "url": "https://www.chinamoney.com.cn/chinese/rdgz/20261120/3453464.html",
+    },
+    "KR": {
+        "date": "2026-10-22",
+        "rate": "3.00%",
+        "summary": "基准利率维持不变。",
+        "url": "https://www.bok.or.kr/eng/bbs/E0000627/view.do?menuNo=400022&nttId=11065824",
+    },
+    "RU": {
+        "date": "2026-10-23",
+        "rate": "14.00%",
+        "summary": "关键利率维持不变。",
+        "url": "https://www.cbr.ru/eng/press/pr/?file=23102026_133000key_e.htm",
+    },
+}
+
 _REGION_ENTITY_TERMS = {
     "US": ("federal reserve", " fed ", "fed's", "fomc", "u.s. central bank"),
     "EU": ("ecb", "european central bank", "euro zone", "eurozone"),
@@ -536,6 +575,9 @@ def analyze_policy_items_with_openai(
         "对每条新闻输出中文 summary_cn，policy_direction 只能表达加息预期升温、降息预期升温、维持观望或不明确，"
         "stance 使用偏鹰、偏鸽、中性或待确认。region 必须与输入保持一致；若新闻主体不是该 region 的央行或经济体，省略该条。"
         "‘不会降息/降息推迟’不能标成降息预期升温，‘不会加息/加息推迟’不能标成加息预期升温。"
+        "把正式决定、个别与会者的主张和调查预测明确区分，保留预测的条件。区分会议日期、新闻发布日期和利率生效日期。"
+        "央行发布的 Summary of Opinions 称作意见摘要，Minutes 才称作会议纪要。"
+        "多篇新闻若报道同一场讲话、同一次会议或同一份公告，只保留一条最清楚且有可信来源的新闻。"
         "不要输出任何密钥、环境变量名或多余字段。"
     )
     request_payload = {
@@ -753,12 +795,19 @@ def build_policy_news_snapshot(
             action_info = policy_actions_for_region(region["code"])
         default_actions = list(action_info.get("actions", []))[:3]
         recent_year_actions = list(action_info.get("recent_year_actions", action_info.get("actions", [])))
+        confirmation = OFFICIAL_POLICY_CONFIRMATIONS.get(region["code"])
+        if confirmation and (
+            confirmation["date"] > run_now.date().isoformat()
+            or (default_actions and default_actions[0]["date"] > confirmation["date"])
+        ):
+            confirmation = None
         regions[region["code"]] = {
             "name": region["name"],
             "central_bank": region["central_bank"],
             "items": items[:3],
             "policy_tool": action_info.get("policy_tool", ""),
             "policy_action_source": action_info.get("source_note", ""),
+            "official_confirmation": dict(confirmation) if confirmation else None,
             "actions": default_actions,
             "recent_year_actions": recent_year_actions,
             "action_update_source": action_info.get("action_update_source", "fallback"),
