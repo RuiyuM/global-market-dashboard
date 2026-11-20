@@ -66,6 +66,10 @@ USER_FX_FLOW_CODE = Path(os.environ.get("FX_FLOW_CODE_PATH", str(DEFAULT_FX_FLOW
 DAILY_MOVE_ALERT_WINDOW = 30
 DAILY_MOVE_ALERT_TOP_PCT = 20.0
 CHART_HISTORY_LIMIT = 1500
+CLOSE_ONLY_YIELD_SOURCES = {
+    "U.S. Treasury official par yield (close-only)",
+    "ChinaBond PBC official yield (close-only)",
+}
 CHINA_SHORT_BOND_BACKFILL_TENORS = {"3M"}
 CHINA_SHORT_BOND_MIN_HISTORY_ROWS = 240
 US_MARKET_CLOSE_HOUR_ET = 16
@@ -622,7 +626,11 @@ def write_ohlc(path: Path, rows: list[dict[str, Any]]) -> None:
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
-        writer.writerows(rows)
+        for row in rows:
+            if row.get("source") in CLOSE_ONLY_YIELD_SOURCES:
+                writer.writerow({**row, "open": "", "high": "", "low": ""})
+            else:
+                writer.writerow(row)
 
 
 def row_date_key(row: dict[str, Any]) -> date:
@@ -647,8 +655,9 @@ def merge_ohlc_rows(existing: list[dict[str, Any]], incoming: list[dict[str, Any
         key = row_date_key(row)
         candidate = {**row, "date": key.isoformat()}
         current = merged.get(key)
-        if current is not None and has_complete_ohlc(current) and not has_complete_ohlc(candidate):
-            continue
+        if current is not None and not has_complete_ohlc(candidate):
+            if has_complete_ohlc(current) or current.get("source") in CLOSE_ONLY_YIELD_SOURCES:
+                continue
         merged[key] = candidate
     return [merged[key] for key in sorted(merged)]
 
@@ -770,6 +779,8 @@ def fetch_all(args: argparse.Namespace) -> list[dict[str, str]]:
             if path.exists():
                 rows = merge_ohlc_rows(read_ohlc(path), rows)
             for row in rows:
+                if row.get("source") in CLOSE_ONLY_YIELD_SOURCES:
+                    continue
                 row["source_symbol"] = series_spec.symbol
                 if series_spec.key in WSCN_VISIBLE_OHLC_KEYS:
                     row["source"] = "WSCN traded-yield OHLC + ChinaMoney CFETS official close anchor"
@@ -1093,7 +1104,10 @@ def read_ohlc(path: Path) -> list[dict[str, Any]]:
                 low = float(row.get("low") or close)
             except (ValueError, TypeError):
                 continue
-            rows.append({"date": parsed_date, "open": open_px, "high": high, "low": low, "close": close})
+            point = {"date": parsed_date, "open": open_px, "high": high, "low": low, "close": close}
+            if row.get("source") in CLOSE_ONLY_YIELD_SOURCES:
+                point["source"] = row["source"]
+            rows.append(point)
     rows.sort(key=lambda row: row["date"])
     dedup: dict[date, dict[str, Any]] = {}
     for row in rows:
@@ -1558,7 +1572,9 @@ def build_second_order_monitor(
 
 def recent_ohlc_rows(rows: list[dict[str, Any]], limit: int = 90) -> list[dict[str, Any]]:
     out = []
-    start = max(0, len(rows) - limit)
+    # Backfilled closes should not evict previously displayable market bars.
+    backfilled = sum(row.get("source") in CLOSE_ONLY_YIELD_SOURCES for row in rows)
+    start = max(0, len(rows) - limit - backfilled)
     for index in range(start, len(rows)):
         row = rows[index]
         item = {
@@ -1568,6 +1584,8 @@ def recent_ohlc_rows(rows: list[dict[str, Any]], limit: int = 90) -> list[dict[s
             "low": row["low"],
             "close": row["close"],
         }
+        if row.get("source") in CLOSE_ONLY_YIELD_SOURCES:
+            item.update(open=None, high=None, low=None, close_only=True, source=row["source"])
         if index > 0:
             prev_close = rows[index - 1].get("close")
             close = row.get("close")
@@ -2437,6 +2455,7 @@ def build_snapshot(
             "derived = 本地公式而非外部供应商：CNY_BASE=1；债券曲线=10Y-2Y；CNYJPY=1/JPYCNY；RUB/CNY 优先使用 MOEX CNYRUB_TOM 真实直接成交历史的倒数，Yahoo 仅作交叉核验，MOEX 缺失或陈旧时才用 USDCNY/USDRUB 派生；RUB/JPY 仍要求 Yahoo 直接报价具备历史深度且与同日公式价偏差不超过2%。",
             "美债扩展期限优先使用 WSCN 日线；中国国债使用 ChinaMoney/CFETS 官方收盘收益率曲线并按缺口回填历史，其中中国3M合并 ChinaBond/CCDC 政府债收益率曲线历史；德国3M/6M/1Y/2Y/3Y/5Y/7Y/10Y/30Y 使用经同日官方收盘交叉核验的 Investing.com 周度 OHLC，2Y/10Y再合并 WSCN 日线，1Y/3Y以 Bundesbank Svensson 期限结构、5Y/7Y/30Y以 Bundesbank 当前联邦证券日频收盘为锚，3M/6M合并 Trading Economics 最新收盘；日本1M/3M/6M 使用 Trading Economics 图表历史、Investing.com 历史表并合并 Trading Economics 最新页；日本1Y/2Y/3Y/5Y/7Y/10Y/30Y 使用日本财务省 MOF 官方收益率曲线作为历史底座，WSCN 提供可用日线 OHLC，Investing.com 周度补齐 OHLC 缺口，并合并 Trading Economics 最新页；韩国1M/3M/6M 使用 SMBS KORIBOR 作为短端资金代理而非政府债，韩国3M/6M可由 BOK ECOS 交叉验证，韩国1Y/2Y/3Y/5Y/10Y/30Y 使用 Investing.com 历史表并在有更新日期时合并 Trading Economics 最新页；俄罗斯2Y/10Y 在 Investing.com 被云服务器拦截时保留历史缓存并合并 Trading Economics 最新页。",
             "宏观指标使用 Yahoo Finance 日线：美元指数 DX-Y.NYB、VIX ^VIX、黄金 GC=F、WTI 原油 CL=F。",
+            "全期限债券的历史缺口可使用美国财政部恒定期限收益率及中债国债收益率曲线补齐。补入值为官方日度收益率，日线图以点显示。",
             "政策新闻雷达只做加息、降息、维持利率相关文本筛选；抓取或 AI 分类不可用时退回本地规则解析。",
         ],
     }
@@ -4074,16 +4093,21 @@ def render_html(snapshot: dict[str, Any]) -> str:
             '<div class="all-bond-toolbar">',
             '<label>国家 <select id="all-bond-country-select"></select></label>',
             '<div class="segmented" aria-label="全期限债券显示方式">',
-            '<button type="button" class="all-bond-mode active" data-all-bond-mode="grouped">分组</button>',
-            '<button type="button" class="all-bond-mode" data-all-bond-mode="tenors">全部期限</button>',
+            '<button type="button" class="all-bond-mode active" data-all-bond-mode="grouped" aria-pressed="true">分组</button>',
+            '<button type="button" class="all-bond-mode" data-all-bond-mode="tenors" aria-pressed="false">全部期限</button>',
             "</div>",
-            '<div class="segmented" aria-label="全期限债券窗口">',
-            '<button type="button" class="all-bond-window" data-all-bond-window="30">30D</button>',
-            '<button type="button" class="all-bond-window active" data-all-bond-window="90">90D</button>',
-            '<button type="button" class="all-bond-window" data-all-bond-window="180">180D</button>',
-            '<button type="button" class="all-bond-window" data-all-bond-window="360">360D</button>',
+            '<div class="segmented all-bond-window-group" aria-label="全期限债券窗口">',
+            '<button type="button" class="all-bond-window" data-all-bond-window="30" aria-pressed="false">30D</button>',
+            '<button type="button" class="all-bond-window active" data-all-bond-window="90" aria-pressed="true">90D</button>',
+            '<button type="button" class="all-bond-window" data-all-bond-window="180" aria-pressed="false">180D</button>',
+            '<button type="button" class="all-bond-window" data-all-bond-window="360" aria-pressed="false">360D</button>',
+            '<button type="button" class="all-bond-window" data-all-bond-window="2Y" aria-pressed="false">2Y</button>',
+            '<button type="button" class="all-bond-window" data-all-bond-window="3Y" aria-pressed="false">3Y</button>',
+            '<button type="button" class="all-bond-window" data-all-bond-window="4Y" aria-pressed="false">4Y</button>',
+            '<button type="button" class="all-bond-window" data-all-bond-window="5Y" aria-pressed="false">5Y</button>',
             "</div>",
             "</div>",
+            '<div class="all-bond-coverage" id="all-bond-coverage" role="status"></div>',
             '<div class="all-bond-summary" id="all-bond-summary">选择国家后显示全部可用期限。</div>',
             '<div class="all-bond-legend" id="all-bond-legend" aria-label="债券期限图例"></div>',
             '<div class="chart-shell all-bond-chart-shell">',
@@ -4576,6 +4600,7 @@ th:first-child, td:first-child { text-align: left; }
 .all-bond-toolbar button { border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); cursor: pointer; min-width: 42px; height: 30px; padding: 0 10px; font: inherit; font-size: 12px; font-weight: 650; }
 .all-bond-toolbar button:hover { background: #f8fafc; border-color: #b7c2cf; }
 .all-bond-toolbar button.active { background: #eaf2ff; border-color: #aac5ee; color: var(--blue); }
+.all-bond-coverage { color: var(--muted); font-size: 12px; line-height: 1.5; margin-bottom: 8px; }
 .all-bond-summary { min-height: 20px; color: var(--ink); font-size: 13px; font-weight: 650; margin-bottom: 10px; }
 .all-bond-summary-title { margin-bottom: 7px; }
 .all-bond-spread-matrix { border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
@@ -4586,8 +4611,8 @@ th:first-child, td:first-child { text-align: left; }
 .all-bond-matrix-head { background: #f3f6fa; color: var(--muted); font-size: 11px; }
 .all-bond-matrix-head > span { justify-content: center; font-weight: 700; }
 .all-bond-matrix-head > span:first-child { justify-content: flex-start; }
-.all-bond-matrix-label { display: grid !important; gap: 1px; }
-.all-bond-matrix-label small { color: var(--muted); font-size: 10px; font-weight: 600; }
+.all-bond-matrix-row > .all-bond-matrix-value { display: grid; justify-items: end; gap: 1px; }
+.all-bond-matrix-value small { color: var(--muted); font-size: 10px; font-weight: 600; text-align: right; }
 .all-bond-legend { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
 .all-bond-legend button { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); cursor: pointer; height: 28px; padding: 0 8px; font: inherit; font-size: 12px; font-weight: 650; }
 .all-bond-legend button:hover { background: #f8fafc; border-color: #b7c2cf; }
@@ -4860,6 +4885,7 @@ th:first-child, td:first-child { text-align: left; }
   .all-bond-toolbar select { width: 100%; min-width: 0; height: 38px; }
   .all-bond-toolbar .segmented { width: 100%; }
   .all-bond-toolbar .segmented button { flex: 1 1 0; min-width: 0; height: 38px; }
+  .all-bond-toolbar .all-bond-window-group { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .all-bond-summary { font-size: 12px; line-height: 1.45; }
   .all-bond-spread-matrix { overflow-x: auto; }
   .all-bond-matrix-row { grid-template-columns: 76px repeat(2, minmax(96px, 1fr)); min-width: 268px; }
@@ -4930,6 +4956,7 @@ JS = """
   const allBondCountrySelect = document.getElementById("all-bond-country-select");
   const allBondModeButtons = Array.from(document.querySelectorAll(".all-bond-mode"));
   const allBondWindowButtons = Array.from(document.querySelectorAll(".all-bond-window"));
+  const allBondCoverage = document.getElementById("all-bond-coverage");
   const allBondSummary = document.getElementById("all-bond-summary");
   const allBondLegend = document.getElementById("all-bond-legend");
   const allBondChart = document.getElementById("all-bond-chart");
@@ -4954,7 +4981,7 @@ JS = """
   let dragStart = null;
   let spreadMode = "30";
   let allBondMode = "grouped";
-  let allBondWindow = 90;
+  let allBondWindow = "90";
   const hiddenAllBondKeys = new Set();
   let sharedHoverDate = null;
   const allBondColors = ["#2457a6", "#b36b00", "#087443", "#b42318", "#6f42c1", "#087f8c", "#8a4b2b", "#52606d", "#c23b78", "#2d7dd2"];
@@ -5285,13 +5312,14 @@ JS = """
 
   const normalizeOhlcSeries = (bars) => {
     const values = (bars || [])
-      .flatMap((bar) => [bar.open, bar.high, bar.low, bar.close].map(Number))
+      .flatMap((bar) => (bar.close_only ? [bar.close] : [bar.open, bar.high, bar.low, bar.close]).map(Number))
       .filter(Number.isFinite);
     if (!values.length) return [];
     const rangeMin = Math.min(...values);
     const rangeMax = Math.max(...values);
     const spread = rangeMax - rangeMin;
     const normalize = (value) => {
+      if (value === null || value === undefined) return null;
       const number = Number(value);
       if (!Number.isFinite(number)) return NaN;
       if (spread === 0) return 50;
@@ -5305,7 +5333,7 @@ JS = """
       high_norm: normalize(bar.high),
       low_norm: normalize(bar.low),
       close_norm: normalize(bar.close)
-    })).filter((bar) => [bar.open_norm, bar.high_norm, bar.low_norm, bar.close_norm].every(Number.isFinite));
+    })).filter((bar) => (bar.close_only ? [bar.close_norm] : [bar.open_norm, bar.high_norm, bar.low_norm, bar.close_norm]).every(Number.isFinite));
   };
 
   const updateCompareOptions = (item) => {
@@ -5561,8 +5589,9 @@ JS = """
         tooltip.innerHTML = `<strong>${esc(bar.date)}</strong>`
           + `<div>${esc(item.country)} ${esc(item.label)} 涨跌幅：<b>${moveText}</b></div>`
           + `<div class="muted">Prev close: ${fmt(bar.prev_close)}</div>`
-          + `<div>Open: ${fmt(bar.open)} · High: ${fmt(bar.high)}</div>`
-          + `<div>Low: ${fmt(bar.low)} · Close: ${fmt(bar.close)}</div>`
+          + (bar.close_only
+            ? `<div>官方日度收益率：${fmt(bar.close)}%（仅收盘值）</div>`
+            : `<div>Open: ${fmt(bar.open)} · High: ${fmt(bar.high)}</div><div>Low: ${fmt(bar.low)} · Close: ${fmt(bar.close)}</div>`)
           + compareHtml;
       });
       node.addEventListener("mouseleave", () => {
@@ -5604,8 +5633,8 @@ JS = """
       svg.innerHTML = `<text x="490" y="180" text-anchor="middle" fill="#66717d">没有可归一化的 OHLC 数据</text>`;
       return;
     }
-    const highs = plottedValues.map((bar) => Number(bar[highField]));
-    const lows = plottedValues.map((bar) => Number(bar[lowField]));
+    const highs = plottedValues.map((bar) => Number(bar[bar.close_only ? closeField : highField]));
+    const lows = plottedValues.map((bar) => Number(bar[bar.close_only ? closeField : lowField]));
     let min = normalized ? 0 : Math.min(...lows);
     let max = normalized ? 100 : Math.max(...highs);
     if (!normalized) {
@@ -5638,6 +5667,10 @@ JS = """
 
     const candleSvg = (bar, colorMode, extraClass = "") => {
       const xx = x(bar.plotIndex);
+      if (bar.close_only) {
+        const fill = colorMode === "compare" ? "#2563eb" : "#66717d";
+        return `<circle class="close-only-point ${extraClass}" cx="${xx}" cy="${y(bar[closeField])}" r="2.1" fill="${fill}" />`;
+      }
       const open = Number(bar[openField]);
       const close = Number(bar[closeField]);
       const high = Number(bar[highField]);
@@ -5705,10 +5738,9 @@ JS = """
           ? `<div class="muted">比较 ${esc(compareItem.label)} Close: ${fmt(compareBar.close)}${compareNorm ? ` · 归一: ${fmt(compareNorm.close_norm)} / 100` : ""}</div>`
           : "";
         tooltip.innerHTML = `<strong>${esc(bar.date)}</strong>`
-          + `<div>Open: ${fmt(bar.open)}</div>`
-          + `<div>High: ${fmt(bar.high)}</div>`
-          + `<div>Low: ${fmt(bar.low)}</div>`
-          + `<div>Close: ${fmt(bar.close)}</div>`
+          + (bar.close_only
+            ? `<div>官方日度收益率：${fmt(bar.close)}%（仅收盘值）</div>`
+            : `<div>Open: ${fmt(bar.open)}</div><div>High: ${fmt(bar.high)}</div><div>Low: ${fmt(bar.low)}</div><div>Close: ${fmt(bar.close)}</div>`)
           + normalizedHtml
           + compareHtml;
       });
@@ -5866,42 +5898,67 @@ JS = """
     };
   }).filter(Boolean);
 
-  const calendarWindowDates = (dates, days) => {
-    if (!dates.length) return [];
-    const endMs = dateMs(dates[dates.length - 1]);
-    if (!Number.isFinite(endMs)) return dates.slice();
-    const cutoffMs = endMs - Number(days) * 24 * 60 * 60 * 1000;
-    let startIndex = 0;
-    dates.forEach((day, index) => {
-      const currentMs = dateMs(day);
-      if (Number.isFinite(currentMs) && currentMs <= cutoffMs) startIndex = index;
-    });
-    return dates.slice(startIndex);
+  const allBondDayMs = 24 * 60 * 60 * 1000;
+  const allBondWindowLabel = (window) => window.endsWith("Y") ? window : `${window}D`;
+
+  const allBondWindowStart = (endDate, window) => {
+    const endMs = dateMs(endDate);
+    if (!Number.isFinite(endMs)) return "";
+    if (!window.endsWith("Y")) {
+      return new Date(endMs - Number(window) * allBondDayMs).toISOString().slice(0, 10);
+    }
+    const end = new Date(endMs);
+    const year = end.getUTCFullYear() - Number(window.slice(0, -1));
+    const month = end.getUTCMonth();
+    const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+    return new Date(Date.UTC(year, month, Math.min(end.getUTCDate(), lastDay))).toISOString().slice(0, 10);
   };
 
   const allBondSelection = () => {
     const country = selectedAllBondCountry();
     const tenorBonds = (country?.bonds || []).map((bond, index) => {
       const rows = (ohlcData[bond.key]?.ohlc || [])
-        .map((row) => ({ date: row.date, close: Number(row.close) }))
-        .filter((row) => row.date && Number.isFinite(row.close));
+        .filter((row) => Number.isFinite(dateMs(row.date)) && Number.isFinite(row.close))
+        .map((row) => ({ date: row.date, close: row.close }));
       return { ...bond, legendLabel: bond.tenor, color: allBondColors[index % allBondColors.length], rows };
     });
     const allDates = [...new Set(tenorBonds.flatMap((bond) => bond.rows.map((row) => row.date)))].sort();
-    const selectedDates = calendarWindowDates(allDates, allBondWindow);
-    const bonds = allBondMode === "grouped" ? buildAllBondGroups(tenorBonds, selectedDates) : tenorBonds;
-    const dateSet = new Set(selectedDates);
-    const visibleBonds = bonds
-      .filter((bond) => !hiddenAllBondKeys.has(bond.key))
-      .map((bond) => ({ ...bond, rows: bond.rows.filter((row) => dateSet.has(row.date)) }));
-    return { country, bonds, tenorBonds, visibleBonds, dates: selectedDates };
+    const endDate = allDates[allDates.length - 1] || "";
+    const startDate = allBondWindowStart(endDate, allBondWindow);
+    const dates = allDates.filter((day) => day >= startDate);
+    const windowBonds = tenorBonds.map((bond) => ({ ...bond, rows: bond.rows.filter((row) => row.date >= startDate) }));
+    const bonds = allBondMode === "grouped" ? buildAllBondGroups(windowBonds, dates) : windowBonds;
+    const visibleBonds = bonds.filter((bond) => !hiddenAllBondKeys.has(bond.key));
+    return { country, bonds, visibleBonds, dates, startDate, endDate };
+  };
+
+  const allBondDateRange = (first, last) => first === last ? first : `${first} 至 ${last}`;
+
+  const renderAllBondCoverage = ({ startDate, endDate, visibleBonds }) => {
+    if (!allBondCoverage) return;
+    if (!endDate) {
+      allBondCoverage.textContent = "当前国家没有可用收益率。";
+      return;
+    }
+    const plotted = [...new Set(visibleBonds.flatMap((bond) => bond.rows.map((row) => row.date)))].sort();
+    const requested = `所选 ${allBondWindowLabel(allBondWindow)}｜${allBondDateRange(startDate, endDate)}`;
+    if (!plotted.length) {
+      allBondCoverage.textContent = `${requested}｜${visibleBonds.length ? "所选期限在此窗口无数据" : "未选择显示期限"}`;
+      return;
+    }
+    const first = plotted[0];
+    const last = plotted[plotted.length - 1];
+    const span = Math.round((dateMs(last) - dateMs(first)) / allBondDayMs);
+    allBondCoverage.textContent = `${requested}｜实际覆盖 ${allBondDateRange(first, last)}（跨度 ${span} 个日历日，${plotted.length} 个有数据的日期）`;
   };
 
   const renderAllBondLegend = (bonds) => {
     if (!allBondLegend) return;
     allBondLegend.innerHTML = bonds.map((bond) => {
       const hidden = hiddenAllBondKeys.has(bond.key);
-      return `<button type="button" data-all-bond-key="${esc(bond.key)}" class="${hidden ? "is-hidden" : ""}" aria-pressed="${hidden ? "false" : "true"}">`
+      const dates = bond.rows.map((row) => row.date);
+      const detail = dates.length ? `${allBondDateRange(dates[0], dates[dates.length - 1])} · ${dates.length} 个数据日` : "此窗口无数据";
+      return `<button type="button" data-all-bond-key="${esc(bond.key)}" class="${hidden ? "is-hidden" : ""}" aria-pressed="${hidden ? "false" : "true"}" title="${esc(detail)}">`
         + `<i class="all-bond-swatch" style="--swatch:${bond.color}"></i>${esc(bond.legendLabel || bond.tenor)}</button>`;
     }).join("");
     Array.from(allBondLegend.querySelectorAll("[data-all-bond-key]")).forEach((button) => {
@@ -5945,40 +6002,30 @@ JS = """
   };
 
   const groupedSpreadCell = (spread, field) => {
-    if (!spread) return "缺失";
-    return `${signed(spread[field], 1)}bp`;
+    if (!spread || (field === "delta" && spread.startDate === spread.endDate)) return "<span>缺少共同日期</span>";
+    const dateText = field === "end" ? spread.endDate : allBondDateRange(spread.startDate, spread.endDate);
+    return `<span class="all-bond-matrix-value"><b>${signed(spread[field], 1)}bp</b><small>${esc(dateText)}</small></span>`;
   };
 
   const groupedMatrixRow = (label, dates, series, field) => {
-    const dateText = dates.length ? `${dates[0].slice(5)}→${dates[dates.length - 1].slice(5)}` : "缺少共同日期";
     const longMid = groupedSpread(series, "group-long", "group-mid", dates);
     const midShort = groupedSpread(series, "group-mid", "group-short", dates);
-    return `<div class="all-bond-matrix-row"><span class="all-bond-matrix-label"><b>${esc(label)}</b><small>${esc(dateText)}</small></span>`
-      + `<span>${groupedSpreadCell(longMid, field)}</span>`
-      + `<span>${groupedSpreadCell(midShort, field)}</span></div>`;
+    return `<div class="all-bond-matrix-row"><span>${esc(label)}</span>`
+      + groupedSpreadCell(longMid, field) + groupedSpreadCell(midShort, field) + `</div>`;
   };
 
-  const renderGroupedBondSummary = (country, tenorBonds, displaySeries) => {
+  const renderGroupedBondSummary = ({ country, dates, startDate, endDate, visibleBonds }) => {
     if (!allBondSummary) return;
-    const allDates = [...new Set(tenorBonds.flatMap((bond) => bond.rows.map((row) => row.date)))].sort();
-    const summaryWindow = (days) => {
-      const requestedDates = calendarWindowDates(allDates, days);
-      const series = buildAllBondGroups(tenorBonds, requestedDates);
-      const groupDateSets = series.map((item) => new Set(item.rows.map((row) => row.date)));
-      const commonDates = series[0]?.rows.map((row) => row.date).filter((day) => groupDateSets.every((dates) => dates.has(day))) || [];
-      return { series, commonDates };
-    };
-    const displayDateSets = displaySeries.map((item) => new Set(item.rows.map((row) => row.date)));
-    const displayCommonDates = displaySeries[0]?.rows.map((row) => row.date).filter((day) => displayDateSets.every((dates) => dates.has(day))) || [];
-    const latest = displayCommonDates.length ? [displayCommonDates[displayCommonDates.length - 1]] : [];
-    const horizonRows = [90, 60, 30, 7].map((days) => {
-      const window = summaryWindow(days);
-      return groupedMatrixRow(`${days}D变化`, window.commonDates, window.series, "delta");
+    const horizonRows = ["90", "60", "30", "7"].map((window) => {
+      const cutoff = allBondWindowStart(endDate, window);
+      if (cutoff <= startDate) return "";
+      return groupedMatrixRow(`${allBondWindowLabel(window)}变化`, dates.filter((day) => day >= cutoff), visibleBonds, "delta");
     }).join("");
     allBondSummary.innerHTML = `<div class="all-bond-summary-title">${esc(country?.name || "")}｜窗口内稳定期限等权平均｜价差单位 bp</div>`
       + `<div class="all-bond-spread-matrix">`
       + `<div class="all-bond-matrix-row all-bond-matrix-head"><span>窗口</span><span>长-中</span><span>中-短</span></div>`
-      + groupedMatrixRow("当前价差", latest, displaySeries, "end")
+      + groupedMatrixRow("最新共同日价差", dates, visibleBonds, "end")
+      + groupedMatrixRow(`${allBondWindowLabel(allBondWindow)}变化`, dates, visibleBonds, "delta")
       + horizonRows
       + `</div>`;
   };
@@ -5986,8 +6033,9 @@ JS = """
   const renderAllBondChart = () => {
     if (!allBondChart) return;
     const selection = allBondSelection();
-    const { country, bonds, tenorBonds, visibleBonds, dates } = selection;
+    const { country, bonds, visibleBonds, dates, startDate, endDate } = selection;
     renderAllBondLegend(bonds);
+    renderAllBondCoverage(selection);
     const width = 980;
     const height = 300;
     const margin = { left: 66, right: 22, top: 24, bottom: 42 };
@@ -6006,8 +6054,8 @@ JS = """
     const pad = Math.max((max - min) * 0.1, 0.025);
     min -= pad;
     max += pad;
-    const startMs = dateMs(dates[0]);
-    const endMs = dateMs(dates[dates.length - 1]);
+    const startMs = dateMs(startDate);
+    const endMs = dateMs(endDate);
     const useDateDomain = Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs;
     const xForDate = (day, index = 0) => {
       if (!useDateDomain) return dates.length === 1 ? margin.left + innerW / 2 : margin.left + index * innerW / Math.max(1, dates.length - 1);
@@ -6027,11 +6075,12 @@ JS = """
       const ordered = points.slice().sort((a, b) => a.close - b.close);
       return { date: day, points, low: ordered[0], high: ordered[ordered.length - 1] };
     });
-    const maxGapMs = 10 * 24 * 60 * 60 * 1000;
+    const maxGapMs = 10 * allBondDayMs;
     const bands = dateStats.slice(0, -1).map((row, index) => {
       const next = dateStats[index + 1];
       if (!row.low || !row.high || !next.low || !next.high) return "";
       if (dateMs(next.date) - dateMs(row.date) > maxGapMs) return "";
+      if (row.points.length !== next.points.length || row.points.some((point) => !next.points.some((p) => p.bond.key === point.bond.key))) return "";
       const points = [
         [xForDate(row.date, index), y(row.high.close)],
         [xForDate(next.date, index + 1), y(next.high.close)],
@@ -6040,46 +6089,58 @@ JS = """
       ].map(([px, py]) => `${px.toFixed(2)},${py.toFixed(2)}`).join(" ");
       return `<polygon points="${points}" fill="rgba(82, 96, 109, 0.08)" />`;
     }).join("");
+    const dateIndexes = new Map(dates.map((day, index) => [day, index]));
+    const joins = (left, right) => left && right && dateIndexes.get(right.date) === dateIndexes.get(left.date) + 1
+      && dateMs(right.date) - dateMs(left.date) <= maxGapMs;
     const paths = visibleBonds.map((bond) => {
-      let previousMs = null;
-      const path = bond.rows.map((row, index) => {
-        const currentMs = dateMs(row.date);
-        const command = index === 0 || !Number.isFinite(previousMs) || !Number.isFinite(currentMs) || currentMs - previousMs > maxGapMs ? "M" : "L";
-        previousMs = currentMs;
-        return `${command} ${xForDate(row.date).toFixed(2)} ${y(row.close).toFixed(2)}`;
-      }).join(" ");
-      return `<path d="${path}" fill="none" stroke="${bond.color}" stroke-width="2.1" stroke-linejoin="round" stroke-linecap="round" />`;
+      const commands = [];
+      const isolated = [];
+      bond.rows.forEach((row, index) => {
+        const xx = xForDate(row.date).toFixed(2);
+        const yy = y(row.close).toFixed(2);
+        const joinsPrevious = joins(bond.rows[index - 1], row);
+        commands.push(`${joinsPrevious ? "L" : "M"} ${xx} ${yy}`);
+        if (!joinsPrevious && !joins(row, bond.rows[index + 1])) {
+          isolated.push(`<circle cx="${xx}" cy="${yy}" r="2" fill="${bond.color}" />`);
+        }
+      });
+      return `<path d="${commands.join(" ")}" fill="none" stroke="${bond.color}" stroke-width="2.1" stroke-linejoin="round" stroke-linecap="round" />${isolated.join("")}`;
     }).join("");
-    const tickCount = Math.min(7, dates.length);
+    const tickCount = useDateDomain ? 7 : 1;
+    const longWindow = allBondWindow.endsWith("Y");
     const dateTicks = Array.from({ length: tickCount }, (_, index) => {
       const position = tickCount === 1 ? 0.5 : index / (tickCount - 1);
       const tickMs = useDateDomain ? startMs + (endMs - startMs) * position : null;
-      const day = Number.isFinite(tickMs) ? new Date(tickMs).toISOString().slice(5, 10) : dates[Math.round(position * (dates.length - 1))].slice(5);
+      const isoDate = Number.isFinite(tickMs) ? new Date(tickMs).toISOString().slice(0, 10) : dates[0];
+      const day = longWindow ? isoDate.slice(0, 7) : isoDate.slice(5);
       return `<text x="${margin.left + position * innerW}" y="${height - 13}" text-anchor="middle" fill="#66717d" font-size="11">${esc(day)}</text>`;
     }).join("");
-    const hitW = Math.max(10, Math.min(34, innerW / Math.max(1, dates.length)));
-    const hits = dates.map((day, index) => {
-      const xx = xForDate(day, index);
+    const plottedStats = dateStats.filter((stat) => stat.points.length);
+    const hitXs = plottedStats.map((stat) => xForDate(stat.date));
+    const hits = plottedStats.map((stat, index) => {
+      const xx = hitXs[index];
+      const left = Math.max(xx - 16, (xx + (hitXs[index - 1] ?? xx - 32)) / 2);
+      const right = Math.min(xx + 16, (xx + (hitXs[index + 1] ?? xx + 32)) / 2);
       return `<g class="all-bond-hit" data-index="${index}">`
-        + `<line class="all-bond-crosshair" data-hover-date="${esc(day)}" x1="${xx.toFixed(2)}" x2="${xx.toFixed(2)}" y1="${margin.top}" y2="${height - margin.bottom}" stroke="#98a2b3" stroke-width="1" opacity="0" />`
-        + `<rect x="${(xx - hitW / 2).toFixed(2)}" y="${margin.top}" width="${hitW.toFixed(2)}" height="${innerH}" fill="transparent" />`
+        + `<line class="all-bond-crosshair" data-hover-date="${esc(stat.date)}" x1="${xx.toFixed(2)}" x2="${xx.toFixed(2)}" y1="${margin.top}" y2="${height - margin.bottom}" stroke="#98a2b3" stroke-width="1" opacity="0" />`
+        + `<rect x="${left.toFixed(2)}" y="${margin.top}" width="${(right - left).toFixed(2)}" height="${innerH}" fill="transparent" />`
         + `</g>`;
     }).join("");
     allBondChart.innerHTML = `<rect width="${width}" height="${height}" fill="#fff" />${grid}${bands}${paths}${dateTicks}${hits}`;
     const latestComparable = dateStats.slice().reverse().find((row) => row.low && row.high);
     if (allBondMode === "grouped") {
-      renderGroupedBondSummary(country, tenorBonds, bonds);
+      renderGroupedBondSummary(selection);
     } else if (allBondSummary) {
       if (latestComparable?.low && latestComparable?.high) {
         const gap = (latestComparable.high.close - latestComparable.low.close) * 100;
-        allBondSummary.textContent = `${country?.name || ""}｜${allBondWindow}D｜${latestComparable.date} 期限范围差 ${latestComparable.high.bond.tenor}-${latestComparable.low.bond.tenor} ${signed(gap, 1)}bp`;
+        allBondSummary.textContent = `${country?.name || ""}｜${latestComparable.date} 期限范围差 ${latestComparable.high.bond.tenor}-${latestComparable.low.bond.tenor} ${signed(gap, 1)}bp`;
       } else {
-        allBondSummary.textContent = `${country?.name || ""}｜${allBondWindow}D｜缺少至少两个期限的同日收盘。`;
+        allBondSummary.textContent = `${country?.name || ""}｜缺少至少两个期限的同日收盘。`;
       }
     }
     syncSharedCrosshairs();
     Array.from(allBondChart.querySelectorAll(".all-bond-hit")).forEach((node) => {
-      const stat = dateStats[Number(node.dataset.index)];
+      const stat = plottedStats[Number(node.dataset.index)];
       node.addEventListener("mousemove", (event) => {
         setSharedHoverDate(stat.date);
         if (!allBondTooltip) return;
@@ -6673,14 +6734,20 @@ JS = """
     button.addEventListener("click", () => {
       allBondMode = button.dataset.allBondMode || "grouped";
       hiddenAllBondKeys.clear();
-      allBondModeButtons.forEach((item) => item.classList.toggle("active", item === button));
+      allBondModeButtons.forEach((item) => {
+        item.classList.toggle("active", item === button);
+        item.setAttribute("aria-pressed", String(item === button));
+      });
       renderAllBondChart();
     });
   });
   allBondWindowButtons.forEach((button) => {
     button.addEventListener("click", () => {
-      allBondWindow = Number(button.dataset.allBondWindow || 90);
-      allBondWindowButtons.forEach((item) => item.classList.toggle("active", item === button));
+      allBondWindow = button.dataset.allBondWindow || "90";
+      allBondWindowButtons.forEach((item) => {
+        item.classList.toggle("active", item === button);
+        item.setAttribute("aria-pressed", String(item === button));
+      });
       renderAllBondChart();
     });
   });

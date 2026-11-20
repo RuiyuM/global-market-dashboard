@@ -271,8 +271,8 @@ def test_all_bond_tenors_chart_is_interactive_and_uses_exact_date_values() -> No
     assert '<section class="panel all-bond-panel" id="all-bond-panel">' in html
     assert "<h2>全期限债券</h2>" in html
     assert 'id="all-bond-country-select"' in html
-    assert 'class="all-bond-mode active" data-all-bond-mode="grouped">分组</button>' in html
-    assert 'class="all-bond-mode" data-all-bond-mode="tenors">全部期限</button>' in html
+    assert 'data-all-bond-mode="grouped" aria-pressed="true">分组</button>' in html
+    assert 'data-all-bond-mode="tenors" aria-pressed="false">全部期限</button>' in html
     assert 'data-all-bond-window="30"' in html
     assert 'data-all-bond-window="90"' in html
     assert 'data-all-bond-window="180"' in html
@@ -286,10 +286,8 @@ def test_all_bond_tenors_chart_is_interactive_and_uses_exact_date_values() -> No
     assert "const requiredCoverage = Math.max(1, Math.ceil(windowDates.length * 0.8));" in JS
     assert "const stableMembers = rankedMembers.filter" in JS
     assert "memberValues: Object.fromEntries" in JS
-    assert "const calendarWindowDates = (dates, days) =>" in JS
-    assert "const selectedDates = calendarWindowDates(allDates, allBondWindow);" in JS
+    assert "const startDate = allBondWindowStart(endDate, allBondWindow);" in JS
     assert "const groupedEndpointPair = (item, startDate, endDate) =>" in JS
-    assert "const summaryWindow = (days) =>" in JS
     assert "窗口内稳定期限等权平均" in JS
     assert "memberMaps.every" not in JS
     assert "dates.slice(-Math.min(dates.length, allBondWindow))" not in JS
@@ -298,11 +296,11 @@ def test_all_bond_tenors_chart_is_interactive_and_uses_exact_date_values() -> No
     assert 'key: "group-long"' in JS
     assert "const groupedSpread = (series, firstKey, secondKey, dates) =>" in JS
     assert "const groupedMatrixRow = (label, dates, series, field) =>" in JS
-    assert '[90, 60, 30, 7].map' in JS
-    assert 'groupedMatrixRow("当前价差", latest, displaySeries, "end")' in JS
+    assert '["90", "60", "30", "7"].map' in JS
+    assert 'groupedMatrixRow("最新共同日价差", dates, visibleBonds, "end")' in JS
     assert '<span>窗口</span><span>长-中</span><span>中-短</span>' in JS
     assert '<span>长-短</span>' not in JS
-    assert 'groupedMatrixRow(`${days}D变化`, window.commonDates, window.series, "delta")' in JS
+    assert 'groupedMatrixRow(`${allBondWindowLabel(allBondWindow)}变化`, dates, visibleBonds, "delta")' in JS
     assert '当日${esc(label)}：${Number(first.close).toFixed(4)}% - ${Number(second.close).toFixed(4)}%' in JS
     assert "const renderAllBondChart = () =>" in JS
     assert "const exactByDate = new Map" in JS

@@ -43,6 +43,8 @@ CHINAMONEY_TERMS = {
 
 CHINABOND_PBC_TERMS = {
     "3M": {"param": "0.25", "column": 2},
+    "6M": {"param": "0.5", "column": 3},
+    "30Y": {"param": "30", "column": 9},
 }
 
 BOK_ECOS_MARKET_RATE_ITEMS = {

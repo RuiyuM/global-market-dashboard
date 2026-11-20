@@ -80,6 +80,22 @@ def test_rows_by_tenor_from_chinabond_pbc_history_html_extracts_3m_rows() -> Non
     ]
 
 
+def test_chinabond_reads_history_from_exact_short_and_long_tenor_columns() -> None:
+    html = """
+    <table><tr><td>ChinaBond Government Bond Yield Curve</td><td>2021-11-22</td>
+        <td>2.2486</td><td>2.2977</td><td>2.4033</td><td>2.5772</td><td>2.7148</td>
+        <td>2.8088</td><td>2.8790</td><td>3.4188</td></tr></table>
+    """
+
+    rows = rows_by_tenor_from_chinabond_pbc_history_html(html)
+
+    assert {tenor: result[0]["close"] for tenor, result in rows.items()} == {
+        "3M": 2.2486,
+        "6M": 2.2977,
+        "30Y": 3.4188,
+    }
+
+
 def test_fetch_chinamoney_history_rows_skips_weekends(monkeypatch) -> None:
     calls: list[date] = []
 
