@@ -300,24 +300,27 @@ FALLBACK_ITEMS = [
     },
     {
         "region": "CN",
-        "headline": "PBOC keeps loan prime rates steady while liquidity conditions stay accommodative",
-        "source": "PBOC",
-        "url": "https://www.pbc.gov.cn/en/3688110/3688172/index.html",
-        "published_at": "",
+        "headline": "PBOC-authorized November loan prime rates remain unchanged",
+        "source": "中国货币网 · 央行授权公告",
+        "url": "https://www.chinamoney.com.cn/chinese/rdgz/20261120/3453464.html",
+        "published_at": "2026-11-20",
+        "summary_cn": "11 月 LPR 维持不变，1 年期为 3.00%，5 年期以上为 3.50%。",
     },
     {
         "region": "KR",
-        "headline": "Bank of Korea keeps rates unchanged and says future moves depend on inflation",
-        "source": "Bank of Korea",
-        "url": "https://www.bok.or.kr/eng/singl/newsDataEng/list.do?menuNo=400022",
-        "published_at": "",
+        "headline": "Bank of Korea minutes show agreement to keep the base rate unchanged at 3.00%",
+        "source": "Bank of Korea · 官方纪要",
+        "url": "https://www.bok.or.kr/eng/bbs/E0001620/view.do?menuNo=400021&nttId=11066451",
+        "published_at": "2026-11-10",
+        "summary_cn": "10 月 22 日会议纪要显示，委员一致同意将基准利率维持在 3.00%。",
     },
     {
         "region": "RU",
-        "headline": "Bank of Russia signals tight policy may remain in place if inflation pressure persists",
-        "source": "Bank of Russia",
-        "url": "https://www.cbr.ru/eng/press/keypr/",
-        "published_at": "",
+        "headline": "Bank of Russia minutes: key rate unchanged at 14.00%",
+        "source": "Bank of Russia · 官方纪要",
+        "url": "https://www.cbr.ru/eng/dkp/mp_dec/decision_key_rate/summary_key_rate_05112026/",
+        "published_at": "2026-11-13",
+        "summary_cn": "10 月 23 日会议维持关键利率 14.00%。纪要指出，核心通胀压力和通胀预期仍偏高。",
     },
 ]
 
@@ -401,7 +404,7 @@ def classify_policy_news_heuristic(item: dict[str, Any]) -> dict[str, Any]:
         confidence = 0.35
 
     region = _REGION_BY_CODE.get(str(item.get("region")), {})
-    summary = f"{region.get('name', item.get('region', ''))}：{direction}，{stance}。"
+    summary = item.get("summary_cn") or f"{region.get('name', item.get('region', ''))}：{direction}，{stance}。"
     if math.isfinite(total):
         confidence = round(confidence, 2)
     return {

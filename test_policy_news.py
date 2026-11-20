@@ -83,6 +83,26 @@ def test_snapshot_has_six_regions_and_no_secret_material() -> None:
     assert "OPENAI_API_KEY" not in serialized
 
 
+def test_missing_regional_headlines_use_dated_official_releases(tmp_path: Path) -> None:
+    snapshot = build_policy_news_snapshot(
+        fetch_news=True,
+        use_openai=False,
+        cache_path=tmp_path / "policy_news.json",
+        fetcher=lambda: [],
+        action_builder=lambda: {},
+    )
+    for region, published, rate in (
+        ("CN", "2026-11-20", "3.50%"),
+        ("KR", "2026-11-10", "3.00%"),
+        ("RU", "2026-11-13", "14.00%"),
+    ):
+        item = snapshot["regions"][region]["items"][0]
+        assert item["published_at"] == published
+        assert item["policy_direction"] == "维持观望"
+        assert item["url"].startswith("https://")
+        assert rate in item["summary_cn"]
+
+
 def test_snapshot_includes_recent_policy_actions() -> None:
     def fake_action_builder():
         return {
