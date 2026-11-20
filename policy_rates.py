@@ -3,10 +3,13 @@
 
 from __future__ import annotations
 
+import csv
 import json
+import math
 import re
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
+from io import StringIO
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlencode, urljoin
@@ -30,7 +33,7 @@ class PolicyRatePoint:
 POLICY_RATE_SOURCES = {
     "US": {"policy_tool": "联邦基金目标区间", "source_note": "Federal Reserve FOMC target range"},
     "EU": {"policy_tool": "ECB deposit facility rate", "source_note": "ECB key interest rates"},
-    "JP": {"policy_tool": "无担保隔夜拆借利率目标", "source_note": "Bank of Japan monetary policy releases"},
+    "JP": {"policy_tool": "无担保隔夜拆借利率目标", "source_note": "Bank of Japan policy rate via BIS"},
     "CN": {"policy_tool": "1Y Loan Prime Rate", "source_note": "NIFC/PBOC Loan Prime Rate"},
     "KR": {"policy_tool": "Bank of Korea Base Rate", "source_note": "Bank of Korea monetary policy decisions"},
     "RU": {"policy_tool": "Bank of Russia Key Rate", "source_note": "Bank of Russia key rate"},
@@ -40,11 +43,13 @@ FED_URL = "https://www.federalreserve.gov/monetarypolicy/openmarket.htm"
 ECB_URL = "https://www.ecb.europa.eu/stats/policy_and_exchange_rates/key_ecb_interest_rates/html/index.en.html"
 BOJ_RELEASE_BASE = "https://www.boj.or.jp/en/mopo/mpmdeci/"
 BOJ_RELEASE_TEMPLATE = "https://www.boj.or.jp/en/mopo/mpmdeci/mpr_{year}/index.htm"
+BIS_POLICY_RATE_API = "https://stats.bis.org/api/v1/data/BIS,WS_CBPOL,1.0/"
+BIS_POLICY_RATE_SERIES = "https://data.bis.org/topics/CBPOL/BIS%2CWS_CBPOL%2C1.0/"
 CHINA_LPR_URL = "https://www.chinamoney.com.cn/english/bmklpr/"
 CHINA_LPR_CURRENT_URL = "https://www.chinamoney.com.cn/r/cms/www/chinamoney/data/currency/bk-lpr.json"
 CHINA_LPR_HISTORY_URL = "https://www.chinamoney.com.cn/ags/ms/cm-u-bk-currency/LprHis"
 BOK_URL = "https://www.bok.or.kr/eng/singl/baseRate/progress.do?dataSeCd=01&menuNo=400016"
-RUSSIA_URL = "https://www.cbr.ru/eng/hd_base/KeyRate/?UniDbQuery.Posted=True"
+RUSSIA_URL = "https://www.cbr.ru/eng/hd_base/KeyRate/"
 
 MONTHS = {
     "Jan": 1,
@@ -181,7 +186,8 @@ def parse_fed_all_points(html: str, *, years: list[int]) -> list[PolicyRatePoint
 
 
 def parse_ecb_points(html: str) -> list[PolicyRatePoint]:
-    text = normalize_text(re.sub(r"<[^>]+>", " ", html))
+    without_footnotes = re.sub(r"<sup\b[^>]*>.*?</sup>", "", html, flags=re.IGNORECASE | re.DOTALL)
+    text = normalize_text(re.sub(r"<[^>]+>", " ", without_footnotes))
     pattern = re.compile(r"\b(20\d{2})\s+(\d{1,2})\s+([A-Z][a-z]+)\.?\s+(-?\d+(?:\.\d+)?)\s+[-\d.]+\s+(?:-|[-\d.]+)\s+[-\d.]+")
     rows: list[PolicyRatePoint] = []
     for year_text, day_text, month_name, deposit_rate in pattern.findall(text):
@@ -194,20 +200,66 @@ def parse_ecb_points(html: str) -> list[PolicyRatePoint]:
     return sorted({(row.date, row.display_rate): row for row in rows}.values(), key=lambda row: row.date)
 
 
-def parse_russia_points(html: str) -> list[PolicyRatePoint]:
+def fetch_ecb_points(
+    *,
+    fetcher: Callable[[str], str] = fetch_text,
+    today: date | None = None,
+) -> list[PolicyRatePoint]:
+    try:
+        points = parse_ecb_points(fetcher(ECB_URL))
+    except (OSError, ValueError):
+        points = []
+    if len(points) >= 2:
+        return points
+
+    end = today or datetime.now(timezone.utc).date()
+    # The BIS euro area series used the main refinancing rate before this date.
+    lookback_days = min(730, (end - date(2024, 9, 18)).days)
+    if lookback_days < 1:
+        raise ValueError("BIS euro area series does not yet represent the ECB deposit facility rate")
+    return fetch_bis_policy_rate_points(
+        "EU",
+        bis_region="XM",
+        source_ref="European Central Bank",
+        fetcher=fetcher,
+        today=end,
+        lookback_days=lookback_days,
+    )
+
+
+def parse_russia_points(html: str, *, source_url: str = RUSSIA_URL) -> list[PolicyRatePoint]:
     text = normalize_text(re.sub(r"<[^>]+>", " ", html))
     pattern = re.compile(r"\b(\d{2})\.(\d{2})\.(20\d{2})\s+(\d+(?:\.\d+)?)")
     daily_rows: list[PolicyRatePoint] = []
     for day_text, month_text, year_text, rate_text in pattern.findall(text):
         rate_date = date(int(year_text), int(month_text), int(day_text))
         display = format_percent(rate_text)
-        daily_rows.append(PolicyRatePoint("RU", rate_date, display, float(rate_text), "Bank of Russia", RUSSIA_URL))
+        daily_rows.append(PolicyRatePoint("RU", rate_date, display, float(rate_text), "Bank of Russia", source_url))
 
     compressed: list[PolicyRatePoint] = []
     for row in sorted(daily_rows, key=lambda item: item.date):
         if not compressed or row.numeric_rate != compressed[-1].numeric_rate:
             compressed.append(row)
     return compressed
+
+
+def fetch_russia_points(
+    *,
+    fetcher: Callable[[str], str] = fetch_text,
+    today: date | None = None,
+) -> list[PolicyRatePoint]:
+    end = today or datetime.now(timezone.utc).date()
+    # The default query only returns one week. Keep enough history to compare
+    # the latest rate changes even when the current rate has held for months.
+    start = end - timedelta(days=3 * 365)
+    query = urlencode({
+        "UniDbQ": "",
+        "UniDbQuery.From": start.strftime("%d.%m.%Y"),
+        "UniDbQuery.To": end.strftime("%d.%m.%Y"),
+        "UniDbQuery.Posted": "True",
+    })
+    url = f"{RUSSIA_URL}?{query}"
+    return parse_russia_points(fetcher(url), source_url=url)
 
 
 def parse_china_lpr_points(html: str) -> list[PolicyRatePoint]:
@@ -380,6 +432,51 @@ def parse_korea_base_rate_points(html: str) -> list[PolicyRatePoint]:
     return trim_large_history_gap(deduped)
 
 
+def fetch_bis_policy_rate_points(
+    region: str,
+    *,
+    bis_region: str,
+    source_ref: str,
+    source_url: str | None = None,
+    fetcher: Callable[[str], str] = fetch_text,
+    today: date | None = None,
+    lookback_days: int = 730,
+) -> list[PolicyRatePoint]:
+    """Read the official institution's effective policy rate from BIS's daily series."""
+    end = today or datetime.now(timezone.utc).date()
+    start = end - timedelta(days=lookback_days)
+    series = f"D.{bis_region}"
+    params = urlencode({"startPeriod": start.isoformat(), "endPeriod": end.isoformat(), "format": "csv"})
+    text = fetcher(f"{BIS_POLICY_RATE_API}{series}?{params}")
+    reader = csv.DictReader(StringIO(text.lstrip("\ufeff")))
+    required_columns = {"FREQ", "REF_AREA", "SOURCE_REF", "TIME_PERIOD", "OBS_VALUE"}
+    if not required_columns.issubset(reader.fieldnames or []):
+        raise ValueError(f"BIS {series} response has no policy rate CSV header")
+
+    permalink = source_url or f"{BIS_POLICY_RATE_SERIES}{series}"
+    rows: dict[date, PolicyRatePoint] = {}
+    for row in reader:
+        if (row["FREQ"], row["REF_AREA"], row["SOURCE_REF"]) != ("D", bis_region, source_ref):
+            continue
+        try:
+            observed_on = date.fromisoformat(row["TIME_PERIOD"])
+            value = float(row["OBS_VALUE"])
+        except (TypeError, ValueError):
+            continue
+        if not start <= observed_on <= end or not math.isfinite(value):
+            continue
+        previous = rows.get(observed_on)
+        if previous and previous.numeric_rate != value:
+            raise ValueError(f"BIS {series} has conflicting policy rates for {observed_on}")
+        rows[observed_on] = PolicyRatePoint(
+            region, observed_on, format_percent(value), value, f"{source_ref} via BIS", permalink,
+        )
+
+    if len(rows) < 2 or (end - max(rows)).days > 14:
+        raise ValueError(f"BIS {series} policy rate history is missing or stale")
+    return sorted(rows.values(), key=lambda row: row.date)
+
+
 def parse_boj_statement_points(text: str, *, source_url: str) -> list[PolicyRatePoint]:
     normalized = normalize_text(re.sub(r"<[^>]+>", " ", text))
     date_match = re.search(r"\b(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\b", normalized)
@@ -431,15 +528,15 @@ def fetch_policy_rate_points(region: str) -> list[PolicyRatePoint]:
         html = fetch_text(FED_URL)
         return parse_fed_all_points(html, years=[current_year - 2, current_year - 1, current_year])
     if region == "EU":
-        return parse_ecb_points(fetch_text(ECB_URL))
+        return fetch_ecb_points()
     if region == "RU":
-        return parse_russia_points(fetch_text(RUSSIA_URL))
+        return fetch_russia_points()
     if region == "CN":
         return fetch_china_lpr_points()
     if region == "KR":
         return parse_korea_base_rate_points(fetch_text(BOK_URL))
     if region == "JP":
-        return fetch_boj_points()
+        return fetch_bis_policy_rate_points("JP", bis_region="JP", source_ref="Bank of Japan")
     return []
 
 
@@ -451,6 +548,8 @@ def build_policy_actions_from_official_sources(
         try:
             points = fetcher(region)
             actions = actions_from_rate_points(points, policy_tool=meta["policy_tool"])
+            if not actions:
+                raise ValueError("official history did not contain a verifiable rate change")
         except Exception as exc:
             result[region] = {
                 "policy_tool": meta["policy_tool"],
@@ -458,7 +557,7 @@ def build_policy_actions_from_official_sources(
                 "actions": [],
                 "recent_year_actions": [],
                 "action_update_source": "fetch_failed",
-                "action_cache_status": "candidate",
+                "action_cache_status": "unavailable",
                 "action_error": str(exc)[:180],
             }
             continue
@@ -513,16 +612,19 @@ def build_policy_actions(
 
     cached_regions = cached.get("regions", {}) if cached and isinstance(cached.get("regions"), dict) else {}
     for code, region in list(fresh.items()):
-        if region.get("action_update_source") != "fetch_failed":
-            continue
         cached_region = cached_regions.get(code)
-        if isinstance(cached_region, dict) and cached_region.get("actions"):
-            replacement = dict(cached_region)
-            replacement["action_update_source"] = "cache"
-            replacement["action_cache_status"] = "cache_fallback"
-            replacement["action_last_changed_at"] = cached.get("last_changed_at", "")
-            replacement["action_checked_at"] = checked_at
-            fresh[code] = replacement
+        if not isinstance(cached_region, dict) or not cached_region.get("actions"):
+            continue
+        fresh_actions = region.get("actions", [])
+        cached_latest_date = cached_region["actions"][0]["date"]
+        if fresh_actions and fresh_actions[0]["date"] >= cached_latest_date:
+            continue
+        replacement = dict(cached_region)
+        replacement["action_update_source"] = "cache"
+        replacement["action_cache_status"] = "cache_fallback"
+        replacement["action_last_changed_at"] = cached.get("last_changed_at", "")
+        replacement["action_checked_at"] = checked_at
+        fresh[code] = replacement
 
     fresh_signature = action_signature(fresh)
     cached_signature = str(cached.get("signature", "")) if cached else ""
@@ -535,16 +637,15 @@ def build_policy_actions(
         }
         write_policy_actions_cache(cache_path, payload)
         for region in fresh.values():
-            if region.get("action_cache_status") != "cache_fallback":
+            if region.get("action_update_source") == "official":
                 region["action_cache_status"] = "changed"
             region["action_last_changed_at"] = payload["last_changed_at"]
             region["action_checked_at"] = checked_at
         return fresh
 
-    regions = cached["regions"] if cached and isinstance(cached.get("regions"), dict) else fresh
-    for region in regions.values():
-        if region.get("action_cache_status") != "cache_fallback":
+    for region in fresh.values():
+        if region.get("action_update_source") == "official":
             region["action_cache_status"] = "unchanged"
         region["action_last_changed_at"] = cached.get("last_changed_at", "") if cached else checked_at
         region["action_checked_at"] = checked_at
-    return regions
+    return fresh

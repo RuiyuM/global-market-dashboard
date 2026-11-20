@@ -106,6 +106,46 @@ def test_parse_ecb_rows_from_official_snippet() -> None:
     ]
 
 
+def test_fetch_ecb_points_uses_direct_source_when_available() -> None:
+    def fetch(url: str) -> str:
+        assert url == policy_rates.ECB_URL
+        return "2026 16 Sep. 2.50 2.65 - 2.90 2026 17 Jun. 2.25 2.40 - 2.65"
+
+    points = policy_rates.fetch_ecb_points(fetcher=fetch)
+    assert points[-1].display_rate == "2.50%"
+    assert points[-1].source == "ECB"
+
+
+def test_parse_ecb_points_ignores_date_footnote() -> None:
+    html = (
+        "<tr><td>2024</td><td>18 Sep.<sup>5</sup></td>"
+        "<td>3.50</td><td>3.65</td><td>-</td><td>3.90</td></tr>"
+    )
+
+    points = parse_ecb_points(html)
+    assert [(point.date, point.numeric_rate) for point in points] == [(date(2024, 9, 18), 3.50)]
+
+
+def test_fetch_ecb_points_falls_back_to_bis_when_tls_fails() -> None:
+    def fetch(url: str) -> str:
+        if url == policy_rates.ECB_URL:
+            raise OSError("TLS certificate verification failed")
+        assert "/D.XM?" in url
+        return (
+            "FREQ,REF_AREA,SOURCE_REF,TIME_PERIOD,OBS_VALUE\n"
+            "D,XM,European Central Bank,2026-09-15,2.25\n"
+            "D,XM,European Central Bank,2026-09-16,2.50\n"
+            "D,XM,European Central Bank,2026-11-17,2.50\n"
+        )
+
+    points = policy_rates.fetch_ecb_points(fetcher=fetch, today=date(2026, 11, 20))
+    actions = actions_from_rate_points(points, policy_tool="ECB deposit facility rate")
+    assert len(actions) == 1
+    assert actions[0]["date"] == "2026-09-16"
+    assert actions[0]["rate_after"] == "2.50%"
+    assert actions[0]["source"] == "European Central Bank via BIS"
+
+
 def test_parse_russia_key_rate_rows_from_official_snippet() -> None:
     html = "Date Rate 25.06.2026 14.25 19.06.2026 14.50 18.06.2026 14.50"
     points = parse_russia_points(html)
@@ -113,6 +153,43 @@ def test_parse_russia_key_rate_rows_from_official_snippet() -> None:
         ("2026-06-18", "14.50%"),
         ("2026-06-25", "14.25%"),
     ]
+
+
+def test_fetch_russia_points_requests_history_and_preserves_effective_dates() -> None:
+    from urllib.parse import parse_qs, urlsplit
+
+    requested_urls = []
+
+    def fetcher(url: str) -> str:
+        requested_urls.append(url)
+        return (
+            "<table><tr><th>Date</th><th>Rate</th></tr>"
+            "<tr><td>18.11.2026</td><td>14.00</td></tr>"
+            "<tr><td>27.07.2026</td><td>14.00</td></tr>"
+            "<tr><td>24.07.2026</td><td>14.25</td></tr>"
+            "<tr><td>22.06.2026</td><td>14.25</td></tr>"
+            "<tr><td>19.06.2026</td><td>14.50</td></tr>"
+            "<tr><td>27.04.2026</td><td>14.50</td></tr>"
+            "<tr><td>24.04.2026</td><td>15.00</td></tr></table>"
+        )
+
+    points = policy_rates.fetch_russia_points(fetcher=fetcher, today=date(2026, 11, 20))
+    assert len(requested_urls) == 1
+    url = urlsplit(requested_urls[0])
+    assert (url.scheme, url.netloc, url.path) == ("https", "www.cbr.ru", "/eng/hd_base/KeyRate/")
+    assert parse_qs(url.query, keep_blank_values=True) == {
+        "UniDbQ": [""],
+        "UniDbQuery.From": ["21.11.2023"],
+        "UniDbQuery.To": ["20.11.2026"],
+        "UniDbQuery.Posted": ["True"],
+    }
+    actions = actions_from_rate_points(points, policy_tool="Bank of Russia Key Rate")
+    assert [(action["date"], action["rate_after"], action["change_bp"]) for action in actions] == [
+        ("2026-07-27", "14.00%", -25),
+        ("2026-06-22", "14.25%", -25),
+        ("2026-04-27", "14.50%", -50),
+    ]
+    assert all(action["source_url"] == requested_urls[0] for action in actions)
 
 
 def test_parse_korea_base_rate_chart_rows_from_official_page() -> None:
@@ -234,6 +311,56 @@ def test_fetch_boj_points_includes_prior_year_for_latest_action_context() -> Non
     assert actions[0]["type"] == "加息"
 
 
+def test_bis_bank_of_japan_uses_effective_dates_and_explicit_source() -> None:
+    def fetcher(url: str) -> str:
+        assert url.startswith(f"{policy_rates.BIS_POLICY_RATE_API}D.JP?")
+        assert "endPeriod=2026-11-20" in url
+        assert "format=csv" in url
+        return "\n".join([
+            "FREQ,REF_AREA,SOURCE_REF,TIME_PERIOD,OBS_VALUE",
+            "D,JP,Bank of Japan,2026-11-19,1.25",
+            "D,JP,Bank of Japan,2026-06-16,0.75",
+            "D,JP,Bank of Japan,2026-06-17,1",
+            "D,JP,Bank of Japan,2026-09-24,1.25",
+            "D,JP,Bank of Japan,2026-09-24,1.25",
+            "D,EU,Bank of Japan,2026-10-10,99",
+            "D,JP,Unverified provider,2026-10-10,99",
+            "D,JP,Bank of Japan,2026-11-20,NaN",
+        ])
+
+    points = policy_rates.fetch_bis_policy_rate_points(
+        "JP", bis_region="JP", source_ref="Bank of Japan", fetcher=fetcher, today=date(2026, 11, 20),
+    )
+    actions = actions_from_rate_points(points, policy_tool="无担保隔夜拆借利率目标")
+
+    assert [(row["date"], row["change_bp"], row["rate_after"]) for row in actions] == [
+        ("2026-09-24", 25, "1.25%"),
+        ("2026-06-17", 25, "1.00%"),
+    ]
+    assert actions[0]["source"] == "Bank of Japan via BIS"
+    assert actions[0]["source_url"] == f"{policy_rates.BIS_POLICY_RATE_SERIES}D.JP"
+
+
+def test_stale_bis_series_is_a_source_failure() -> None:
+    text = "\n".join([
+        "FREQ,REF_AREA,SOURCE_REF,TIME_PERIOD,OBS_VALUE",
+        "D,JP,Bank of Japan,2026-06-17,1",
+        "D,JP,Bank of Japan,2026-09-24,1.25",
+    ])
+
+    def fetcher(region: str) -> list[PolicyRatePoint]:
+        if region != "JP":
+            return []
+        return policy_rates.fetch_bis_policy_rate_points(
+            "JP", bis_region="JP", source_ref="Bank of Japan", fetcher=lambda url: text, today=date(2026, 11, 20),
+        )
+
+    result = policy_rates.build_policy_actions_from_official_sources(fetcher)["JP"]
+    assert result["actions"] == []
+    assert result["action_update_source"] == "fetch_failed"
+    assert "missing or stale" in result["action_error"]
+
+
 def test_policy_action_cache_only_changes_when_official_actions_change() -> None:
     first_now = datetime(2026, 6, 26, 12, 0, 0)
     second_now = first_now + timedelta(days=1)
@@ -295,6 +422,31 @@ def test_policy_action_fetch_failure_is_scoped_to_one_region() -> None:
     assert result["EU"]["actions"] == []
 
 
+def test_policy_action_cache_keeps_newer_verified_actions_during_incomplete_fetch(tmp_path: Path) -> None:
+    old = PolicyRatePoint("EU", date(2025, 6, 11), "2.00%", 2.00, "ECB", policy_rates.ECB_URL)
+    baseline = PolicyRatePoint("EU", date(2026, 6, 17), "2.25%", 2.25, "ECB", policy_rates.ECB_URL)
+    latest = PolicyRatePoint("EU", date(2026, 9, 16), "2.50%", 2.50, "ECB", policy_rates.ECB_URL)
+    now = datetime(2026, 11, 20, 12)
+    cache_path = tmp_path / "policy_actions.json"
+
+    def run(points: list[PolicyRatePoint], day: int) -> dict:
+        return build_policy_actions(
+            fetcher=lambda region: points if region == "EU" else [],
+            cache_path=cache_path,
+            now=now + timedelta(days=day),
+        )["EU"]
+
+    first = run([old, baseline, latest], 0)
+    for points, day in [([latest], 1), ([old, baseline], 2)]:
+        fallback = run(points, day)
+        assert fallback["actions"] == first["actions"]
+        assert fallback["action_update_source"] == "cache"
+        assert fallback["action_cache_status"] == "cache_fallback"
+    recovered = run([old, baseline, latest], 3)
+    assert recovered["action_update_source"] == "official"
+    assert recovered["action_cache_status"] == "unchanged"
+
+
 if __name__ == "__main__":
     test_actions_from_rate_points_detects_hikes_and_cuts()
     test_split_default_and_recent_year_keeps_three_default_rows()
@@ -302,6 +454,7 @@ if __name__ == "__main__":
     test_parse_fed_rows_skips_ellipsis_change_columns()
     test_parse_ecb_rows_from_official_snippet()
     test_parse_russia_key_rate_rows_from_official_snippet()
+    test_fetch_russia_points_requests_history_and_preserves_effective_dates()
     test_parse_korea_base_rate_chart_rows_from_official_page()
     test_parse_korea_drops_stale_history_before_large_gap()
     test_parse_china_lpr_records_from_chinamoney_json()
@@ -309,6 +462,8 @@ if __name__ == "__main__":
     test_parse_china_lpr_history_rows_from_chinamoney_api()
     test_fetch_china_lpr_points_chunks_history_requests()
     test_fetch_boj_points_includes_prior_year_for_latest_action_context()
+    test_bis_bank_of_japan_uses_effective_dates_and_explicit_source()
+    test_stale_bis_series_is_a_source_failure()
     test_policy_action_cache_only_changes_when_official_actions_change()
     test_policy_action_fetch_failure_is_scoped_to_one_region()
     print("policy rate tests passed")
