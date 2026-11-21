@@ -50,6 +50,9 @@ from fetch_japan_bond_ohlc import (
     fetch_tradingeconomics_latest_row,
 )
 from policy_news import build_policy_news_snapshot
+from route_market_flow import attach_route_market_flows, load_route_market_flows
+from route_market_panel import render_route_market_panel
+from route_market_tracker import build_route_market_tracker
 
 
 ROOT = Path(__file__).resolve().parent
@@ -59,6 +62,7 @@ DASHBOARD_DATA = DASHBOARD / "data"
 SNAPSHOT_JSON = DASHBOARD / "latest_market_snapshot.json"
 QUANT_FUND_JSON = DASHBOARD / "quant_fund_snapshot.json"
 LOCAL_PATCH_REPORT_JSON = DASHBOARD / "local_patch_report.json"
+ROUTE_MARKET_FLOW_CACHE = DASHBOARD_DATA / "route_market_official_flows.json"
 HTML_OUT = DASHBOARD / "index.html"
 QUANT_FUND_HTML_OUT = DASHBOARD / "quant_fund.html"
 DEFAULT_FX_FLOW_CODE = ROOT / "fx_flow_logic.py"
@@ -2407,6 +2411,7 @@ def build_snapshot(
     *,
     fetch_policy_news: bool = True,
     force_policy_news_refresh: bool = False,
+    fetch_route_market_flows: bool = False,
     fetch_mode: str = "network",
     last_fetch_at: str = "",
     previous_snapshot: dict[str, Any] | None = None,
@@ -2423,6 +2428,16 @@ def build_snapshot(
         previous_snapshot=previous_snapshot,
         now=generated_at_dt,
     )
+    # A common closed-session cutoff keeps partial later-market bars out of
+    # the follow-through sequence during the existing morning update.
+    route_market_cutoff = us_close_effective_date(generated_at_dt)
+    route_market_tracker = build_route_market_tracker(
+        series, cutoff_date=route_market_cutoff, as_of_date=route_market_cutoff
+    )
+    official_flows = load_route_market_flows(
+        ROUTE_MARKET_FLOW_CACHE, refresh=fetch_route_market_flows, now=generated_at_dt
+    )
+    attach_route_market_flows(route_market_tracker, official_flows, now=generated_at_dt)
     snapshot = {
         "generated_at": generated_at,
         "fetch_mode": fetch_mode,
@@ -2441,10 +2456,11 @@ def build_snapshot(
         "second_order_monitor": build_second_order_monitor(series, specs),
         "fx_flows": fx_flows,
         "fx_flow_views": fx_flow_views,
+        "route_market_tracker": route_market_tracker,
         "hike_cycle_example": build_hike_cycle_example(series),
         "series_status": build_series_status(series, specs),
         "source_audit": build_source_audit(series, specs),
-        "fetch_records": fetch_records,
+        "fetch_records": [*fetch_records, *official_flows.get("fetch_records", [])],
         "notes": [
             "债券变化单位为 bp；股指和汇率变化单位为对数百分比。",
             "一阶速度 = 当前窗口变化 / 实际间隔天数；二阶加速度 = 当前一阶速度相对上一段同长度窗口的速度变化 / 平均间隔天数。",
@@ -4189,6 +4205,8 @@ def render_html(snapshot: dict[str, Any]) -> str:
             "</section>",
         ]
     )
+
+    html.append(render_route_market_panel(snapshot.get("route_market_tracker") or {}))
 
     html.extend(
         [
@@ -6807,6 +6825,7 @@ def main() -> int:
         fetch_records,
         fetch_policy_news=args.fetch or args.force_policy_news_refresh,
         force_policy_news_refresh=args.force_policy_news_refresh,
+        fetch_route_market_flows=args.fetch,
         fetch_mode=fetch_mode,
         last_fetch_at=last_fetch_at,
         previous_snapshot=previous_snapshot,

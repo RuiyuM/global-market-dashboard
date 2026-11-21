@@ -454,7 +454,9 @@ def test_source_policy_keys_match_dashboard_and_investing_specs() -> None:
     assert required <= overrides <= dashboard_keys
     assert set(policy["yahoo_patch_on_failure"]) <= dashboard_keys
     assert set(policy["smbs_patch_on_failure"]) <= dashboard_keys
-    assert set(policy["optional_sources"]) <= dashboard_keys
+    route_sources = {"JP_MOF_PORTFOLIO_WEEKLY", "JP_MOF_PORTFOLIO_RELEASE_SCHEDULE"}
+    optional = set(policy["optional_sources"])
+    assert route_sources <= optional <= dashboard_keys | route_sources
     assert {
         policy["investing_symbol_map"][key]
         for key in mapped

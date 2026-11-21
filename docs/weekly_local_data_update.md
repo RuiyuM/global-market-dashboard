@@ -50,6 +50,12 @@ not read or print quant percentages.
 
 The public snapshot keeps both tri-currency views. `fx_flows` remains the backward-compatible result for the current run, while `fx_flow_views.closed` is rebuilt from completed New York sessions and `fx_flow_views.asia_intraday` is a retained morning snapshot. A partial morning update must preserve the previous valid Asia snapshot instead of publishing mixed-date legs. The dashboard defaults to the Asia view immediately after a complete morning capture and to the U.S.-close view after the close; users can switch between them without recomputation.
 
+## Exchange-Rate Route Tracker
+
+The existing market update regenerates all 18 directed paths from completed New York observations. The tracker keeps the latest 10 daily and 10 completed weekly windows per triad. A weekly signal compares the last common observation in adjacent weeks. At the destination, the tracker fixes the short, medium, and long maturity baskets using the trailing 90-day coverage rule. It compares a recent common yield level as of the signal with the first subsequent common yield observation. The equity baseline is the first valid local close strictly after that bond observation, with returns for the next one and five observed closes.
+
+On a network run, Japan Ministry of Finance weekly net purchases and its official release schedule are refreshed into the runtime cache. A cache render reuses the last verified release. The published figure is for the Sunday–Saturday week containing the FX signal and uses the Ministry's issuer-based debt and equity categories. It does not identify flows through an intermediate currency or isolate Japanese government debt. The feed is optional for the core dashboard, with planned publication and missing data explicitly labeled. Other destinations currently have no comparable official net-purchase feed in this panel.
+
 ## Source Split
 
 ### Server Daily

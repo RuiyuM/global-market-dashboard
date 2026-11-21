@@ -130,6 +130,8 @@
     "KR_6M"
   ],
   "optional_sources": [
+    "JP_MOF_PORTFOLIO_WEEKLY",
+    "JP_MOF_PORTFOLIO_RELEASE_SCHEDULE",
     "RUBCNY_YAHOO",
     "CN_30Y_WSCN_OHLC",
     "JP_2Y_WSCN_OHLC",

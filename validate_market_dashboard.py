@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import sys
-from datetime import date
+from datetime import date, timedelta
+from itertools import permutations
 from pathlib import Path
 
 from market_dashboard import WSCN_OHLC_OVERLAY_TARGETS, has_complete_ohlc
@@ -75,6 +77,122 @@ SECOND_ORDER_WINDOWS = {"1D", "7D", "30D"}
 SECOND_ORDER_ROWS = len(COUNTRIES) * 5 + len(ONE_YEAR_BOND_KEYS) + len(EXTENDED_BOND_KEYS) + len(MACRO_KEYS)
 BOND_CURVE_ROWS = len(COUNTRIES)
 OHLC_MAX_WINDOW = 360
+
+
+def validate_route_market_tracker(tracker: object) -> list[str]:
+    errors = []
+    markets = {"JP": {"US", "CN", "JP"}, "DE": {"US", "CN", "DE"}, "RU": {"US", "CN", "RU"}}
+    stage_statuses = {"available", "pending", "unavailable"}
+
+    def read_date(value: object) -> date | None:
+        try:
+            return date.fromisoformat(value) if isinstance(value, str) and len(value) == 10 else None
+        except ValueError:
+            return None
+
+    def finite(value: object) -> bool:
+        return type(value) in {int, float} and math.isfinite(value)
+
+    if not isinstance(tracker, dict) or tracker.get("version") != 1 or not isinstance(tracker.get("groups"), list):
+        return ["missing or invalid route market tracker"]
+    groups = [group for group in tracker["groups"] if isinstance(group, dict)]
+    if len(groups) != 3 or {group.get("id") for group in groups} != set(markets):
+        return ["route market tracker should contain all three currency groups"]
+    cutoff = read_date(tracker.get("cutoff_date"))
+    as_of = read_date(tracker.get("as_of_date"))
+    if not cutoff or not as_of or cutoff > as_of:
+        return ["route market tracker has an invalid cutoff"]
+    for group in groups:
+        code = group["id"]
+        expected_routes = {"-".join(route) for route in permutations(markets[code])}
+        for frequency in ("daily", "weekly"):
+            windows = group.get(frequency)
+            if not isinstance(windows, list) or not 1 <= len(windows) <= 10:
+                errors.append(f"route market {code} {frequency}: missing/invalid history")
+                continue
+            previous_signal = None
+            for window in windows:
+                if not isinstance(window, dict):
+                    errors.append(f"route market {code} {frequency}: invalid window")
+                    continue
+                first = read_date(window.get("base_date"))
+                signal = read_date(window.get("signal_date"))
+                label = f"route market {code} {frequency} {signal}"
+                if not first or not signal or not first < signal <= cutoff or (previous_signal and signal >= previous_signal):
+                    errors.append(f"{label}: invalid or unsorted FX dates")
+                    continue
+                previous_signal = signal
+                routes = window.get("routes")
+                if (not isinstance(routes, list) or len(routes) != 6
+                    or any(not isinstance(route, dict) for route in routes)
+                    or {route.get("id") for route in routes} != expected_routes):
+                    errors.append(f"{label}: expected six distinct ordered routes")
+                    continue
+                for route in routes:
+                    prefix = f"{label} {route['id']}"
+                    origin, via, destination = route["id"].split("-")
+                    if (route.get("origin"), route.get("via"), route.get("destination")) != (origin, via, destination):
+                        errors.append(f"{prefix}: route country mismatch")
+                    score, direct, residual = (route.get(field) for field in ("score", "direct", "residual"))
+                    if not all(finite(value) for value in (score, direct, residual)) or abs(score - direct - residual) > 1e-8:
+                        errors.append(f"{prefix}: invalid FX score decomposition")
+                    bond = route.get("bond")
+                    equity = route.get("equity")
+                    flow = route.get("flow")
+                    if not all(isinstance(stage, dict) for stage in (bond, equity, flow)):
+                        errors.append(f"{prefix}: missing stage data")
+                        continue
+                    bond_base, bond_day = (read_date(bond.get(field)) for field in ("base_date", "date"))
+                    bond_groups = bond.get("groups")
+                    if (bond.get("status") not in stage_statuses or not isinstance(bond_groups, dict)
+                        or set(bond_groups) != {"short", "mid", "long"}):
+                        errors.append(f"{prefix}: invalid bond groups")
+                    elif bond.get("status") == "available" and (
+                        not bond_base or not bond_day or not bond_base <= signal < bond_day <= as_of
+                    ):
+                        errors.append(f"{prefix}: bond comparison must follow the FX signal")
+                    if isinstance(bond_groups, dict):
+                        for name, bucket in bond_groups.items():
+                            if not isinstance(bucket, dict) or bucket.get("status") not in stage_statuses:
+                                errors.append(f"{prefix}: invalid {name} bond status")
+                                continue
+                            if destination == "RU" and name == "short" and bucket["status"] != "unavailable":
+                                errors.append(f"{prefix}: Russian short bond data must stay unavailable")
+                            if bucket["status"] == "available":
+                                before, after, bp = (bucket.get(field) for field in ("base_yield", "yield", "change_bp"))
+                                if not all(finite(value) for value in (before, after, bp)) or abs((after - before) * 100 - bp) > 1e-7:
+                                    errors.append(f"{prefix}: invalid {name} bond yield change")
+                    base_day = read_date(equity.get("base_date"))
+                    base_value = equity.get("base_value")
+                    if equity.get("status") not in stage_statuses:
+                        errors.append(f"{prefix}: invalid equity status")
+                    if base_day and (not bond_day or not bond_day < base_day <= as_of or not finite(base_value) or base_value <= 0):
+                        errors.append(f"{prefix}: equity baseline must follow the bond observation")
+                    horizons = equity.get("horizons")
+                    if not isinstance(horizons, dict) or set(horizons) != {"1", "5"}:
+                        errors.append(f"{prefix}: invalid equity horizons")
+                    else:
+                        for horizon, point in horizons.items():
+                            if not isinstance(point, dict) or point.get("status") not in stage_statuses:
+                                errors.append(f"{prefix}: invalid equity {horizon} status")
+                                continue
+                            if point["status"] == "available":
+                                end = read_date(point.get("date"))
+                                value, change = point.get("value"), point.get("return_pct")
+                                if (not base_day or not end or not base_day < end <= as_of
+                                    or not all(finite(x) for x in (base_value, value, change))
+                                    or base_value <= 0 or value <= 0 or abs((value / base_value - 1) * 100 - change) > 1e-7):
+                                    errors.append(f"{prefix}: invalid equity {horizon} return or dates")
+                    amounts = [flow.get(field) for field in ("short_net", "long_net", "equity_net")]
+                    flow_week = read_date(flow.get("week_start")), read_date(flow.get("week_end"))
+                    if flow.get("status") == "published":
+                        if (destination != "JP" or not all(finite(value) for value in amounts)
+                            or not all(flow_week) or not flow_week[0] <= signal <= flow_week[1]
+                            or flow_week[1] - flow_week[0] != timedelta(days=6)):
+                            errors.append(f"{prefix}: invalid dated official net purchases")
+                    elif flow.get("status") not in {"pending", "unavailable"} or any(value is not None for value in amounts):
+                        errors.append(f"{prefix}: unpublished net purchases contain values or an invalid status")
+    return errors
 
 
 def main() -> int:
@@ -576,6 +694,16 @@ def main() -> int:
                     errors.append(
                         f"{label} {section['name']} {period['period']} route count mismatch: {len(routes)}"
                     )
+
+    errors.extend(validate_route_market_tracker(snapshot.get("route_market_tracker")))
+    if snapshot.get("fetch_mode") == "network":
+        tracked_sources = {"JP_MOF_PORTFOLIO_WEEKLY", "JP_MOF_PORTFOLIO_RELEASE_SCHEDULE"}
+        records = snapshot.get("fetch_records")
+        keys = {record.get("key") for record in records if isinstance(record, dict)} if isinstance(records, list) else set()
+        if not tracked_sources <= keys:
+            errors.append("missing route tracker fetch audit records")
+    if 'id="route-market-panel"' not in html:
+        errors.append("missing route market tracker panel")
 
     current_flows = snapshot.get("fx_flows", [])
     validate_flow_sections(current_flows, "current")
