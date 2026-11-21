@@ -102,6 +102,7 @@ def validate_route_market_tracker(tracker: object) -> list[str]:
     as_of = read_date(tracker.get("as_of_date"))
     if not cutoff or not as_of or cutoff > as_of:
         return ["route market tracker has an invalid cutoff"]
+    assessments = {}
     for group in groups:
         code = group["id"]
         expected_routes = {"-".join(route) for route in permutations(markets[code])}
@@ -192,6 +193,21 @@ def validate_route_market_tracker(tracker: object) -> list[str]:
                             errors.append(f"{prefix}: invalid dated official net purchases")
                     elif flow.get("status") not in {"pending", "unavailable"} or any(value is not None for value in amounts):
                         errors.append(f"{prefix}: unpublished net purchases contain values or an invalid status")
+                    assessment = route.get("assessment")
+                    if not isinstance(assessment, dict):
+                        errors.append(f"{prefix}: missing destination market assessment")
+                        continue
+                    kind, code = assessment.get("kind"), assessment.get("code")
+                    if kind not in {"official", "price", "waiting"} or code not in {
+                        "debt", "equity", "both", "neither", "mixed", "unknown"
+                    }:
+                        errors.append(f"{prefix}: invalid destination market assessment")
+                    if (kind == "official") != (flow.get("status") == "published"):
+                        errors.append(f"{prefix}: assessment must distinguish official purchases from prices")
+                    if not all(isinstance(assessment.get(key), str) and assessment[key] for key in ("headline", "explanation")):
+                        errors.append(f"{prefix}: assessment lacks the plain-language conclusion")
+                    if assessments.setdefault((signal, destination), assessment) != assessment:
+                        errors.append(f"{prefix}: destination assessment must be consistent across FX paths")
     return errors
 
 

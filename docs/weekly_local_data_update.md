@@ -56,6 +56,8 @@ The existing market update regenerates all 18 directed paths from completed New 
 
 On a network run, Japan Ministry of Finance weekly net purchases and its official release schedule are refreshed into the runtime cache. A cache render reuses the last verified release. The published figure is for the Sunday–Saturday week containing the FX signal and uses the Ministry's issuer-based debt and equity categories. It does not identify flows through an intermediate currency or isolate Japanese government debt. The feed is optional for the core dashboard, with planned publication and missing data explicitly labeled. Other destinations currently have no comparable official net-purchase feed in this panel.
 
+The panel presents an assessment for the selected destination first. An official assessment compares the reported sum of short- and long-term debt net purchases with net purchases of equities and funds. Without official quantities, any available comparison is labeled as price evidence. Bond prices are considered directionally strong or weak when both medium- and long-term yields move by at least one basis point in the same direction. One subsequent equity close is preliminary; conflicting one- and five-close moves are shown as mixed. The exchange-rate arrows only select the market and cannot identify the route taken by investors.
+
 ## Source Split
 
 ### Server Daily

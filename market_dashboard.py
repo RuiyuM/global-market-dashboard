@@ -50,6 +50,7 @@ from fetch_japan_bond_ohlc import (
     fetch_tradingeconomics_latest_row,
 )
 from policy_news import build_policy_news_snapshot
+from route_market_assessment import attach_route_market_assessments
 from route_market_flow import attach_route_market_flows, load_route_market_flows
 from route_market_panel import render_route_market_panel
 from route_market_tracker import build_route_market_tracker
@@ -2438,6 +2439,7 @@ def build_snapshot(
         ROUTE_MARKET_FLOW_CACHE, refresh=fetch_route_market_flows, now=generated_at_dt
     )
     attach_route_market_flows(route_market_tracker, official_flows, now=generated_at_dt)
+    attach_route_market_assessments(route_market_tracker)
     snapshot = {
         "generated_at": generated_at,
         "fetch_mode": fetch_mode,

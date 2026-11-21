@@ -6,12 +6,13 @@ import json
 PANEL = """
 <section class="panel rmt-panel" id="route-market-panel" aria-labelledby="rmt-title">
   <div class="rmt-heading">
-    <h2 id="rmt-title">三币种路径追踪</h2>
+    <h2 id="rmt-title">债券还是股票？</h2>
     <div class="rmt-period" role="group" aria-label="汇率观察周期">
       <button type="button" data-rmt-period="daily" aria-pressed="false">日度</button>
       <button type="button" data-rmt-period="weekly" aria-pressed="true">周度</button>
     </div>
   </div>
+  <p class="rmt-note">选一条 3B 汇率路径，查看终点市场偏债还是偏股。</p>
   <div class="rmt-toolbar">
     <div class="rmt-triads" role="group" aria-label="三币种组合">
       <button type="button" data-rmt-group="JP" aria-pressed="true">中日美</button>
@@ -21,9 +22,27 @@ PANEL = """
     <label for="rmt-window">汇率日期 <select id="rmt-window"></select></label>
   </div>
   <div class="rmt-routes" id="rmt-routes" role="group" aria-label="有向汇率路径"></div>
-  <p class="rmt-note">箭头表示汇率比较顺序。按汇率、终点债券、当地股指依次观察，实际净买入单列。</p>
   <p class="rmt-sr" id="rmt-announcement" role="status"></p>
   <div id="rmt-empty" class="rmt-empty" hidden>所选周期暂无共同收盘数据。</div>
+  <article id="rmt-verdict" class="rmt-verdict" aria-labelledby="rmt-verdict-title" hidden>
+    <div class="rmt-verdict-top">
+      <span id="rmt-verdict-market"></span>
+      <span id="rmt-verdict-badge" class="rmt-badge"></span>
+    </div>
+    <h3 id="rmt-verdict-title" tabindex="-1"></h3>
+    <p id="rmt-verdict-explanation"></p>
+    <dl id="rmt-verdict-values" class="rmt-verdict-values"></dl>
+    <div id="rmt-verdict-reference" class="rmt-verdict-reference" hidden>
+      <span id="rmt-verdict-date"></span>
+      <a id="rmt-verdict-source" target="_blank" rel="noopener noreferrer" hidden></a>
+    </div>
+    <button id="rmt-history-button" class="rmt-history-button" type="button" hidden>
+      <span>看最近有结果</span><span id="rmt-history-preview"></span>
+    </button>
+  </article>
+  <details id="rmt-evidence" class="rmt-evidence" hidden>
+    <summary>查看依据</summary>
+    <p class="rmt-note">箭头表示汇率比较顺序。债券和股指按后续收盘观察，实际净买入按官方统计周显示。</p>
   <div class="rmt-stages" id="rmt-stages" hidden>
     <article class="rmt-card" aria-labelledby="rmt-fx-title">
       <h3 id="rmt-fx-title">汇率方向</h3>
@@ -57,6 +76,7 @@ PANEL = """
     <dl class="rmt-flow-values" id="rmt-flow-values"></dl>
     <p class="rmt-note rmt-flow-note"><span id="rmt-flow-detail"></span> <a id="rmt-flow-source" hidden target="_blank" rel="noopener noreferrer"></a></p>
   </aside>
+  </details>
   <noscript><p class="rmt-note">启用 JavaScript 后可切换路径和观察日期。</p></noscript>
 </section>
 """
@@ -73,12 +93,29 @@ STYLES = """
 .rmt-panel button { cursor: pointer; }
 .rmt-panel button:hover { border-color: #aac5ee; background: #f7f9fc; }
 .rmt-panel button[aria-pressed="true"] { background: #eaf2ff; border-color: #aac5ee; color: var(--blue); }
-.rmt-panel :is(button, select, a):focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.rmt-panel :is(button, select, a, summary):focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 .rmt-panel select:disabled { opacity: .6; }
 .rmt-routes { margin-top: 9px; }
 .rmt-routes button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
 .rmt-routes small { font-size: 9px; font-weight: 700; color: var(--blue); }
 .rmt-panel .rmt-note { color: var(--muted); font-size: 12px; line-height: 1.45; margin-top: 8px; }
+.rmt-verdict { margin-top: 12px; padding: 14px 16px; border: 1px solid var(--line); border-left: 4px solid #94a3b8; border-radius: 8px; background: #f8fafc; }
+.rmt-verdict[data-kind="official"] { border-left-color: #16803a; background: #f3faf5; }
+.rmt-verdict[data-kind="price"] { border-left-color: var(--blue); background: #f4f8ff; }
+.rmt-verdict-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--muted); font-size: 12px; }
+.rmt-panel #rmt-verdict-title { margin: 5px 0; font-size: clamp(19px, 3vw, 24px); line-height: 1.25; }
+.rmt-panel #rmt-verdict-explanation { font-size: 13px; color: var(--ink); line-height: 1.6; }
+.rmt-panel .rmt-verdict-values { display: flex; flex-wrap: wrap; gap: 5px 18px; font-size: 13px; margin-top: 7px; }
+.rmt-verdict-values:empty { display: none; }
+.rmt-verdict-values > div { display: flex; align-items: baseline; gap: 6px; }
+.rmt-verdict-values dd { overflow-wrap: anywhere; }
+.rmt-verdict-reference { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 7px; color: var(--muted); font-size: 12px; }
+.rmt-verdict-reference a { color: var(--blue); }
+.rmt-panel .rmt-history-button { display: flex; align-items: baseline; text-align: left; flex-wrap: wrap; column-gap: 8px; row-gap: 2px; margin-top: 9px; color: var(--blue); background: #fff; }
+.rmt-history-button #rmt-history-preview { color: var(--muted); font-weight: 500; }
+.rmt-panel .rmt-history-button:hover { background: #eaf2ff; }
+.rmt-evidence { margin-top: 10px; }
+.rmt-evidence summary { cursor: pointer; width: fit-content; color: var(--blue); font-size: 13px; font-weight: 650; padding: 4px; border-radius: 3px; }
 .rmt-stages { display: grid; grid-template-columns: minmax(170px, .85fr) minmax(225px, 1.2fr) minmax(185px, .95fr); gap: 8px; margin-top: 10px; }
 .rmt-panel [hidden] { display: none; }
 .rmt-card, .rmt-flow, .rmt-empty { border: 1px solid var(--line); border-radius: 7px; padding: 10px 12px; min-width: 0; }
@@ -139,6 +176,12 @@ SCRIPT = """
   const market = (code) => labels[code] || {name: code, currency: code, equity: "股指"};
   const statusLabel = {available: "已更新", pending: "待观察", unavailable: "暂无数据"};
   const flowStatusLabel = {published: "已发布", pending: "待发布", unavailable: "暂无数据"};
+  const verdictBadge = {official: "官方净买入", price: "价格线索", waiting: "待确认"};
+  const verdictFallback = {
+    kind: "waiting",
+    headline: "暂不能判断",
+    explanation: "等待终点市场的债券和股指观察。"
+  };
   const horizons = [["1", "后 1 日"], ["5", "后 5 日"]];
   const formatters = new Map();
   let groupId = groups[0]?.id || "JP";
@@ -146,6 +189,7 @@ SCRIPT = """
   let observation = "";
   let routeId = "";
   let activeWindow = null;
+  let earlierResult = null;
 
   const finite = (value) => typeof value === "number" && Number.isFinite(value);
   const number = (value, places) => {
@@ -267,21 +311,60 @@ SCRIPT = """
         label, signed(value, 2, flow.unit ? " " + flow.unit : ""), value
       )) : []));
     setText("flow-detail", flow.detail || (state === "unavailable" ? "暂无可对齐的公开净买入统计。" : ""));
-    const link = dom("flow-source");
-    link.hidden = true;
+    setSourceLink("flow-source", flow);
+  };
+
+  const setSourceLink = (id, flow) => {
+    const link = dom(id);
+    const url = flow.source_url;
+    link.hidden = typeof url !== "string" || !url.startsWith("https://");
     link.removeAttribute("href");
-    if (typeof flow.source_url === "string" && flow.source_url.startsWith("https://")) {
-      link.href = flow.source_url;
+    if (!link.hidden) {
+      link.href = url;
       link.textContent = flow.source || "数据来源";
-      link.hidden = false;
     }
+  };
+
+  const renderVerdict = (selected, destination) => {
+    const verdict = selected.assessment || verdictFallback;
+    const flow = selected.flow || {};
+    dom("verdict").dataset.kind = verdict.kind;
+    dom("verdict-badge").dataset.state = verdict.kind === "official" ? "published" :
+      verdict.kind === "waiting" ? "pending" : "";
+    setText("verdict-market", destination.name + "市场");
+    setText("verdict-badge", verdictBadge[verdict.kind] || verdictBadge.waiting);
+    setText("verdict-title", verdict.headline);
+    setText("verdict-explanation", verdict.explanation);
+    dom("verdict-values").replaceChildren(...(verdict.details || []).map(({label, value}) => pair(label, value)));
+
+    const scheduled = flow.status === "pending" && flow.publication_date;
+    const reference = verdict.kind === "official" ?
+      (flow.publication_date ? "发布日期 " + flow.publication_date : "") :
+      scheduled ? "官方数据预计 " + flow.publication_date + " 发布（日本时间）" : "";
+    setText("verdict-date", reference);
+    setSourceLink("verdict-source", verdict.kind === "official" || scheduled ? flow : {});
+    dom("verdict-reference").hidden = !reference && dom("verdict-source").hidden;
+
+    earlierResult = null;
+    if (verdict.kind === "waiting") {
+      for (const item of activeGroup()?.[period] || []) {
+        if (item.signal_date >= activeWindow.signal_date) continue;
+        const prior = item.routes.find((route) => route.id === routeId)?.assessment;
+        if (prior?.kind === "official" || prior?.kind === "price") {
+          earlierResult = item.signal_date;
+          setText("history-preview", `${item.signal_date} · ${prior.headline}`);
+          break;
+        }
+      }
+    }
+    dom("history-button").hidden = !earlierResult;
+    setText("announcement", `${selected.label} · ${destination.name} · ${activeWindow.signal_date} · ${verdict.headline}`);
   };
 
   const renderDetails = () => {
     const selected = activeWindow?.routes?.find((route) => route.id === routeId);
     dom("empty").hidden = Boolean(selected);
-    dom("stages").hidden = !selected;
-    dom("flow").hidden = !selected;
+    for (const id of ["verdict", "evidence", "stages", "flow"]) dom(id).hidden = !selected;
     pressed(routeButtons(), (btn) => btn.dataset.rmtRoute === routeId);
     if (!selected) {
       const route = activeGroup()?.routes?.find((item) => item.id === routeId);
@@ -289,7 +372,7 @@ SCRIPT = """
       return;
     }
     const destination = market(selected.destination);
-    setText("announcement", `${selected.label} · ${destination.name} · ${activeWindow.signal_date}`);
+    renderVerdict(selected, destination);
     renderFx(selected);
     renderBond(selected, destination);
     renderEquity(selected, destination);
@@ -342,6 +425,12 @@ SCRIPT = """
     observation = "";
     renderWindows();
   }));
+  dom("history-button").addEventListener("click", () => {
+    if (!earlierResult) return;
+    observation = earlierResult;
+    renderWindows();
+    dom("verdict-title").focus();
+  });
   dom("window").addEventListener("change", (event) => {
     observation = event.currentTarget.value;
     renderWindows();
