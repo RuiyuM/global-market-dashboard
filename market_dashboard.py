@@ -6,11 +6,13 @@ from __future__ import annotations
 import argparse
 import calendar
 import csv
+import hashlib
 import importlib.util
 import json
 import math
 import os
 import re
+import ssl
 import statistics
 import sys
 import time
@@ -82,6 +84,8 @@ RUB_DIRECT_MAX_DIVERGENCE_PCT = 2.0
 MOEX_DIRECT_MAX_LAG_DAYS = 7
 MOEX_CANDLES_URL = "https://iss.moex.com/iss/engines/currency/markets/selt/securities/{symbol}/candles.json"
 MOEX_INDEX_CANDLES_URL = "https://iss.moex.com/iss/engines/stock/markets/index/securities/{symbol}/candles.json"
+MOEX_CA_PATH = ROOT / "certs" / "russian_trusted_root_ca.pem"
+MOEX_CA_SHA256 = "d26d2d0231b7c39f92cc738512ba54103519e4405d68b5bd703e9788ca8ecf31"
 
 
 def env_flag(name: str) -> bool:
@@ -92,6 +96,18 @@ def fetch_record_status(rows: list[dict[str, Any]], error: str = "") -> str:
     if rows:
         return "degraded" if error else "ok"
     return "error" if error else "empty"
+
+
+def moex_ssl_context() -> ssl.SSLContext:
+    """Trust the official Russian NCA only for explicit MOEX requests."""
+    pem = MOEX_CA_PATH.read_text(encoding="ascii")
+    der = ssl.PEM_cert_to_DER_cert(pem)
+    fingerprint = hashlib.sha256(der).hexdigest()
+    if fingerprint != MOEX_CA_SHA256:
+        raise RuntimeError(f"MOEX CA fingerprint mismatch: {fingerprint}")
+    context = ssl.create_default_context()
+    context.load_verify_locations(cadata=pem)
+    return context
 
 
 @dataclass(frozen=True)
@@ -503,6 +519,7 @@ def fetch_moex_rubcny_ohlc(symbol: str, start: date, end: date) -> list[dict[str
     rows: list[dict[str, Any]] = []
     offset = 0
     page_size = 500
+    ssl_context = moex_ssl_context()
     while True:
         query = urlencode(
             {
@@ -515,7 +532,7 @@ def fetch_moex_rubcny_ohlc(symbol: str, start: date, end: date) -> list[dict[str
         )
         url = f"{MOEX_CANDLES_URL.format(symbol=quote(symbol, safe=''))}?{query}"
         request = Request(url, headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json,*/*"})
-        with urlopen(request, timeout=30) as response:
+        with urlopen(request, timeout=30, context=ssl_context) as response:
             payload = json.loads(response.read().decode("utf-8"))
         page = rows_from_moex_cnyrub_response(payload, symbol)
         rows.extend(page)
@@ -563,6 +580,7 @@ def fetch_moex_index_ohlc(symbol: str, start: date, end: date) -> list[dict[str,
     rows: list[dict[str, Any]] = []
     offset = 0
     page_size = 100
+    ssl_context = moex_ssl_context()
     while True:
         query = urlencode(
             {
@@ -575,7 +593,7 @@ def fetch_moex_index_ohlc(symbol: str, start: date, end: date) -> list[dict[str,
         )
         url = f"{MOEX_INDEX_CANDLES_URL.format(symbol=quote(symbol, safe=''))}?{query}"
         request = Request(url, headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json,*/*"})
-        with urlopen(request, timeout=30) as response:
+        with urlopen(request, timeout=30, context=ssl_context) as response:
             payload = json.loads(response.read().decode("utf-8"))
         raw_count = len(((payload.get("candles") or {}).get("data") or []))
         rows.extend(rows_from_moex_index_response(payload, symbol))

@@ -73,6 +73,15 @@ python3 audit_market_sources.py
 
 The service runs as `globaldash`, loads policy-news credentials from the private environment file, and sets `MARKET_SKIP_INVESTING=1` because Investing.com is confirmed blocked from Tencent Cloud. The source audit treats those configured fallbacks as expected degradation. Allowlisted Yahoo errors produce `SOURCE AUDIT FALLBACK` while fresh cache continues serving; unhandled errors still fail the service.
 
+MOEX internet services use the Russian National Certification Authority chain.
+The updater adds the tracked, pinned `certs/russian_trusted_root_ca.pem` only to
+the SSL contexts used for `iss.moex.com`; it does not add that root to the
+machine-wide trust store or disable certificate verification. The accepted
+SHA-256 fingerprint is
+`D2:6D:2D:02:31:B7:C3:9F:92:CC:73:85:12:BA:54:10:35:19:E4:40:5D:68:B5:BD:70:3E:97:88:CA:8E:CF:31`.
+If the fingerprint changes, fail closed and verify the replacement against the
+official Gosuslugi certificate distribution before updating the pin.
+
 Check timer and logs:
 
 ```bash
