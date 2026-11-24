@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+import shutil
+import subprocess
 from types import SimpleNamespace
 
 import market_dashboard
+import pytest
 from fetch_japan_bond_ohlc import close_only_row
 from market_dashboard import COUNTRY_BOND_TENORS
 from market_dashboard import CHINA_BOND_SPECS
@@ -44,10 +47,44 @@ def test_recent_ohlc_rows_adds_percent_move_from_previous_close() -> None:
     assert recent[1]["change_pct"] == -10.0
 
 
-def test_move_chart_keeps_rotated_date_labels_inside_svg_viewbox() -> None:
-    assert "bottom: 84" in JS
-    assert 'const dateLabelY = height - 30;' in JS
-    assert 'rotate(-48 ${xx} ${dateLabelY})' in JS
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node is required for JavaScript behavior checks")
+def test_move_and_candle_axes_label_the_first_observed_day_when_monday_is_missing() -> None:
+    setup = """
+const assert = require("node:assert/strict");
+const element = (dataset = {}) => ({
+  dataset, style: {}, classList: { add() {}, remove() {}, toggle() {} },
+  querySelectorAll() { return []; },
+  addEventListener(event, callback) { this[event] = callback; },
+});
+const mode = element({ mode: "move" });
+const chart = element();
+const dates = ["2024-12-27", "2024-12-31", "2025-01-02", "2025-01-06"];
+const ohlc = dates.map(date => ({ date, open: 100, high: 103, low: 99, close: 102, change_pct: 2 }));
+const ids = {
+  "ohlc-data": { textContent: JSON.stringify({ US_10Y: { ohlc, country: "美国", group: "债券", label: "10Y" } }) },
+  "ohlc-head": element(), "ohlc-chart": chart, "ohlc-tooltip": element(),
+};
+globalThis.document = {
+  getElementById(id) { return ids[id] || null; },
+  querySelector() { return null; },
+  querySelectorAll(selector) { return selector === ".ohlc-mode" ? [mode] : []; },
+};
+globalThis.window = { addEventListener() {} };
+"""
+    checks = r"""
+for (const moveMode of [false, true]) {
+  if (moveMode) mode.click();
+  assert.match(chart.innerHTML, /class="chart-week-grid"/);
+  assert.match(chart.innerHTML, /2024-12-31 周二 · 01周/);
+  assert.match(chart.innerHTML, /2025-01-06 周一 · 02周/);
+  assert.doesNotMatch(chart.innerHTML, /2024-12-30/);
+  const dates = [...chart.innerHTML.matchAll(/class="chart-date-label" x="[^"]+" y="(\d+)"/g)];
+  assert.ok(dates.length >= 3);
+  assert.ok(dates.every((match) => Number(match[1]) + 11 < 360));
+}
+"""
+    result = subprocess.run(["node", "-"], input=setup + JS + checks, text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
 
 
 def test_ohlc_panel_exposes_comparison_selector() -> None:

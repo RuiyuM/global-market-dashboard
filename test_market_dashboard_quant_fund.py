@@ -125,10 +125,11 @@ def test_quant_fund_separate_page_contains_curves_and_back_link() -> None:
     assert '<div class="quant-detail-title"><h3>期货</h3><span class="quant-chart-kicker"><b>Curve</b><em>daily percentage points</em></span></div>' in html
     assert 'class="quant-chart-title"' not in html
     assert 'class="quant-chart-subtitle"' not in html
-    assert '<text class="quant-axis-date" ' in html
-    assert '>04-01</text>' in html
-    assert '>04-02</text>' in html
-    assert '>04-03 +1.00%</text>' in html
+    assert '<text class="chart-date-label" ' in html
+    assert '>04-01<tspan' in html
+    assert '>04-02<tspan' in html
+    assert '>04-03 +1.00%<tspan' in html
+    assert '>周五 · 14周</tspan>' in html
     assert 'class="quant-peak-line"' in html
     assert 'class="quant-start-line"' in html
     assert "Max DD" in html
@@ -148,7 +149,7 @@ def test_quant_fund_separate_page_contains_curves_and_back_link() -> None:
     assert "USDC" not in html
 
 
-def test_quant_fund_large_curve_leaves_room_for_rotated_date_labels() -> None:
+def test_quant_fund_large_curve_spaces_week_labels_inside_the_viewbox() -> None:
     points = [
         {"date": f"2026-04-{day:02d}", "pct": (day % 7) - 3}
         for day in range(1, 29)
@@ -158,6 +159,8 @@ def test_quant_fund_large_curve_leaves_room_for_rotated_date_labels() -> None:
     viewbox = re.search(r'viewBox="0 0 920 ([0-9.]+)"', html)
     assert viewbox
     height = float(viewbox.group(1))
-    y_values = [float(value) for value in re.findall(r'class="quant-axis-date" x="[^"]+" y="([0-9.]+)"', html)]
-    assert y_values
-    assert height - max(y_values) >= 76
+    y_values = [float(value) for value in re.findall(r'class="chart-date-label" x="[^"]+" y="([0-9.]+)"', html)]
+    assert 2 < len(y_values) < len(points)
+    assert height - max(y_values) >= 23
+    assert "2026-04-06 周一" in html
+    assert "周一 · 15周" in html

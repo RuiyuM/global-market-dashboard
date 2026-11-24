@@ -3118,11 +3118,54 @@ def smooth_svg_path(points: list[tuple[float, float]]) -> str:
     return " ".join(path)
 
 
+def chart_weekday(day: date) -> str:
+    return f"周{'一二三四五六日'[day.weekday()]}"
+
+
+def render_chart_date_axis(
+    observations: list[tuple[date, float]], top: float, bottom: float, *, end_suffix: str = ""
+) -> str:
+    first_day, left = observations[0]
+    last_day, right = observations[-1]
+    week_stride = max(1, math.ceil((last_day - first_day).days / (7 * 14)))
+    first_week = first_day.toordinal() - first_day.weekday()
+    across_years = first_day.year != last_day.year
+    date_format = "%Y-%m-%d" if across_years else "%m-%d"
+    grid = []
+    labels = []
+    previous_week = first_week
+    label_gap = 94 if across_years else 72
+    endpoint_gap = label_gap + 14
+    next_label_x = left + endpoint_gap
+    label_limit = right - endpoint_gap - (36 if end_suffix else 0)
+    short_span = (last_day - first_day).days <= 7
+    for index, (day, x) in enumerate(observations):
+        week = day.toordinal() - day.weekday()
+        week_start = week != previous_week and (week - first_week) // 7 % week_stride == 0
+        previous_week = week
+        if week_start:
+            grid.append(f'<line class="chart-week-grid" x1="{x:.2f}" x2="{x:.2f}" y1="{top}" y2="{bottom}" />')
+        last = index == len(observations) - 1
+        endpoint = index == 0 or last
+        if not endpoint and not ((week_start or short_span) and next_label_x <= x <= label_limit):
+            continue
+        if index:
+            next_label_x = x + label_gap
+        anchor = "start" if index == 0 else "end" if endpoint else "middle"
+        labels.append(
+            f'<text class="chart-date-label" x="{x:.2f}" y="{bottom + 12}" text-anchor="{anchor}">'
+            f'<title>{day.isoformat()} {chart_weekday(day)}</title>'
+            f'{day.strftime(date_format)}{escape(end_suffix) if last else ""}'
+            f'<tspan x="{x:.2f}" dy="11">{chart_weekday(day)} · {day.isocalendar().week:02d}周</tspan></text>'
+        )
+    return '<g class="chart-date-axis">' + "".join(grid + labels) + "</g>"
+
+
 def render_quant_curve(points: list[dict[str, Any]], *, large: bool = False) -> str:
-    values: list[tuple[str, float]] = []
+    values: list[tuple[date, float]] = []
     for point in points:
         try:
-            day = str(point["date"])
+            day = date.fromisoformat(str(point["date"]))
             pct = float(point["pct"])
         except (KeyError, TypeError, ValueError):
             continue
@@ -3133,11 +3176,10 @@ def render_quant_curve(points: list[dict[str, Any]], *, large: bool = False) -> 
 
     if large:
         width = 920
-        height = 390
+        height = 306
         pad_x = 58
         chart_top = 34
         chart_bottom = 268
-        date_label_y = chart_bottom + 34
 
         min_value = min(value for _, value in values)
         max_value = max(value for _, value in values)
@@ -3176,8 +3218,7 @@ def render_quant_curve(points: list[dict[str, Any]], *, large: bool = False) -> 
         peak_path = " ".join(
             f"{'M' if index == 0 else 'L'} {x:.2f} {y:.2f}" for index, (x, y) in enumerate(peak_coords)
         )
-        latest_day, latest_value = values[-1]
-        max_dd_index, (max_dd_day, max_dd_value) = min(enumerate(drawdowns), key=lambda item: item[1][1])
+        max_dd_index, (_, max_dd_value) = min(enumerate(drawdowns), key=lambda item: item[1][1])
         max_dd_x, max_dd_y = coords[max_dd_index]
         top_zero = ""
         if min_value <= 0 <= max_value:
@@ -3191,20 +3232,19 @@ def render_quant_curve(points: list[dict[str, Any]], *, large: bool = False) -> 
         )
         point_marks = "".join(
             f'<circle class="quant-detail-dot" cx="{x:.2f}" cy="{y:.2f}" r="2.5">'
-            f"<title>{escape(day)} {value:+.2f}%</title>"
+            f"<title>{day.isoformat()} {chart_weekday(day)} {value:+.2f}%</title>"
             "</circle>"
             for (day, value), (x, y) in zip(values, coords)
         )
-        axis_dates = "".join(
-            f'<text class="quant-axis-date" x="{x:.2f}" y="{date_label_y:.2f}" '
-            f'text-anchor="end" transform="rotate(-55 {x:.2f} {date_label_y:.2f})">'
-            f'{escape(day[5:] + (f" {value:+.2f}%" if index == len(values) - 1 else ""))}</text>'
-            for index, ((day, value), (x, _)) in enumerate(zip(values, coords))
+        axis_dates = render_chart_date_axis(
+            [(day, x) for (day, _), (x, _) in zip(values, coords)], chart_top, chart_bottom,
+            end_suffix=f" {values[-1][1]:+.2f}%",
         )
         return (
             f'<svg class="quant-curve quant-curve-large" viewBox="0 0 {width} {height}" role="img" aria-label="量化基金曲线">'
             f'<rect class="quant-chart-bg" x="0" y="0" width="{width}" height="{height}" />'
             f'{"".join(grid_lines)}'
+            f"{axis_dates}"
             f"{top_zero}"
             f'<path class="quant-area-fill" d="{escape(top_area)}" />'
             f'<path class="quant-peak-line" d="{escape(peak_path)}" />'
@@ -3213,7 +3253,6 @@ def render_quant_curve(points: list[dict[str, Any]], *, large: bool = False) -> 
             f'<circle class="quant-dd-dot" cx="{max_dd_x:.2f}" cy="{max_dd_y:.2f}" r="4.2" />'
             f'<line class="quant-dd-callout" x1="{max_dd_x:.2f}" y1="{max_dd_y:.2f}" x2="{min(width - pad_x - 80, max_dd_x + 70):.2f}" y2="{min(chart_bottom - 28, max_dd_y + 28):.2f}" />'
             f'<text class="quant-dd-label" x="{min(width - pad_x - 132, max_dd_x + 76):.2f}" y="{min(chart_bottom - 30, max_dd_y + 32):.2f}">Max DD {max_dd_value:.2f}%</text>'
-            f'<g class="quant-axis-dates">{axis_dates}</g>'
             "</svg>"
         )
 
@@ -3246,8 +3285,8 @@ def render_quant_curve(points: list[dict[str, Any]], *, large: bool = False) -> 
         f"{zero_line}"
         f'<path class="quant-curve-line" d="{escape(path)}" />'
         f'<circle class="quant-curve-dot" cx="{coords[-1][0]:.2f}" cy="{coords[-1][1]:.2f}" r="2.4" />'
-        f'<text x="10" y="12">{escape(values[0][0][5:])}</text>'
-        f'<text x="{width - 10}" y="12" text-anchor="end">{escape(latest_day[5:])} {latest_value:+.2f}%</text>'
+        f'<text x="10" y="12">{values[0][0]:%m-%d} {chart_weekday(values[0][0])}</text>'
+        f'<text x="{width - 10}" y="12" text-anchor="end">{latest_day:%m-%d} {chart_weekday(latest_day)} {latest_value:+.2f}%</text>'
         "</svg>"
     )
 
@@ -3585,6 +3624,10 @@ def render_hike_chart(example: dict[str, Any]) -> str:
         return left + (current_ord - start_ord) / max(1, end_ord - start_ord) * plot_w
 
     first_hike_x = marker_x(example["first_hike"])
+    date_axis = render_chart_date_axis(
+        [(date.fromisoformat(point["date"]), marker_x(point["date"])) for point in points],
+        top, top + plot_h,
+    )
     y_ticks = [100, 200, 500, 1000, 2000]
     tick_html = []
     for tick in y_ticks:
@@ -3601,11 +3644,10 @@ def render_hike_chart(example: dict[str, Any]) -> str:
         'aria-label="2022 加息周期美国 2Y 与 10Y 国债收益率归一化走势">'
         f'<rect x="{left}" y="{top}" width="{plot_w}" height="{plot_h}" class="hike-chart-bg" />'
         + "".join(tick_html)
+        + date_axis
         + f'<line x1="{first_hike_x:.1f}" y1="{top}" x2="{first_hike_x:.1f}" y2="{top + plot_h}" class="hike-event-line" />'
         + f'<path d="{path_for("us10y_index")}" class="hike-line hike-line-10y" />'
         + f'<path d="{path_for("us2y_index")}" class="hike-line hike-line-2y" />'
-        + f'<text x="{left}" y="{height - 14}" class="hike-axis-label">{escape(example["chart_start"])}</text>'
-        + f'<text x="{width - right}" y="{height - 14}" text-anchor="end" class="hike-axis-label">{escape(example["chart_end"])}</text>'
         + f'<text x="{left}" y="12" class="hike-axis-label">指数，2020-07-01=100，对数刻度</text>'
         + '</svg>'
     )
@@ -3656,6 +3698,10 @@ def render_hike_phase_chart(phase: dict[str, Any], index: int) -> str:
 
     top_label = f"{y_max:.2f}%"
     bottom_label = f"{y_min:.2f}%"
+    date_axis = render_chart_date_axis(
+        [(date.fromisoformat(point["date"]), xy(point, "us2y")[0]) for point in points],
+        top, top + plot_h,
+    )
     svg = (
         f'<svg class="hike-phase-chart" viewBox="0 0 {width} {height}" role="img" '
         f'aria-label="{escape(phase["title"])} 阶段收益率走势">'
@@ -3664,10 +3710,9 @@ def render_hike_phase_chart(phase: dict[str, Any], index: int) -> str:
         f'<line x1="{left}" y1="{top + plot_h}" x2="{width - right}" y2="{top + plot_h}" class="hike-grid-line" />'
         f'<text x="{left - 7}" y="{top + 4}" text-anchor="end">{top_label}</text>'
         f'<text x="{left - 7}" y="{top + plot_h + 4}" text-anchor="end">{bottom_label}</text>'
+        f"{date_axis}"
         f'<path d="{path_for("us10y")}" class="hike-line hike-line-10y" />'
         f'<path d="{path_for("us2y")}" class="hike-line hike-line-2y" />'
-        f'<text x="{left}" y="{height - 8}" class="hike-axis-label">{escape(phase["chart_start"])}</text>'
-        f'<text x="{width - right}" y="{height - 8}" text-anchor="end" class="hike-axis-label">{escape(phase["chart_end"])}</text>'
         f'<text x="{width - right - 76}" y="11" class="hike-phase-caption">10Y</text>'
         f'<text x="{width - right - 36}" y="11" class="hike-phase-caption">2Y</text>'
         "</svg>"
@@ -3717,6 +3762,10 @@ def render_hike_focus_chart(chart: dict[str, Any]) -> str:
     unit = "指数" if mode == "index" else "%"
     top_label = f"{y_max:.0f}" if mode == "index" else f"{y_max:.2f}%"
     bottom_label = f"{y_min:.0f}" if mode == "index" else f"{y_min:.2f}%"
+    date_axis = render_chart_date_axis(
+        [(date.fromisoformat(point["date"]), xy(point)[0]) for point in points],
+        top, top + plot_h,
+    )
     svg = (
         f'<svg class="hike-phase-chart" viewBox="0 0 {width} {height}" role="img" '
         f'aria-label="{escape(chart["label"])} 焦点收益率走势">'
@@ -3725,9 +3774,8 @@ def render_hike_focus_chart(chart: dict[str, Any]) -> str:
         f'<line x1="{left}" y1="{top + plot_h}" x2="{width - right}" y2="{top + plot_h}" class="hike-grid-line" />'
         f'<text x="{left - 7}" y="{top + 4}" text-anchor="end">{top_label}</text>'
         f'<text x="{left - 7}" y="{top + plot_h + 4}" text-anchor="end">{bottom_label}</text>'
+        f"{date_axis}"
         f'<path d="{path}" class="hike-line {line_class}" />'
-        f'<text x="{left}" y="{height - 8}" class="hike-axis-label">{escape(chart["start"])}</text>'
-        f'<text x="{width - right}" y="{height - 8}" text-anchor="end" class="hike-axis-label">{escape(chart["end"])}</text>'
         f'<text x="{width - right}" y="11" text-anchor="end" class="hike-phase-caption">{escape(unit)}</text>'
         "</svg>"
     )
@@ -4621,6 +4669,9 @@ th:first-child, td:first-child { text-align: left; }
 .date-tools button:hover, .spread-toolbar button:hover { background: #f8fafc; border-color: #b7c2cf; }
 #ohlc-range-label { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .ohlc-head { color: var(--muted); margin: -4px 0 12px; font-size: 13px; }
+.chart-week-grid { stroke: #cbd5e1; stroke-width: 1; stroke-dasharray: 3 4; pointer-events: none; }
+.chart-date-label { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.chart-date-label tspan { font-size: .9em; }
 .chart-shell { position: relative; border: 1px solid var(--line); border-radius: 8px; background: #fff; overflow: hidden; }
 #ohlc-chart { display: block; width: 100%; height: min(52vw, 420px); min-height: 320px; cursor: grab; }
 #ohlc-chart.dragging { cursor: grabbing; }
@@ -4893,6 +4944,7 @@ th:first-child, td:first-child { text-align: left; }
 @media (max-width: 640px) {
   main { padding: 10px; }
   .panel { padding: 12px; }
+  :is(#ohlc-chart, #all-bond-chart, #spread-chart) .chart-date-label { font-size: 13px; }
   .ohlc-toolbar { display: grid; grid-template-columns: 1fr; align-items: stretch; gap: 10px; }
   .ohlc-mode-group,
   .ohlc-window-group,
@@ -4999,6 +5051,7 @@ JS = """
   const allBondLegend = document.getElementById("all-bond-legend");
   const allBondChart = document.getElementById("all-bond-chart");
   const allBondTooltip = document.getElementById("all-bond-tooltip");
+  const narrowChart = window.matchMedia?.("(max-width: 640px)");
   const windowSteps = [90, 180, 360];
   const ohlcPickerGroups = Object.entries(ohlcData).reduce((groups, [key, item]) => {
     const code = item.code || item.country || "OTHER";
@@ -5055,6 +5108,84 @@ JS = """
     if (!date) return null;
     const time = Date.parse(`${date}T00:00:00Z`);
     return Number.isFinite(time) ? time : null;
+  };
+
+  const chartWidth = (chart, height) => {
+    const width = narrowChart?.matches ? 480 : 980;
+    if (narrowChart) chart.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    return width;
+  };
+
+  const dayMs = 86400000;
+  const weekMs = 7 * dayMs;
+  const weekday = (ms) => new Date(ms).getUTCDay();
+  const weekdayText = (ms) => `周${"日一二三四五六"[weekday(ms)]}`;
+  const weekStart = (ms) => ms - ((weekday(ms) + 6) % 7) * dayMs;
+  const isoDate = (ms) => new Date(ms).toISOString().slice(0, 10);
+  const isoWeek = (ms) => {
+    const monday = weekStart(ms);
+    const year = new Date(monday + 3 * dayMs).getUTCFullYear();
+    const weekOne = weekStart(Date.UTC(year, 0, 4));
+    return Math.round((monday - weekOne) / weekMs) + 1;
+  };
+  const chartDateText = (day) => {
+    const ms = dateMs(day);
+    return `${day} ${weekdayText(ms)} · ${String(isoWeek(ms)).padStart(2, "0")}周`;
+  };
+
+  const renderDateAxis = (dates, xForDate, top, bottom, domain = null) => {
+    const first = domain?.start || dates[0];
+    const last = domain?.end || dates[dates.length - 1];
+    const start = dateMs(first);
+    const end = dateMs(last);
+    const startWeek = weekStart(start);
+    const stride = Math.max(1, Math.ceil((end - start) / (14 * weekMs)));
+    const showYear = first.slice(0, 4) !== last.slice(0, 4);
+    const shortSpan = end - start <= weekMs;
+    const ticks = [];
+    if (domain) {
+      ticks.push({ day: first, x: xForDate(first) });
+      const step = shortSpan ? dayMs : stride * weekMs;
+      const firstTick = shortSpan ? start + dayMs : startWeek + step;
+      for (let ms = firstTick; ms < end; ms += step) {
+        const day = isoDate(ms);
+        ticks.push({ day, x: xForDate(day), boundary: weekStart(ms) === ms });
+      }
+      ticks.push({ day: last, x: xForDate(last), boundary: weekStart(end) === end });
+    } else {
+      let previousWeek = startWeek;
+      dates.forEach((day, index) => {
+        const week = weekStart(dateMs(day));
+        const boundary = week !== previousWeek && (week - startWeek) % (stride * weekMs) === 0;
+        previousWeek = week;
+        if (boundary || shortSpan || index === 0 || index === dates.length - 1) {
+          ticks.push({ day, x: xForDate(day, index), boundary });
+        }
+      });
+    }
+
+    const right = ticks[ticks.length - 1].x;
+    const labelGap = showYear ? 96 : 76;
+    const endpointGap = labelGap + (narrowChart?.matches ? 28 : 16);
+    let nextLabelX = ticks[0].x + endpointGap;
+    const grid = [];
+    const labels = [];
+    ticks.forEach(({ day, x, boundary }, index) => {
+      if (boundary) {
+        grid.push(`<line class="chart-week-grid" x1="${x}" x2="${x}" y1="${top}" y2="${bottom}" />`);
+      }
+      const endpoint = index === 0 || index === ticks.length - 1;
+      if (!endpoint && (x < nextLabelX || x > right - endpointGap)) return;
+      if (index) nextLabelX = x + labelGap;
+      const anchor = index === 0 ? "start" : endpoint ? "end" : "middle";
+      const label = showYear ? day : day.slice(5);
+      const ms = dateMs(day);
+      const week = String(isoWeek(ms)).padStart(2, "0");
+      labels.push(`<text class="chart-date-label" x="${x}" y="${bottom + 12}" text-anchor="${anchor}">`
+        + `<title>${esc(chartDateText(day))}</title>${esc(label)}`
+        + `<tspan x="${x}" dy="13">${weekdayText(ms)} · ${week}周</tspan></text>`);
+    });
+    return `<g class="chart-date-axis">${grid.join("")}${labels.join("")}</g>`;
   };
 
   const pctLabel = (value, digits = 2) => {
@@ -5499,14 +5630,14 @@ JS = """
 
   const renderMoveChart = (item, compareItem = null) => {
     const bars = item.ohlc || [];
-    const width = 980;
     const height = 360;
-    const margin = { left: 64, right: 22, top: 22, bottom: 84 };
+    const width = chartWidth(svg, height);
+    const margin = { left: 64, right: 22, top: 22, bottom: 44 };
     const innerW = width - margin.left - margin.right;
     const innerH = height - margin.top - margin.bottom;
     tooltip.classList.add("dark");
     if (!bars.length) {
-      svg.innerHTML = `<text x="490" y="180" text-anchor="middle" fill="#66717d">没有日线涨跌幅数据</text>`;
+      svg.innerHTML = `<text x="${width / 2}" y="180" text-anchor="middle" fill="#66717d">没有日线涨跌幅数据</text>`;
       return;
     }
     const moves = bars.map((bar, index) => ({
@@ -5515,7 +5646,7 @@ JS = """
       value: Number(bar.change_pct)
     })).filter((item) => Number.isFinite(item.value));
     if (!moves.length) {
-      svg.innerHTML = `<text x="490" y="180" text-anchor="middle" fill="#66717d">没有可计算的前收盘涨跌幅</text>`;
+      svg.innerHTML = `<text x="${width / 2}" y="180" text-anchor="middle" fill="#66717d">没有可计算的前收盘涨跌幅</text>`;
       return;
     }
 
@@ -5547,14 +5678,7 @@ JS = """
         + `<text x="${margin.left - 10}" y="${yy + 4}" text-anchor="end" fill="#66717d" font-size="11">${zero ? "0%" : pctLabel(tick)}</text>`;
     }).join("");
 
-    const dateTicks = [];
-    const dateLabelY = height - 30;
-    const tickCount = Math.min(10, bars.length);
-    for (let i = 0; i < tickCount; i += 1) {
-      const index = Math.round(i * (bars.length - 1) / Math.max(1, tickCount - 1));
-      const xx = x(index);
-      dateTicks.push(`<text x="${xx}" y="${dateLabelY}" transform="rotate(-48 ${xx} ${dateLabelY})" text-anchor="end" fill="#66717d" font-size="10">${esc(bars[index].date.slice(5))}</text>`);
-    }
+    const dateAxis = renderDateAxis(bars.map((bar) => bar.date), (_, index) => x(index), margin.top, height - margin.bottom);
 
     const moveBars = moves.map((move) => {
       const xx = x(move.index);
@@ -5597,7 +5721,7 @@ JS = """
       + grid
       + `<line x1="${margin.left}" x2="${margin.left}" y1="${margin.top}" y2="${height - margin.bottom}" stroke="#d5dbe3" />`
       + `<line x1="${margin.left}" x2="${width - margin.right}" y1="${height - margin.bottom}" y2="${height - margin.bottom}" stroke="#d5dbe3" />`
-      + dateTicks.join("")
+      + dateAxis
       + moveBars
       + `<path d="${linePath}" fill="none" stroke="#f4b43f" stroke-width="1.8" />`
       + dots
@@ -5624,7 +5748,7 @@ JS = """
           ? `<div class="muted">比较 ${esc(compareItem.label)} 涨跌幅：<b>${compareText}</b></div>`
             + `<div class="muted">Close: ${fmt(compareBar.close)}</div>`
           : "";
-        tooltip.innerHTML = `<strong>${esc(bar.date)}</strong>`
+        tooltip.innerHTML = `<strong>${esc(chartDateText(bar.date))}</strong>`
           + `<div>${esc(item.country)} ${esc(item.label)} 涨跌幅：<b>${moveText}</b></div>`
           + `<div class="muted">Prev close: ${fmt(bar.prev_close)}</div>`
           + (bar.close_only
@@ -5641,14 +5765,14 @@ JS = """
 
   const renderChart = (item, compareItem = null) => {
     const bars = item.ohlc || [];
-    const width = 980;
     const height = 360;
+    const width = chartWidth(svg, height);
     const margin = { left: 64, right: 22, top: 34, bottom: 38 };
     const innerW = width - margin.left - margin.right;
     const innerH = height - margin.top - margin.bottom;
     tooltip.classList.remove("dark");
     if (!bars.length) {
-      svg.innerHTML = `<text x="490" y="180" text-anchor="middle" fill="#66717d">没有 OHLC 数据</text>`;
+      svg.innerHTML = `<text x="${width / 2}" y="180" text-anchor="middle" fill="#66717d">没有 OHLC 数据</text>`;
       return;
     }
     const dateIndex = new Map(bars.map((bar, index) => [bar.date, index]));
@@ -5668,7 +5792,7 @@ JS = """
       : [];
     const plottedValues = [...primarySeries, ...compareSeries];
     if (!plottedValues.length) {
-      svg.innerHTML = `<text x="490" y="180" text-anchor="middle" fill="#66717d">没有可归一化的 OHLC 数据</text>`;
+      svg.innerHTML = `<text x="${width / 2}" y="180" text-anchor="middle" fill="#66717d">没有可归一化的 OHLC 数据</text>`;
       return;
     }
     const highs = plottedValues.map((bar) => Number(bar[bar.close_only ? closeField : highField]));
@@ -5695,13 +5819,7 @@ JS = """
         + `<text x="${margin.left - 10}" y="${yy + 4}" text-anchor="end" fill="#66717d" font-size="11">${normalized ? tick.toFixed(1) : fmt(tick)}</text>`;
     }).join("");
 
-    const dateTicks = [];
-    const tickCount = Math.min(6, bars.length);
-    for (let i = 0; i < tickCount; i += 1) {
-      const index = Math.round(i * (bars.length - 1) / Math.max(1, tickCount - 1));
-      const xx = x(index);
-      dateTicks.push(`<text x="${xx}" y="${height - 13}" text-anchor="middle" fill="#66717d" font-size="11">${esc(bars[index].date.slice(5))}</text>`);
-    }
+    const dateAxis = renderDateAxis(bars.map((bar) => bar.date), (_, index) => x(index), margin.top, height - margin.bottom);
 
     const candleSvg = (bar, colorMode, extraClass = "") => {
       const xx = x(bar.plotIndex);
@@ -5748,7 +5866,7 @@ JS = """
       + `<line x1="${margin.left}" x2="${margin.left}" y1="${margin.top}" y2="${height - margin.bottom}" stroke="#cbd3dd" />`
       + `<line x1="${margin.left}" x2="${width - margin.right}" y1="${height - margin.bottom}" y2="${height - margin.bottom}" stroke="#cbd3dd" />`
       + grid
-      + dateTicks.join("")
+      + dateAxis
       + compareCandles
       + candles;
     svg.innerHTML += legend;
@@ -5775,7 +5893,7 @@ JS = """
         const compareHtml = compareBar
           ? `<div class="muted">比较 ${esc(compareItem.label)} Close: ${fmt(compareBar.close)}${compareNorm ? ` · 归一: ${fmt(compareNorm.close_norm)} / 100` : ""}</div>`
           : "";
-        tooltip.innerHTML = `<strong>${esc(bar.date)}</strong>`
+        tooltip.innerHTML = `<strong>${esc(chartDateText(bar.date))}</strong>`
           + (bar.close_only
             ? `<div>官方日度收益率：${fmt(bar.close)}%（仅收盘值）</div>`
             : `<div>Open: ${fmt(bar.open)}</div><div>High: ${fmt(bar.high)}</div><div>Low: ${fmt(bar.low)}</div><div>Close: ${fmt(bar.close)}</div>`)
@@ -5792,14 +5910,14 @@ JS = """
   const renderBondCurveChart = (item) => {
     const curve = item.curve || {};
     const bars = curve.rows || [];
-    const width = 980;
     const height = 360;
+    const width = chartWidth(svg, height);
     const margin = { left: 64, right: 22, top: 34, bottom: 38 };
     const innerW = width - margin.left - margin.right;
     const innerH = height - margin.top - margin.bottom;
     tooltip.classList.remove("dark");
     if (!bars.length) {
-      svg.innerHTML = `<text x="490" y="180" text-anchor="middle" fill="#66717d">没有 2Y/10Y 曲线数据</text>`;
+      svg.innerHTML = `<text x="${width / 2}" y="180" text-anchor="middle" fill="#66717d">没有 2Y/10Y 曲线数据</text>`;
       return;
     }
 
@@ -5825,13 +5943,7 @@ JS = """
         + `<text x="${margin.left - 10}" y="${yy + 4}" text-anchor="end" fill="#66717d" font-size="11">${fmt(tick)}%</text>`;
     }).join("");
 
-    const dateTicks = [];
-    const tickCount = Math.min(6, bars.length);
-    for (let i = 0; i < tickCount; i += 1) {
-      const index = Math.round(i * (bars.length - 1) / Math.max(1, tickCount - 1));
-      const xx = x(index);
-      dateTicks.push(`<text x="${xx}" y="${height - 13}" text-anchor="middle" fill="#66717d" font-size="11">${esc(bars[index].date.slice(5))}</text>`);
-    }
+    const dateAxis = renderDateAxis(bars.map((bar) => bar.date), (_, index) => x(index), margin.top, height - margin.bottom);
 
     const bands = bars.slice(0, -1).map((bar, index) => {
       const next = bars[index + 1];
@@ -5856,7 +5968,7 @@ JS = """
       + `<line x1="${margin.left}" x2="${margin.left}" y1="${margin.top}" y2="${height - margin.bottom}" stroke="#cbd3dd" />`
       + `<line x1="${margin.left}" x2="${width - margin.right}" y1="${height - margin.bottom}" y2="${height - margin.bottom}" stroke="#cbd3dd" />`
       + grid
-      + dateTicks.join("")
+      + dateAxis
       + bands
       + `<path d="${linePath("bond_10y")}" fill="none" stroke="#2457a6" stroke-width="2.2" />`
       + `<path d="${linePath("bond_2y")}" fill="none" stroke="#9a5b00" stroke-width="2.2" />`
@@ -5875,7 +5987,7 @@ JS = """
         tooltip.style.top = `${Math.max(8, event.clientY - bounds.top - 82)}px`;
         const spread = Number(bar.spread_bp);
         const spreadText = `${spread >= 0 ? "+" : ""}${fmt(spread)}bp`;
-        tooltip.innerHTML = `<strong>${esc(bar.date)}</strong>`
+        tooltip.innerHTML = `<strong>${esc(chartDateText(bar.date))}</strong>`
           + `<div>${esc(curve.bond_10y_label || "10Y")}: ${fmt(bar.bond_10y)}%</div>`
           + `<div>${esc(curve.bond_2y_label || "2Y")}: ${fmt(bar.bond_2y)}%</div>`
           + `<div>Spread: ${spreadText}</div>`
@@ -6074,14 +6186,14 @@ JS = """
     const { country, bonds, visibleBonds, dates, startDate, endDate } = selection;
     renderAllBondLegend(bonds);
     renderAllBondCoverage(selection);
-    const width = 980;
     const height = 300;
+    const width = chartWidth(allBondChart, height);
     const margin = { left: 66, right: 22, top: 24, bottom: 42 };
     const innerW = width - margin.left - margin.right;
     const innerH = height - margin.top - margin.bottom;
     const values = visibleBonds.flatMap((bond) => bond.rows.map((row) => row.close)).filter(Number.isFinite);
     if (!dates.length || !values.length) {
-      allBondChart.innerHTML = `<text x="490" y="150" text-anchor="middle" fill="#66717d">没有可显示的全期限债券数据</text>`;
+      allBondChart.innerHTML = `<text x="${width / 2}" y="150" text-anchor="middle" fill="#66717d">没有可显示的全期限债券数据</text>`;
       if (allBondSummary) allBondSummary.textContent = `${country?.name || ""}：缺少可比较数据。`;
       if (allBondTooltip) allBondTooltip.style.display = "none";
       return;
@@ -6144,15 +6256,8 @@ JS = """
       });
       return `<path d="${commands.join(" ")}" fill="none" stroke="${bond.color}" stroke-width="2.1" stroke-linejoin="round" stroke-linecap="round" />${isolated.join("")}`;
     }).join("");
-    const tickCount = useDateDomain ? 7 : 1;
-    const longWindow = allBondWindow.endsWith("Y");
-    const dateTicks = Array.from({ length: tickCount }, (_, index) => {
-      const position = tickCount === 1 ? 0.5 : index / (tickCount - 1);
-      const tickMs = useDateDomain ? startMs + (endMs - startMs) * position : null;
-      const isoDate = Number.isFinite(tickMs) ? new Date(tickMs).toISOString().slice(0, 10) : dates[0];
-      const day = longWindow ? isoDate.slice(0, 7) : isoDate.slice(5);
-      return `<text x="${margin.left + position * innerW}" y="${height - 13}" text-anchor="middle" fill="#66717d" font-size="11">${esc(day)}</text>`;
-    }).join("");
+    const dateAxis = renderDateAxis(dates, xForDate, margin.top, height - margin.bottom,
+      useDateDomain ? { start: startDate, end: endDate } : null);
     const plottedStats = dateStats.filter((stat) => stat.points.length);
     const hitXs = plottedStats.map((stat) => xForDate(stat.date));
     const hits = plottedStats.map((stat, index) => {
@@ -6164,7 +6269,7 @@ JS = """
         + `<rect x="${left.toFixed(2)}" y="${margin.top}" width="${(right - left).toFixed(2)}" height="${innerH}" fill="transparent" />`
         + `</g>`;
     }).join("");
-    allBondChart.innerHTML = `<rect width="${width}" height="${height}" fill="#fff" />${grid}${bands}${paths}${dateTicks}${hits}`;
+    allBondChart.innerHTML = `<rect width="${width}" height="${height}" fill="#fff" />${grid}${dateAxis}${bands}${paths}${hits}`;
     const latestComparable = dateStats.slice().reverse().find((row) => row.low && row.high);
     if (allBondMode === "grouped") {
       renderGroupedBondSummary(selection);
@@ -6195,7 +6300,7 @@ JS = """
         allBondTooltip.style.display = "block";
         allBondTooltip.style.left = `${Math.min(bounds.width - 250, Math.max(8, event.clientX - bounds.left + 14))}px`;
         allBondTooltip.style.top = `${Math.max(8, event.clientY - bounds.top - 72)}px`;
-        allBondTooltip.innerHTML = `<strong>${esc(stat.date)}</strong>`
+        allBondTooltip.innerHTML = `<strong>${esc(chartDateText(stat.date))}</strong>`
           + ordered.map((point) => `<div class="tenor-row"><span><i class="tenor-dot" style="--dot:${point.bond.color}"></i>${esc(point.bond.tenor)}</span><b>${fmt(point.close)}%</b></div>`).join("")
           + (allBondMode === "grouped"
             ? `<div class="muted">${tooltipSpread("group-long", "group-mid", "长-中")}${tooltipSpread("group-mid", "group-short", "中-短")}</div>`
@@ -6373,13 +6478,13 @@ JS = """
 
   const renderSpreadChart = (rows, domain = {}) => {
     if (!spreadChart) return;
-    const width = 980;
     const height = 260;
+    const width = chartWidth(spreadChart, height);
     const margin = { left: 64, right: 22, top: 30, bottom: 42 };
     const innerW = width - margin.left - margin.right;
     const innerH = height - margin.top - margin.bottom;
     if (!rows.length) {
-      spreadChart.innerHTML = `<text x="490" y="130" text-anchor="middle" fill="#66717d">没有可计算的利差数据</text>`;
+      spreadChart.innerHTML = `<text x="${width / 2}" y="130" text-anchor="middle" fill="#66717d">没有可计算的利差数据</text>`;
       if (spreadTooltip) spreadTooltip.style.display = "none";
       return;
     }
@@ -6400,15 +6505,12 @@ JS = """
     const useDateDomain = Number.isFinite(domainStartMs) && Number.isFinite(domainEndMs) && domainEndMs > domainStartMs;
     const xStep = innerW / Math.max(1, rows.length - 1);
     const xByIndex = (index) => rows.length === 1 ? margin.left + innerW / 2 : margin.left + index * xStep;
-    const x = (index) => {
-      if (useDateDomain) {
-        const rowMs = dateMs(rows[index]?.date);
-        if (Number.isFinite(rowMs)) {
-          return margin.left + clamp((rowMs - domainStartMs) / (domainEndMs - domainStartMs), 0, 1) * innerW;
-        }
-      }
-      return xByIndex(index);
+    const xForDate = (day, index) => {
+      const rowMs = dateMs(day);
+      if (!useDateDomain || !Number.isFinite(rowMs)) return xByIndex(index);
+      return margin.left + clamp((rowMs - domainStartMs) / (domainEndMs - domainStartMs), 0, 1) * innerW;
     };
+    const x = (index) => xForDate(rows[index].date, index);
     const y = (value) => margin.top + (max - value) / (max - min) * innerH;
     const grid = yTicks(min, max, 5).map((tick) => {
       const yy = y(tick);
@@ -6431,21 +6533,8 @@ JS = """
       const fill = positive ? "rgba(8, 116, 67, 0.16)" : "rgba(180, 35, 24, 0.16)";
       return `<polygon class="${klass}" points="${points}" fill="${fill}" />`;
     }).join("");
-    const tickCount = Math.min(7, useDateDomain ? 7 : rows.length);
-    const dateTicks = [];
-    if (useDateDomain) {
-      for (let i = 0; i < tickCount; i += 1) {
-        const position = tickCount === 1 ? 0.5 : i / (tickCount - 1);
-        const tickMs = domainStartMs + (domainEndMs - domainStartMs) * position;
-        const tickDate = new Date(tickMs).toISOString().slice(5, 10);
-        dateTicks.push(`<text x="${margin.left + position * innerW}" y="${height - 13}" text-anchor="middle" fill="#66717d" font-size="11">${esc(tickDate)}</text>`);
-      }
-    } else {
-      for (let i = 0; i < tickCount; i += 1) {
-        const index = Math.round(i * (rows.length - 1) / Math.max(1, tickCount - 1));
-        dateTicks.push(`<text x="${x(index)}" y="${height - 13}" text-anchor="middle" fill="#66717d" font-size="11">${esc(rows[index].date.slice(5))}</text>`);
-      }
-    }
+    const dateAxis = renderDateAxis(rows.map((row) => row.date), xForDate, margin.top, height - margin.bottom,
+      useDateDomain ? { start: domainStart, end: domainEnd } : null);
     const longDots = rows.map((row, index) => (
       `<circle cx="${x(index).toFixed(2)}" cy="${y(row.longClose).toFixed(2)}" r="2.2" fill="#2457a6"><title>${esc(row.date)} 长端 ${fmt(row.longClose)}%</title></circle>`
     )).join("");
@@ -6461,6 +6550,7 @@ JS = """
     )).join("");
     spreadChart.innerHTML = `<rect width="${width}" height="${height}" fill="#fff" />`
       + grid
+      + dateAxis
       + bands
       + `<path class="spread-long-line" d="${longPath}" fill="none" stroke="#2457a6" stroke-width="2.3" />`
       + `<path class="spread-short-line" d="${shortPath}" fill="none" stroke="#9a5b00" stroke-width="2.3" stroke-dasharray="5 4" />`
@@ -6469,7 +6559,6 @@ JS = """
       + `<text x="${margin.left}" y="17" fill="#2457a6" font-size="12" font-weight="700">长端</text>`
       + `<text x="${margin.left + 46}" y="17" fill="#9a5b00" font-size="12" font-weight="700">短端</text>`
       + `<text x="${margin.left + 98}" y="17" fill="#66717d" font-size="12">绿色=长端高，红色=短端高</text>`
-      + dateTicks.join("")
       + hits;
     syncSharedCrosshairs();
     Array.from(spreadChart.querySelectorAll(".spread-hit")).forEach((node) => {
@@ -6484,7 +6573,7 @@ JS = """
         spreadTooltip.style.display = "block";
         spreadTooltip.style.left = `${Math.min(bounds.width - 236, Math.max(8, event.clientX - bounds.left + 14))}px`;
         spreadTooltip.style.top = `${Math.max(8, event.clientY - bounds.top - 96)}px`;
-        spreadTooltip.innerHTML = `<strong>${esc(row.date)}</strong>`
+        spreadTooltip.innerHTML = `<strong>${esc(chartDateText(row.date))}</strong>`
           + `<div>长端：<b>${fmt(row.longClose)}%</b></div>`
           + `<div>短端：<b>${fmt(row.shortClose)}%</b></div>`
           + `<div>利差：<b>${signed(row.spreadBp, 1)}bp</b></div>`
@@ -6818,6 +6907,11 @@ JS = """
   window.addEventListener("mouseup", () => {
     dragStart = null;
     svg.classList.remove("dragging");
+  });
+  narrowChart?.addEventListener("change", () => {
+    rerenderCurrent();
+    renderAllBondChart();
+    renderSpread();
   });
   initSpreadCalculator();
   initAllBondChart();

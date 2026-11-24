@@ -103,7 +103,9 @@ assert.equal(periods[0].attributes["aria-pressed"], "true");
 assert.equal(periods[1].attributes["aria-pressed"], "false");
 const chart = ids["all-bond-chart"];
 assert.match(chart.innerHTML, /d="M [\d.]+ [\d.]+ M [\d.]+ [\d.]+" fill="none" stroke="#2457a6"/);
-assert.match(chart.innerHTML, />2022-02<\/text>/);
+assert.match(chart.innerHTML, /<title>2022-02-28 周一 · 09周<\/title>2022-02-28<tspan/);
+assert.match(chart.innerHTML, /class="chart-week-grid"/);
+assert.ok((chart.innerHTML.match(/class="chart-date-label"/g) || []).length <= 14);
 
 periods[1].click();
 modes[1].click();
